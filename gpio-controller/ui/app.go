@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"gpio-controller/gpio"
 	"strconv"
+	"sync"
 )
 
 // 主菜单选项
@@ -18,12 +19,13 @@ var menuItems = []menuItem{
 
 // App 应用程序主界面
 type App struct {
-	Pin *gpio.Pin
+	mu  sync.RWMutex
+	pin *gpio.Pin
 }
 
 // NewApp 创建应用实例
 func NewApp(pin *gpio.Pin) *App {
-	return &App{Pin: pin}
+	return &App{pin: pin}
 }
 
 // Run 启动主菜单循环
@@ -57,50 +59,75 @@ func (a *App) Run() {
 }
 
 func (a *App) handleSetHigh() {
-	if err := a.Pin.SetHigh(); err != nil {
+	var pinNumber int
+	if err := a.withCurrentPin(func(pin *gpio.Pin) error {
+		pinNumber = pin.Number
+		return pin.SetHigh()
+	}); err != nil {
 		printError("设置高电平失败: %v", err)
 		return
 	}
-	printSuccess("GPIO%d -> 高电平", a.Pin.Number)
+	printSuccess("GPIO%d -> 高电平", pinNumber)
 }
 
 func (a *App) handleSetLow() {
-	if err := a.Pin.SetLow(); err != nil {
+	var pinNumber int
+	if err := a.withCurrentPin(func(pin *gpio.Pin) error {
+		pinNumber = pin.Number
+		return pin.SetLow()
+	}); err != nil {
 		printError("设置低电平失败: %v", err)
 		return
 	}
-	printSuccess("GPIO%d -> 低电平", a.Pin.Number)
+	printSuccess("GPIO%d -> 低电平", pinNumber)
 }
 
 func (a *App) handleReadValue() {
 	status := a.readPinStatus()
-	printInfo("GPIO%d 当前状态", a.Pin.Number)
+	if status.ReadErr != nil {
+		printError("读取 GPIO%d 状态失败: %v", status.Number, status.ReadErr)
+		return
+	}
+	printInfo("GPIO%d 当前状态", status.Number)
 	fmt.Printf("方向 : %s\n", status.Direction)
 	fmt.Printf("电平 : %s\n", status.Level)
 }
 
 func (a *App) handleToggle() {
-	val, err := a.Pin.GetValue()
-	if err != nil {
-		printError("读取当前电平失败: %v", err)
-		return
-	}
-	newVal := 1 - val
-	if err := a.Pin.SetValue(newVal); err != nil {
+	var pinNumber int
+	var newVal int
+	if err := a.withCurrentPin(func(pin *gpio.Pin) error {
+		pinNumber = pin.Number
+		val, err := pin.GetValue()
+		if err != nil {
+			return fmt.Errorf("读取当前电平失败: %w", err)
+		}
+		newVal = 1 - val
+		if err := pin.SetValue(newVal); err != nil {
+			return err
+		}
+		return nil
+	}); err != nil {
 		printError("切换电平失败: %v", err)
 		return
 	}
-	printSuccess("GPIO%d -> %s", a.Pin.Number, formatLevel(newVal))
+	printSuccess("GPIO%d -> %s", pinNumber, formatLevel(newVal))
 }
 
 func (a *App) handleSwitchPin() {
-	pinNum, err := PromptGPIOPin(strconv.Itoa(a.Pin.Number))
+	currentPinNumber, err := a.currentPinNumber()
+	if err != nil {
+		printError("读取当前引脚失败: %v", err)
+		return
+	}
+
+	pinNum, err := PromptGPIOPin(strconv.Itoa(currentPinNumber))
 	if err != nil {
 		printError("输入错误: %v", err)
 		return
 	}
 
-	if pinNum == a.Pin.Number {
+	if pinNum == currentPinNumber {
 		printInfo("当前已经在控制 GPIO%d", pinNum)
 		return
 	}
@@ -112,14 +139,15 @@ func (a *App) handleSwitchPin() {
 		return
 	}
 
-	a.Pin.Cleanup()
-	a.Pin = newPin
+	a.swapPin(newPin)
 	printSuccess("已切换到 GPIO%d", pinNum)
 }
 
 type pinStatus struct {
+	Number    int
 	Direction string
 	Level     string
+	ReadErr   error
 }
 
 func (a *App) renderStatusPanel() {
@@ -127,27 +155,56 @@ func (a *App) renderStatusPanel() {
 
 	fmt.Println()
 	fmt.Println("──────────────── GPIO 控制台 ────────────────")
-	fmt.Printf("当前引脚 : GPIO%d\n", a.Pin.Number)
+	fmt.Printf("当前引脚 : GPIO%d\n", status.Number)
 	fmt.Printf("方向     : %s\n", status.Direction)
 	fmt.Printf("电平     : %s\n", status.Level)
+	if status.ReadErr != nil {
+		fmt.Printf("状态异常 : %v\n", status.ReadErr)
+	}
 	fmt.Println("────────────────────────────────────────────")
 }
 
 func (a *App) readPinStatus() pinStatus {
-	direction := "未知"
-	if dir, err := a.Pin.GetDirection(); err == nil && dir != "" {
-		direction = formatDirection(dir)
+	status, err := a.withCurrentPinStatus()
+	if err != nil {
+		return pinStatus{
+			Direction: "未知",
+			Level:     "未知",
+			ReadErr:   err,
+		}
+	}
+	return status
+}
+
+func (a *App) withCurrentPinStatus() (pinStatus, error) {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+
+	if a.pin == nil {
+		return pinStatus{}, fmt.Errorf("当前没有可用的 GPIO 引脚")
 	}
 
-	level := "未知"
-	if val, err := a.Pin.GetValue(); err == nil {
-		level = formatLevelWithValue(val)
+	status := pinStatus{
+		Number:    a.pin.Number,
+		Direction: "未知",
+		Level:     "未知",
 	}
 
-	return pinStatus{
-		Direction: direction,
-		Level:     level,
+	dir, dirErr := a.pin.GetDirection()
+	if dirErr == nil && dir != "" {
+		status.Direction = formatDirection(dir)
+	} else if dirErr != nil {
+		status.ReadErr = dirErr
 	}
+
+	val, valErr := a.pin.GetValue()
+	if valErr == nil {
+		status.Level = formatLevelWithValue(val)
+	} else if status.ReadErr == nil {
+		status.ReadErr = valErr
+	}
+
+	return status, nil
 }
 
 func formatDirection(dir string) string {
@@ -193,4 +250,42 @@ func printError(format string, args ...any) {
 
 func printInfo(format string, args ...any) {
 	fmt.Printf("[提示] "+format+"\n", args...)
+}
+
+func (a *App) currentPinNumber() (int, error) {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	if a.pin == nil {
+		return 0, fmt.Errorf("当前没有可用的 GPIO 引脚")
+	}
+	return a.pin.Number, nil
+}
+
+func (a *App) withCurrentPin(fn func(*gpio.Pin) error) error {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+
+	if a.pin == nil {
+		return fmt.Errorf("当前没有可用的 GPIO 引脚")
+	}
+	return fn(a.pin)
+}
+
+func (a *App) swapPin(next *gpio.Pin) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
+	if a.pin != nil {
+		a.pin.Cleanup()
+	}
+	a.pin = next
+}
+
+func (a *App) Cleanup() {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
+	if a.pin != nil {
+		a.pin.Cleanup()
+	}
 }

@@ -65,7 +65,7 @@ func main() {
 	go func() {
 		<-sigCh
 		fmt.Println("\n[提示] 正在清理 GPIO 引脚...")
-		app.Pin.Cleanup()
+		app.Cleanup()
 		os.Exit(0)
 	}()
 
@@ -73,5 +73,5 @@ func main() {
 	app.Run()
 
 	// 5. 正常退出时清理
-	app.Pin.Cleanup()
+	app.Cleanup()
 }

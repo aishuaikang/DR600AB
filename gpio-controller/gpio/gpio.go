@@ -18,16 +18,26 @@ const (
 	controlFilePerm   = 0o200
 	attributeFilePerm = 0o644
 
-	exportReadyRetries = 50
-	exportReadyDelay   = 10 * time.Millisecond
-	writeRetryCount    = 5
-	writeRetryDelay    = 20 * time.Millisecond
-
 	directionIn  = "in"
 	directionOut = "out"
 
 	valueLow  = 0
 	valueHigh = 1
+)
+
+var (
+	sysfsRoot = sysfsPath
+
+	exportReadyRetries = 50
+	exportReadyDelay   = 10 * time.Millisecond
+	writeRetryCount    = 5
+	writeRetryDelay    = 20 * time.Millisecond
+
+	statFile  = os.Stat
+	readFile  = os.ReadFile
+	writeFile = os.WriteFile
+	readDir   = os.ReadDir
+	sleep     = time.Sleep
 )
 
 // Pin 代表一个 GPIO 引脚
@@ -40,21 +50,18 @@ type Pin struct {
 func NewPin(number int) *Pin {
 	return &Pin{
 		Number: number,
-		path:   filepath.Join(sysfsPath, fmt.Sprintf("gpio%d", number)),
+		path:   filepath.Join(sysfsRoot, fmt.Sprintf("gpio%d", number)),
 	}
 }
 
 // Export 导出引脚，使其可通过 sysfs 访问
 func (p *Pin) Export() error {
 	if p.IsExported() {
-		return nil
+		return p.busyError()
 	}
 	if err := writeControlFile("export", p.Number); err != nil {
 		if isBusyError(err) {
-			if p.IsExported() {
-				return nil
-			}
-			return fmt.Errorf("导出 GPIO%d 失败: 引脚已被占用或不支持通过 sysfs 导出", p.Number)
+			return p.busyError()
 		}
 		return fmt.Errorf("导出 GPIO%d 失败: %w", p.Number, err)
 	}
@@ -78,7 +85,7 @@ func (p *Pin) Unexport() error {
 
 // IsExported 检查引脚是否已导出
 func (p *Pin) IsExported() bool {
-	_, err := os.Stat(p.path)
+	_, err := statFile(p.path)
 	return err == nil
 }
 
@@ -148,7 +155,7 @@ func (p *Pin) Cleanup() {
 
 // ListExportedPins 列出当前已导出的 GPIO 引脚编号
 func ListExportedPins() []int {
-	entries, err := os.ReadDir(sysfsPath)
+	entries, err := readDir(sysfsRoot)
 	if err != nil {
 		return nil
 	}
@@ -174,7 +181,7 @@ type GPIOChipInfo struct {
 
 // ListGPIOChips 列出系统中的 GPIO 控制器芯片及其引脚范围
 func ListGPIOChips() []GPIOChipInfo {
-	entries, err := os.ReadDir(sysfsPath)
+	entries, err := readDir(sysfsRoot)
 	if err != nil {
 		return nil
 	}
@@ -184,7 +191,7 @@ func ListGPIOChips() []GPIOChipInfo {
 		if !strings.HasPrefix(name, "gpiochip") {
 			continue
 		}
-		chipPath := filepath.Join(sysfsPath, name)
+		chipPath := filepath.Join(sysfsRoot, name)
 		chips = append(chips, GPIOChipInfo{
 			Name:  name,
 			Label: readOptionalTrimmedFile(filepath.Join(chipPath, "label")),
@@ -221,8 +228,12 @@ func (p *Pin) attributePath(name string) string {
 	return filepath.Join(p.path, name)
 }
 
+func (p *Pin) busyError() error {
+	return fmt.Errorf("导出 GPIO%d 失败: 引脚已被其他进程导出或被内核占用", p.Number)
+}
+
 func (p *Pin) readAttribute(name string) (string, error) {
-	data, err := os.ReadFile(p.attributePath(name))
+	data, err := readFile(p.attributePath(name))
 	if err != nil {
 		return "", fmt.Errorf("读取 GPIO%d/%s 失败: %w", p.Number, name, err)
 	}
@@ -230,7 +241,7 @@ func (p *Pin) readAttribute(name string) (string, error) {
 }
 
 func (p *Pin) writeAttribute(name, value string) error {
-	if err := os.WriteFile(p.attributePath(name), []byte(value), attributeFilePerm); err != nil {
+	if err := writeFile(p.attributePath(name), []byte(value), attributeFilePerm); err != nil {
 		return fmt.Errorf("写入 GPIO%d/%s 失败: %w", p.Number, name, err)
 	}
 	return nil
@@ -240,12 +251,12 @@ func (p *Pin) writeAttributeWithRetry(name, value string, retries int, delay tim
 	var lastErr error
 	path := p.attributePath(name)
 	for i := 0; i < retries; i++ {
-		lastErr = os.WriteFile(path, []byte(value), attributeFilePerm)
+		lastErr = writeFile(path, []byte(value), attributeFilePerm)
 		if lastErr == nil {
 			return nil
 		}
 		if i < retries-1 {
-			time.Sleep(delay)
+			sleep(delay)
 		}
 	}
 	return fmt.Errorf("写入 GPIO%d/%s 失败: %w", p.Number, name, lastErr)
@@ -254,22 +265,22 @@ func (p *Pin) writeAttributeWithRetry(name, value string, retries int, delay tim
 func (p *Pin) waitForAttribute(name string, retries int, delay time.Duration) error {
 	path := p.attributePath(name)
 	for i := 0; i < retries; i++ {
-		if _, err := os.Stat(path); err == nil {
+		if _, err := statFile(path); err == nil {
 			return nil
 		} else if !errors.Is(err, os.ErrNotExist) {
 			return fmt.Errorf("检查 GPIO%d/%s 失败: %w", p.Number, name, err)
 		}
 
 		if i < retries-1 {
-			time.Sleep(delay)
+			sleep(delay)
 		}
 	}
 	return fmt.Errorf("等待 GPIO%d/%s 就绪超时", p.Number, name)
 }
 
 func writeControlFile(name string, number int) error {
-	return os.WriteFile(
-		filepath.Join(sysfsPath, name),
+	return writeFile(
+		filepath.Join(sysfsRoot, name),
 		[]byte(strconv.Itoa(number)),
 		controlFilePerm,
 	)
@@ -294,7 +305,7 @@ func parseExportedPinNumber(name string) (int, bool) {
 }
 
 func readOptionalTrimmedFile(path string) string {
-	data, err := os.ReadFile(path)
+	data, err := readFile(path)
 	if err != nil {
 		return ""
 	}
