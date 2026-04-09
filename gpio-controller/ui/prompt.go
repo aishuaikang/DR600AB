@@ -7,21 +7,49 @@ import (
 	"github.com/manifoldco/promptui"
 )
 
-// SelectFromList 使用 promptui Select 从列表中选择一项
-func SelectFromList(label string, items []string) (int, string, error) {
+type menuItem struct {
+	Label string
+	Desc  string
+}
+
+var menuSelectTemplates = &promptui.SelectTemplates{
+	Label:    "{{ . }}",
+	Active:   "▸ {{ .Label | cyan }}",
+	Inactive: "  {{ .Label }}",
+	Selected: "已选择: {{ .Label | green }}",
+	Details: `
+──────── 操作说明 ────────
+{{ .Desc | faint }}`,
+}
+
+var gpioPinPromptTemplates = &promptui.PromptTemplates{
+	Prompt:  "{{ . | cyan }} ",
+	Valid:   "{{ . | green }} ",
+	Invalid: "{{ . | red }} ",
+	Success: "{{ . | bold }} ",
+}
+
+// SelectMenuItem 使用 promptui Select 从菜单中选择一项
+func SelectMenuItem(label string, items []menuItem) (int, menuItem, error) {
 	prompt := promptui.Select{
-		Label: label,
-		Items: items,
-		Size:  10,
+		Label:     label,
+		Items:     items,
+		Size:      len(items),
+		Templates: menuSelectTemplates,
 	}
-	return prompt.Run()
+	idx, _, err := prompt.Run()
+	if err != nil {
+		return 0, menuItem{}, err
+	}
+	return idx, items[idx], nil
 }
 
 // PromptGPIOPin 输入 GPIO 引脚编号
 func PromptGPIOPin(defaultPin string) (int, error) {
 	prompt := promptui.Prompt{
-		Label:   "GPIO引脚编号",
-		Default: defaultPin,
+		Label:     "输入 GPIO 引脚编号",
+		Default:   defaultPin,
+		Templates: gpioPinPromptTemplates,
 		Validate: func(input string) error {
 			v, err := strconv.Atoi(input)
 			if err != nil {

@@ -11,16 +11,20 @@ import (
 	"syscall"
 )
 
+// I01 96
+// I02 107
+// IO3 106
+// IO4 62
+
 func main() {
-	fmt.Println("╔══════════════════════════════════════════════╗")
-	fmt.Println("║         GPIO 控制工具 - 高低电平控制          ║")
-	fmt.Println("╚══════════════════════════════════════════════╝")
+	fmt.Println("╔════════════════════════════════════════╗")
+	fmt.Println("║              GPIO 控制台              ║")
+	fmt.Println("║         输出模式 / 电平控制工具       ║")
+	fmt.Println("╚════════════════════════════════════════╝")
+	fmt.Println("输入 GPIO 编号后进入控制菜单。")
 	fmt.Println()
 
-	// 1. 显示系统 GPIO 信息
-	printGPIOInfo()
-
-	// 2. 选择并初始化引脚（支持重试）
+	// 1. 选择并初始化引脚（支持重试）
 	var pinNum int
 	var err error
 	var pin *gpio.Pin
@@ -42,59 +46,32 @@ func main() {
 			}
 			pin = gpio.NewPin(pinNum)
 			if err := pin.Setup(); err != nil {
-				fmt.Printf("初始化 GPIO%d 失败: %v\n请重新选择引脚\n\n", pinNum, err)
+				fmt.Printf("[错误] 初始化 GPIO%d 失败: %v\n", pinNum, err)
+				fmt.Println("[提示] 请重新选择引脚。")
+				fmt.Println()
 				continue
 			}
 			break
 		}
 	}
-	fmt.Printf("已初始化: GPIO%d (输出模式)\n", pinNum)
+	fmt.Printf("[成功] 已初始化 GPIO%d，方向: 输出\n", pinNum)
 
-	// 3. 创建 CLI 应用
+	// 2. 创建 CLI 应用
 	app := ui.NewApp(pin)
 
-	// 4. 捕获退出信号，自动清理引脚
+	// 3. 捕获退出信号，自动清理引脚
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 	go func() {
 		<-sigCh
-		fmt.Println("\n正在清理 GPIO 引脚...")
+		fmt.Println("\n[提示] 正在清理 GPIO 引脚...")
 		app.Pin.Cleanup()
 		os.Exit(0)
 	}()
 
-	// 5. 启动 CLI 应用
+	// 4. 启动 CLI 应用
 	app.Run()
 
-	// 6. 正常退出时清理
+	// 5. 正常退出时清理
 	app.Pin.Cleanup()
-}
-
-// printGPIOInfo 启动时打印系统 GPIO 信息
-func printGPIOInfo() {
-	chips := gpio.ListGPIOChips()
-	if len(chips) > 0 {
-		fmt.Println("系统 GPIO 控制器:")
-		fmt.Println("  ┌──────────────┬────────────────────┬──────┬──────┬──────────────┐")
-		fmt.Println("  │     芯片     │        标签        │ 起始 │ 数量 │   引脚范围   │")
-		fmt.Println("  ├──────────────┼────────────────────┼──────┼──────┼──────────────┤")
-		for _, c := range chips {
-			fmt.Printf("  │ %-12s │ %-18s │ %4d │ %4d │ %4d - %-5d │\n",
-				c.Name, c.Label, c.Base, c.Ngpio, c.Base, c.Base+c.Ngpio-1)
-		}
-		fmt.Println("  └──────────────┴────────────────────┴──────┴──────┴──────────────┘")
-	}
-
-	exported := gpio.ListExportedPins()
-	if len(exported) > 0 {
-		fmt.Printf("  已导出的引脚: ")
-		for i, num := range exported {
-			if i > 0 {
-				fmt.Print(", ")
-			}
-			fmt.Printf("GPIO%d", num)
-		}
-		fmt.Println()
-	}
-	fmt.Println()
 }
