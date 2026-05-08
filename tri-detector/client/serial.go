@@ -3,6 +3,8 @@ package client
 import (
 	"bufio"
 	"fmt"
+	"io"
+	"os"
 	"strings"
 	"time"
 
@@ -16,6 +18,7 @@ type SerialClient struct {
 	portName string
 	scanner  *bufio.Scanner
 	verbose  bool
+	output   io.Writer
 }
 
 // NewSerialClient 创建串口客户端，包装已打开的串口连接。
@@ -29,7 +32,17 @@ func NewSerialClient(port serial.Port, portName string, verbose bool) *SerialCli
 		portName: portName,
 		scanner:  scanner,
 		verbose:  verbose,
+		output:   os.Stdout,
 	}
+}
+
+// SetOutput 设置客户端日志输出位置。
+func (c *SerialClient) SetOutput(w io.Writer) {
+	if w == nil {
+		c.output = os.Stdout
+		return
+	}
+	c.output = w
 }
 
 // Send 发送一行文本命令（自动追加换行符）
@@ -39,7 +52,7 @@ func (c *SerialClient) Send(cmd string) error {
 	}
 
 	if c.verbose {
-		fmt.Printf("  -> 发送: %q\n", strings.TrimRight(cmd, "\n"))
+		fmt.Fprintf(c.output, "  -> 发送: %q\n", strings.TrimRight(cmd, "\n"))
 	}
 
 	n, err := c.port.Write([]byte(cmd))
@@ -78,7 +91,7 @@ func (c *SerialClient) ReadLine() (string, error) {
 			return "", r.err
 		}
 		if c.verbose {
-			fmt.Printf("  <- 接收: %q\n", r.line)
+			fmt.Fprintf(c.output, "  <- 接收: %q\n", r.line)
 		}
 		return r.line, nil
 	case <-time.After(5 * time.Second):
@@ -103,12 +116,12 @@ func (c *SerialClient) ReadLoop(handler LineHandler) {
 			continue
 		}
 		if c.verbose {
-			fmt.Printf("  <- 接收: %q\n", line)
+			fmt.Fprintf(c.output, "  <- 接收: %q\n", line)
 		}
 		handler(line)
 	}
 	if err := c.scanner.Err(); err != nil {
-		fmt.Printf("读取错误: %v\n", err)
+		fmt.Fprintf(c.output, "读取错误: %v\n", err)
 	}
 }
 

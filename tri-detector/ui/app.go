@@ -6,23 +6,27 @@ import (
 	"os/signal"
 	"syscall"
 
+	"github.com/chzyer/readline"
+
 	"tri-detector/client"
 	"tri-detector/handler"
 )
 
 // App 三合一侵测板应用程序
 type App struct {
-	client   *client.SerialClient
-	portName string
-	baudRate int
+	client     *client.SerialClient
+	portName   string
+	baudRate   int
+	outputMode *handler.OutputModeState
 }
 
 // NewApp 创建应用实例
 func NewApp(c *client.SerialClient, portName string, baudRate int) *App {
 	return &App{
-		client:   c,
-		portName: portName,
-		baudRate: baudRate,
+		client:     c,
+		portName:   portName,
+		baudRate:   baudRate,
+		outputMode: handler.NewOutputModeState(handler.OutputRaw),
 	}
 }
 
@@ -33,13 +37,28 @@ func NewApp(c *client.SerialClient, portName string, baudRate int) *App {
 func (a *App) Run() {
 	fmt.Printf("串口已打开: %s (%d bps)\n", a.portName, a.baudRate)
 	fmt.Println("输入要发送的命令后回车，输入 exit 退出。")
+	fmt.Printf("当前接收输出模式: %s。输入 /mode raw|parsed|both 切换。\n", a.outputMode.Get())
 
-	go handler.ReadLoop(a.client)
+	rl, err := readline.NewEx(&readline.Config{
+		Prompt:          "> ",
+		HistoryLimit:    -1,
+		InterruptPrompt: "^C",
+		EOFPrompt:       "exit",
+	})
+	if err != nil {
+		fmt.Printf("初始化命令行失败: %v\n", err)
+		return
+	}
+	defer rl.Close()
+
+	output := rl.Stdout()
+	a.client.SetOutput(output)
+
+	go handler.ReadLoop(a.client, a.outputMode, output)
 
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
 
-	inputScanner := handler.NewInputScanner()
 	for {
 		select {
 		case <-sigChan:
@@ -48,7 +67,7 @@ func (a *App) Run() {
 		default:
 		}
 
-		if handler.InputLoop(inputScanner, a.client) {
+		if handler.ReadlineInputLoop(rl, a.client, a.outputMode) {
 			return
 		}
 	}
