@@ -1,0 +1,18 @@
+{
+  "title": "Interference Control",
+  "description": "IO1 / IO2 / IO3 map to different bands, IO4 is reserved.",
+  "channels": "Channels",
+  "pin": "GPIO",
+  "bands": "Band mapping",
+  "desired": "Target level",
+  "actual": "Current level",
+  "reservedChannel": "Reserved channel",
+  "enable": "Enable",
+  "disable": "Disable",
+  "toggle": "Toggle",
+  "statusReady": "Ready",
+  "statusActive": "Enabled",
+  "statusIdle": "Disabled",
+  "statusError": "Error",
+  "lastError": "Last error"
+}

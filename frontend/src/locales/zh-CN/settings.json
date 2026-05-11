@@ -1,0 +1,21 @@
+{
+  "title": "设置",
+  "description": "统一管理串口、语言和系统元信息。",
+  "serialTitle": "串口配置",
+  "serialDescription": "选择接收和发送串口。保存后会自动连接，断开后会自动重连。串口协议参数已内置为固定值。",
+  "receivePort": "接收串口",
+  "sendPort": "发送串口",
+  "selectReceivePort": "请选择接收串口",
+  "selectSendPort": "请选择发送串口",
+  "serialHint": "更改串口后会自动保存并触发连接，连接断开后会自动重连。",
+  "noPorts": "未检测到可用串口",
+  "languageTitle": "语言设置",
+  "languageDescription": "切换前端语言并查看后端支持的语言包。",
+  "language": "语言",
+  "supportedLocales": "支持语言",
+  "namespaces": "语言包命名空间",
+  "backendLocales": "后端语言元信息",
+  "defaultLocale": "默认语言",
+  "currentLocale": "当前语言",
+  "apiHint": "前端默认通过 /api 访问后端。"
+}

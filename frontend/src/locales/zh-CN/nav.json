@@ -1,0 +1,9 @@
+{
+  "didEncrypted": "DID 秘文",
+  "rid": "Remote ID",
+  "didPlain": "DID 明文",
+  "detect": "侦测数据",
+  "heartbeat": "心跳",
+  "interference": "干扰",
+  "settings": "设置"
+}

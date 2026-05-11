@@ -1,0 +1,21 @@
+{
+  "title": "Settings",
+  "description": "Manage serial ports, language, and system metadata in one place.",
+  "serialTitle": "Serial configuration",
+  "serialDescription": "Select the receive and send serial ports. Saving will connect automatically and reconnect after drops. Serial protocol parameters are built in.",
+  "receivePort": "Receive port",
+  "sendPort": "Send port",
+  "selectReceivePort": "Select receive port",
+  "selectSendPort": "Select send port",
+  "serialHint": "Changing serial ports saves automatically and triggers a connection. The system will reconnect after drops.",
+  "noPorts": "No serial ports detected",
+  "languageTitle": "Language settings",
+  "languageDescription": "Switch frontend language and inspect backend locale metadata.",
+  "language": "Language",
+  "supportedLocales": "Supported locales",
+  "namespaces": "Locale namespaces",
+  "backendLocales": "Backend locale metadata",
+  "defaultLocale": "Default locale",
+  "currentLocale": "Current locale",
+  "apiHint": "The frontend talks to the backend through /api by default."
+}

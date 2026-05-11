@@ -1,0 +1,9 @@
+{
+  "invalid_request": "Invalid request",
+  "port_required": "Select a receive serial port before starting detection",
+  "port_open_failed": "Failed to open serial port",
+  "channel_not_found": "Interference channel was not found",
+  "channel_reserved": "This channel is reserved and cannot be controlled",
+  "gpio_update_failed": "Failed to update GPIO state",
+  "internal": "Service is temporarily unavailable"
+}

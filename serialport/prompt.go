@@ -6,10 +6,21 @@ import (
 	"github.com/manifoldco/promptui"
 )
 
+const manualPortItem = "[ 手动输入串口名称 ]"
+
 // SelectPort 交互式选择串口。
 // 列出可用串口供用户选择，同时提供手动输入选项；
 // 若系统无可用串口，直接引导用户手动输入。
 func SelectPort() (string, error) {
+	return SelectPortWithLabel("选择串口")
+}
+
+// SelectPortWithLabel 使用指定标签交互式选择串口。
+func SelectPortWithLabel(label string) (string, error) {
+	if label == "" {
+		label = "选择串口"
+	}
+
 	ports, err := ListPorts()
 	if err != nil {
 		return "", fmt.Errorf("获取串口列表失败: %w", err)
@@ -17,16 +28,16 @@ func SelectPort() (string, error) {
 
 	if len(ports) == 0 {
 		fmt.Println("未检测到可用串口")
-		return promptInput("请手动输入串口名称", "/dev/tty.usbserial-110")
+		return promptInput(label+"（手动输入）", "/dev/tty.usbserial-110")
 	}
 
 	// 追加手动输入选项
 	items := make([]string, len(ports)+1)
 	copy(items, ports)
-	items[len(ports)] = "[ 手动输入串口名称 ]"
+	items[len(ports)] = manualPortItem
 
 	prompt := promptui.Select{
-		Label: "选择串口",
+		Label: label,
 		Items: items,
 		Size:  10,
 	}
@@ -36,8 +47,8 @@ func SelectPort() (string, error) {
 		return "", fmt.Errorf("串口选择已取消: %w", err)
 	}
 
-	if result == "[ 手动输入串口名称 ]" {
-		return promptInput("请输入串口名称", "/dev/tty.usbserial-110")
+	if result == manualPortItem {
+		return promptInput(label+"（手动输入）", "/dev/tty.usbserial-110")
 	}
 	return result, nil
 }

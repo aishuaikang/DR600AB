@@ -14,19 +14,26 @@ import (
 
 // App 三合一侵测板应用程序
 type App struct {
-	client     *client.SerialClient
-	portName   string
-	baudRate   int
-	outputMode *handler.OutputModeState
+	client        *client.SerialClient
+	readPortName  string
+	writePortName string
+	baudRate      int
+	outputMode    *handler.OutputModeState
 }
 
 // NewApp 创建应用实例
 func NewApp(c *client.SerialClient, portName string, baudRate int) *App {
+	return NewDuplexApp(c, portName, portName, baudRate)
+}
+
+// NewDuplexApp 创建收发串口可分离的应用实例。
+func NewDuplexApp(c *client.SerialClient, readPortName string, writePortName string, baudRate int) *App {
 	return &App{
-		client:     c,
-		portName:   portName,
-		baudRate:   baudRate,
-		outputMode: handler.NewOutputModeState(handler.OutputRaw),
+		client:        c,
+		readPortName:  readPortName,
+		writePortName: writePortName,
+		baudRate:      baudRate,
+		outputMode:    handler.NewOutputModeState(handler.OutputRaw),
 	}
 }
 
@@ -35,7 +42,12 @@ func NewApp(c *client.SerialClient, portName string, baudRate int) *App {
 // 2. 前台接收用户输入并通过客户端发送到串口
 // 3. 支持 Ctrl+C / SIGTERM 优雅退出
 func (a *App) Run() {
-	fmt.Printf("串口已打开: %s (%d bps)\n", a.portName, a.baudRate)
+	if a.readPortName == a.writePortName {
+		fmt.Printf("串口已打开: %s (%d bps)\n", a.readPortName, a.baudRate)
+	} else {
+		fmt.Printf("接收数据串口已打开: %s (%d bps)\n", a.readPortName, a.baudRate)
+		fmt.Printf("发送命令串口已打开: %s (%d bps)\n", a.writePortName, a.baudRate)
+	}
 	fmt.Println("输入要发送的命令后回车，输入 exit 退出。")
 	fmt.Printf("当前接收输出模式: %s。输入 /mode raw|parsed|both 切换。\n", a.outputMode.Get())
 

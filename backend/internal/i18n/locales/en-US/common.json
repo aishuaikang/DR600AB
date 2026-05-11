@@ -1,0 +1,11 @@
+{
+  "app.title": "Drone Detection and Interference System",
+  "session.connecting": "Detection session is connecting automatically",
+  "session.started": "Detection session started",
+  "session.reconnecting": "Connection was lost, reconnecting automatically",
+  "session.stopped": "Detection session stopped",
+  "session.inactive": "No active detection session",
+  "session.disconnected": "Serial connection was lost",
+  "gpio.enabled": "Interference channel enabled",
+  "gpio.disabled": "Interference channel disabled"
+}

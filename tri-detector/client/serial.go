@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"go.bug.st/serial"
@@ -14,25 +15,42 @@ import (
 // SerialClient 串口文本行协议客户端，包装已打开的串口连接，
 // 提供基于文本行的收发能力。
 type SerialClient struct {
-	port     serial.Port
-	portName string
-	scanner  *bufio.Scanner
-	verbose  bool
-	output   io.Writer
+	readPort      serial.Port
+	writePort     serial.Port
+	readPortName  string
+	writePortName string
+	sharedPort    bool
+	closeOnce     sync.Once
+	scanner       *bufio.Scanner
+	verbose       bool
+	output        io.Writer
 }
 
 // NewSerialClient 创建串口客户端，包装已打开的串口连接。
 // portName 用于日志标识，verbose 控制是否打印收发数据。
 func NewSerialClient(port serial.Port, portName string, verbose bool) *SerialClient {
-	scanner := bufio.NewScanner(port)
+	return newSerialClient(port, portName, port, portName, true, verbose)
+}
+
+// NewDuplexSerialClient 创建收发分离的串口客户端。
+// readPort 仅用于接收设备上报数据，writePort 仅用于发送命令。
+func NewDuplexSerialClient(readPort serial.Port, readPortName string, writePort serial.Port, writePortName string, verbose bool) *SerialClient {
+	return newSerialClient(readPort, readPortName, writePort, writePortName, readPortName == writePortName, verbose)
+}
+
+func newSerialClient(readPort serial.Port, readPortName string, writePort serial.Port, writePortName string, sharedPort bool, verbose bool) *SerialClient {
+	scanner := bufio.NewScanner(readPort)
 	scanner.Buffer(make([]byte, 0, 4096), 1024*1024)
 
 	return &SerialClient{
-		port:     port,
-		portName: portName,
-		scanner:  scanner,
-		verbose:  verbose,
-		output:   os.Stdout,
+		readPort:      readPort,
+		writePort:     writePort,
+		readPortName:  readPortName,
+		writePortName: writePortName,
+		sharedPort:    sharedPort,
+		scanner:       scanner,
+		verbose:       verbose,
+		output:        os.Stdout,
 	}
 }
 
@@ -55,7 +73,7 @@ func (c *SerialClient) Send(cmd string) error {
 		fmt.Fprintf(c.output, "  -> 发送: %q\n", strings.TrimRight(cmd, "\n"))
 	}
 
-	n, err := c.port.Write([]byte(cmd))
+	n, err := c.writePort.Write([]byte(cmd))
 	if err != nil {
 		return fmt.Errorf("发送失败: %v", err)
 	}
@@ -127,14 +145,29 @@ func (c *SerialClient) ReadLoop(handler LineHandler) {
 
 // Close 关闭串口
 func (c *SerialClient) Close() {
-	if c.port != nil {
-		c.port.Close()
-	}
+	c.closeOnce.Do(func() {
+		if c.readPort != nil {
+			c.readPort.Close()
+		}
+		if !c.sharedPort && c.writePort != nil {
+			c.writePort.Close()
+		}
+	})
 }
 
 // PortName 返回串口名称
 func (c *SerialClient) PortName() string {
-	return c.portName
+	return c.readPortName
+}
+
+// ReadPortName 返回接收数据串口名称。
+func (c *SerialClient) ReadPortName() string {
+	return c.readPortName
+}
+
+// WritePortName 返回发送命令串口名称。
+func (c *SerialClient) WritePortName() string {
+	return c.writePortName
 }
 
 // 编译期接口实现检查

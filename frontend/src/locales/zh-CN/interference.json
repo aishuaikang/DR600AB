@@ -1,0 +1,18 @@
+{
+  "title": "干扰控制",
+  "description": "IO1 / IO2 / IO3 对应不同频段，IO4 为预留通道。",
+  "channels": "通道",
+  "pin": "GPIO",
+  "bands": "频段映射",
+  "desired": "目标电平",
+  "actual": "当前电平",
+  "reservedChannel": "预留通道",
+  "enable": "开启",
+  "disable": "关闭",
+  "toggle": "切换",
+  "statusReady": "就绪",
+  "statusActive": "已开启",
+  "statusIdle": "已关闭",
+  "statusError": "异常",
+  "lastError": "最近错误"
+}

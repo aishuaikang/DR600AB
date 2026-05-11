@@ -1,0 +1,9 @@
+{
+  "invalid_request": "请求参数错误",
+  "port_required": "请选择接收串口后再启动侦测",
+  "port_open_failed": "打开串口失败",
+  "channel_not_found": "未找到指定干扰通道",
+  "channel_reserved": "当前通道为预留通道，不能控制",
+  "gpio_update_failed": "更新 GPIO 状态失败",
+  "internal": "服务暂时不可用"
+}
