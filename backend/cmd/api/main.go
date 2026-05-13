@@ -1,3 +1,4 @@
+// Command api 启动无人机智能管控系统后端服务。
 package main
 
 import (

@@ -1,3 +1,4 @@
+// Package settings 在后端重启之间持久化操作配置。
 package settings
 
 import (
@@ -10,15 +11,18 @@ import (
 	"dr600ab-api/internal/model"
 )
 
+// Store 将侦测会话设置持久化到本地 JSON 文件。
 type Store struct {
 	mu   sync.Mutex
 	path string
 }
 
+// NewStore 创建使用指定路径的设置存储。
 func NewStore(path string) *Store {
 	return &Store{path: path}
 }
 
+// Load 在文件存在时读取已持久化的侦测设置。
 func (s *Store) Load() (model.DetectionSessionRequest, bool, error) {
 	if s == nil || s.path == "" {
 		return model.DetectionSessionRequest{}, false, nil
@@ -39,6 +43,7 @@ func (s *Store) Load() (model.DetectionSessionRequest, bool, error) {
 	return req, true, nil
 }
 
+// Save 以原子方式将侦测设置写入磁盘。
 func (s *Store) Save(req model.DetectionSessionRequest) error {
 	if s == nil || s.path == "" {
 		return nil

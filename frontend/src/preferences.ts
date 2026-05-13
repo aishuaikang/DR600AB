@@ -37,7 +37,6 @@ export function persistSettings(settings: StoredSettings) {
   try {
     window.localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
   } catch {
-    // ignore storage errors
+    // 忽略本地存储错误。
   }
 }
-

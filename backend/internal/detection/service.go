@@ -1,3 +1,4 @@
+// Package detection 管理侦测串口会话和解析后的侦测数据。
 package detection
 
 import (
@@ -18,6 +19,7 @@ import (
 	"tri-detector/parser"
 )
 
+// Options 配置串口默认值和重连时间参数。
 type Options struct {
 	DefaultBaudRate       int
 	DefaultDataBits       int
@@ -28,15 +30,18 @@ type Options struct {
 	ReconnectMaxDelay     time.Duration
 }
 
+// SerialOpener 根据串口配置打开串口。
 type SerialOpener func(cfg *serialport.Config) (serial.Port, error)
 
 const startDetectionCommand = "start -freq 1"
 
+// SettingsStore 持久化最近一次侦测会话请求。
 type SettingsStore interface {
 	Load() (model.DetectionSessionRequest, bool, error)
 	Save(model.DetectionSessionRequest) error
 }
 
+// Service 管理侦测串口会话并存储解析记录。
 type Service struct {
 	mu sync.RWMutex
 
@@ -66,6 +71,7 @@ type session struct {
 	cancel        context.CancelFunc
 }
 
+// NewService 创建带串口默认值和存储依赖的侦测服务。
 func NewService(store *store.MemoryStore, translator *i18n.Translator, settingsStore SettingsStore, options Options) *Service {
 	return &Service{
 		store:      store,
@@ -77,6 +83,7 @@ func NewService(store *store.MemoryStore, translator *i18n.Translator, settingsS
 	}
 }
 
+// SetSerialOpener 替换串口打开函数，主要用于测试。
 func (s *Service) SetSerialOpener(open SerialOpener) {
 	if open == nil {
 		return
@@ -86,6 +93,7 @@ func (s *Service) SetSerialOpener(open SerialOpener) {
 	s.openPort = open
 }
 
+// SetPortLister 替换串口枚举函数，主要用于测试。
 func (s *Service) SetPortLister(list func() ([]string, error)) {
 	if list == nil {
 		return
@@ -95,6 +103,7 @@ func (s *Service) SetPortLister(list func() ([]string, error)) {
 	s.listPorts = list
 }
 
+// Settings 加载已持久化的侦测会话请求。
 func (s *Service) Settings() (model.DetectionSessionRequest, bool, error) {
 	if s.settings == nil {
 		return model.DetectionSessionRequest{}, false, nil
@@ -102,6 +111,7 @@ func (s *Service) Settings() (model.DetectionSessionRequest, bool, error) {
 	return s.settings.Load()
 }
 
+// ListPorts 返回串口列表，并标记当前会话占用的串口。
 func (s *Service) ListPorts() ([]model.PortInfo, error) {
 	s.mu.RLock()
 	listPorts := s.listPorts
@@ -124,6 +134,7 @@ func (s *Service) ListPorts() ([]model.PortInfo, error) {
 	return result, nil
 }
 
+// Start 保存设置、打开串口并启动侦测读取循环。
 func (s *Service) Start(req model.DetectionSessionRequest, locale string) (model.DetectionSessionResponse, error) {
 	req = s.normalizeRequest(req)
 	rxPortName, txPortName := s.resolvePortNames(req)
@@ -199,6 +210,7 @@ func (s *Service) Start(req model.DetectionSessionRequest, locale string) (model
 	return response, nil
 }
 
+// Stop 关闭当前侦测会话并发布停止事件。
 func (s *Service) Stop(locale string) model.DetectionSessionResponse {
 	s.mu.Lock()
 	prev := s.current
@@ -227,6 +239,7 @@ func (s *Service) Stop(locale string) model.DetectionSessionResponse {
 	return response
 }
 
+// Current 返回当前侦测会话状态，并按语言本地化提示文本。
 func (s *Service) Current(locale string) model.DetectionSessionResponse {
 	s.mu.RLock()
 	current := s.current
@@ -242,26 +255,27 @@ func (s *Service) Current(locale string) model.DetectionSessionResponse {
 	return s.responseForSession(current, locale, s.messageForState(current.state, locale))
 }
 
+// Records 返回最新的标准化侦测记录。
 func (s *Service) Records(limit int) []model.DetectionRecord {
 	return s.store.ListDetections(limit)
 }
 
+// Parsed 返回最新解析结果，包含无法识别的原始行。
 func (s *Service) Parsed(limit int) []model.ParsedMessage {
 	return s.store.ListParsed(limit)
 }
 
+// FPV 返回最新识别为图传信号的记录。
 func (s *Service) FPV(limit int) []model.FpvRecord {
 	return s.store.ListFPV(limit)
 }
 
+// Subscribe 注册带缓冲的事件订阅者，并返回取消订阅函数。
 func (s *Service) Subscribe(buffer int) (<-chan model.Event, func()) {
 	return s.store.Subscribe(buffer)
 }
 
-func (s *Service) Publish(evt model.Event) {
-	s.store.Publish(evt)
-}
-
+// RestoreSavedSettings 在存在已保存设置时自动恢复会话。
 func (s *Service) RestoreSavedSettings(locale string) {
 	if s.settings == nil {
 		return
@@ -273,6 +287,7 @@ func (s *Service) RestoreSavedSettings(locale string) {
 	_, _ = s.Start(req, locale)
 }
 
+// IngestLine 解析一行串口数据，并写入解析、侦测和图传记录。
 func (s *Service) IngestLine(sessionID, portName, line string) {
 	msg, err := parser.ParseLine(line)
 	if err != nil {
@@ -315,6 +330,7 @@ func (s *Service) IngestLine(sessionID, portName, line string) {
 	}
 }
 
+// manageSession 保持单个串口会话运行，直到被停止或替换。
 func (s *Service) manageSession(seq uint64, sess *session, connected bool) {
 	delay := s.options.ReconnectInitialDelay
 	if delay <= 0 {
@@ -392,6 +408,7 @@ func (s *Service) manageSession(seq uint64, sess *session, connected bool) {
 	}
 }
 
+// finalizeStopped 在读取循环退出且不重连时清理当前会话。
 func (s *Service) finalizeStopped(seq uint64, sess *session) {
 	s.mu.Lock()
 	if s.sequence != seq || s.current != sess {
@@ -409,6 +426,7 @@ func (s *Service) finalizeStopped(seq uint64, sess *session) {
 	s.store.Publish(model.Event{Type: "session.stopped", Time: time.Now(), Payload: response})
 }
 
+// messageForState 将会话状态映射为本地化操作提示。
 func (s *Service) messageForState(state, locale string) string {
 	switch state {
 	case "connected":
@@ -424,6 +442,7 @@ func (s *Service) messageForState(state, locale string) string {
 	}
 }
 
+// responseForSession 将内部会话状态转换为 API 响应结构。
 func (s *Service) responseForSession(sess *session, locale, message string) model.DetectionSessionResponse {
 	if sess == nil {
 		return model.DetectionSessionResponse{
@@ -453,6 +472,7 @@ func (s *Service) responseForSession(sess *session, locale, message string) mode
 	}
 }
 
+// connectOnce 打开接收和发送串口，并发送侦测启动命令。
 func (s *Service) connectOnce(cfg *serialport.Config, txPortName string) (*client.SerialClient, error) {
 	s.mu.RLock()
 	openPort := s.openPort
@@ -484,6 +504,7 @@ func (s *Service) connectOnce(cfg *serialport.Config, txPortName string) (*clien
 	return serialClient, nil
 }
 
+// assignConnectedClient 在会话仍然有效时绑定已连接客户端。
 func (s *Service) assignConnectedClient(seq uint64, sess *session, c *client.SerialClient) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -497,6 +518,7 @@ func (s *Service) assignConnectedClient(seq uint64, sess *session, c *client.Ser
 	return true
 }
 
+// setSessionFailure 记录当前会话最近一次连接错误。
 func (s *Service) setSessionFailure(seq uint64, sess *session, state, lastErr string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -508,12 +530,14 @@ func (s *Service) setSessionFailure(seq uint64, sess *session, state, lastErr st
 	sess.retryCount++
 }
 
+// isCurrentSession 判断序号和会话指针是否仍对应当前会话。
 func (s *Service) isCurrentSession(seq uint64, sess *session) bool {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.sequence == seq && s.current == sess
 }
 
+// saveSettings 在配置存储存在时持久化标准化会话请求。
 func (s *Service) saveSettings(req model.DetectionSessionRequest) error {
 	if s.settings == nil {
 		return nil
@@ -521,6 +545,7 @@ func (s *Service) saveSettings(req model.DetectionSessionRequest) error {
 	return s.settings.Save(req)
 }
 
+// buildConfig 将 API 请求转换为串口配置。
 func (s *Service) buildConfig(req model.DetectionSessionRequest, rxPortName string) serialport.Config {
 	cfg := serialport.Config{
 		PortName:    rxPortName,
@@ -539,6 +564,7 @@ func (s *Service) buildConfig(req model.DetectionSessionRequest, rxPortName stri
 	return cfg
 }
 
+// normalizeRequest 使用服务默认值补齐缺省串口参数。
 func (s *Service) normalizeRequest(req model.DetectionSessionRequest) model.DetectionSessionRequest {
 	req.AutoConnect = true
 	if req.BaudRate == 0 {
@@ -559,6 +585,7 @@ func (s *Service) normalizeRequest(req model.DetectionSessionRequest) model.Dete
 	return req
 }
 
+// resolvePortNames 同时兼容旧单串口请求和收发分离请求。
 func (s *Service) resolvePortNames(req model.DetectionSessionRequest) (string, string) {
 	rxPortName := strings.TrimSpace(req.RxPortName)
 	if rxPortName == "" {
@@ -573,6 +600,7 @@ func (s *Service) resolvePortNames(req model.DetectionSessionRequest) (string, s
 	return rxPortName, txPortName
 }
 
+// nextBackoff 按倍增策略计算下一次重连延迟，并限制最大值。
 func (s *Service) nextBackoff(current time.Duration) time.Duration {
 	maxDelay := s.options.ReconnectMaxDelay
 	if maxDelay <= 0 {
@@ -588,6 +616,7 @@ func (s *Service) nextBackoff(current time.Duration) time.Duration {
 	return next
 }
 
+// sleepOrDone 等待重连延迟，或在会话结束时提前返回。
 func (s *Service) sleepOrDone(ctx context.Context, delay time.Duration) bool {
 	if delay <= 0 {
 		delay = time.Second
@@ -602,6 +631,7 @@ func (s *Service) sleepOrDone(ctx context.Context, delay time.Duration) bool {
 	}
 }
 
+// sameRequest 判断两个会话请求是否指向同一套串口配置。
 func sameRequest(a, b model.DetectionSessionRequest) bool {
 	return a.PortName == b.PortName &&
 		a.RxPortName == b.RxPortName &&
@@ -614,6 +644,7 @@ func sameRequest(a, b model.DetectionSessionRequest) bool {
 		a.AutoConnect == b.AutoConnect
 }
 
+// sessionEventType 将会话状态映射为服务端事件名称。
 func sessionEventType(state string) string {
 	switch state {
 	case "connecting":
@@ -629,6 +660,7 @@ func sessionEventType(state string) string {
 	}
 }
 
+// detectionRecordFromMessage 从解析结果中提取可列表展示的侦测字段。
 func detectionRecordFromMessage(sessionID, portName string, parsed model.ParsedMessage, msg *parser.Message) (model.DetectionRecord, bool) {
 	record := model.DetectionRecord{
 		ID:         fmt.Sprintf("%s-%d", sessionID, parsed.Time.UnixNano()),
@@ -668,6 +700,7 @@ func detectionRecordFromMessage(sessionID, portName string, parsed model.ParsedM
 	return record, true
 }
 
+// buildSummary 创建侦测列表中展示的简短摘要。
 func buildSummary(record model.DetectionRecord) string {
 	parts := make([]string, 0, 4)
 	if record.Device != "" {
@@ -688,6 +721,7 @@ func buildSummary(record model.DetectionRecord) string {
 	return strings.Join(parts, " / ")
 }
 
+// toParsedMessage 将解析器专用数据序列化为通用解析结果结构。
 func toParsedMessage(msg *parser.Message) model.ParsedMessage {
 	data, err := json.Marshal(msg.Data)
 	if err != nil {
@@ -701,6 +735,7 @@ func toParsedMessage(msg *parser.Message) model.ParsedMessage {
 	}
 }
 
+// normalizeOptions 使用生产默认值补齐未设置的服务参数。
 func normalizeOptions(options Options) Options {
 	if options.DefaultBaudRate == 0 {
 		options.DefaultBaudRate = 115200
@@ -729,6 +764,7 @@ func normalizeOptions(options Options) Options {
 	return options
 }
 
+// firstNonZero 优先返回已设置的值，否则返回默认值。
 func firstNonZero(value, fallback int) int {
 	if value == 0 {
 		return fallback

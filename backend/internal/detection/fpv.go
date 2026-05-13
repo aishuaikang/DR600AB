@@ -2,6 +2,7 @@ package detection
 
 import "strings"
 
+// fpvBand 定义用于识别模拟图传信号的频段。
 type fpvBand struct {
 	key      string
 	label    string
@@ -10,6 +11,7 @@ type fpvBand struct {
 	keywords []string
 }
 
+// fpvBands 按频率范围和型号关键字列出已知图传频段。
 var fpvBands = []fpvBand{
 	{key: "433", label: "433M", minMHz: 400, maxMHz: 470, keywords: []string{"433"}},
 	{key: "800", label: "800M", minMHz: 780, maxMHz: 860, keywords: []string{"800"}},
@@ -22,6 +24,7 @@ var fpvBands = []fpvBand{
 	{key: "5.8", label: "5.8G", minMHz: 5700, maxMHz: 5900, keywords: []string{"5.8", "5800"}},
 }
 
+// classifyFPV 根据频率或描述文本匹配已知图传频段。
 func classifyFPV(freq float64, values ...string) (string, string, bool) {
 	for _, band := range fpvBands {
 		if freq >= band.minMHz && freq <= band.maxMHz {

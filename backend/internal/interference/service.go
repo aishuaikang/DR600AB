@@ -1,3 +1,4 @@
+// Package interference 控制用于 GPIO 输出的通道。
 package interference
 
 import (
@@ -12,6 +13,7 @@ import (
 	"gpio-controller/gpio"
 )
 
+// GPIOPin 是 GPIO 控制服务依赖的引脚操作接口。
 type GPIOPin interface {
 	Setup() error
 	SetHigh() error
@@ -19,8 +21,10 @@ type GPIOPin interface {
 	Cleanup()
 }
 
+// PinFactory 根据 Linux GPIO 编号创建引脚。
 type PinFactory func(number int) GPIOPin
 
+// ChannelDefinition 声明一个可控制的 GPIO 输出通道。
 type ChannelDefinition struct {
 	ID       string
 	Label    string
@@ -29,6 +33,7 @@ type ChannelDefinition struct {
 	Reserved bool
 }
 
+// Service 管理 GPIO 通道状态，并发布通道事件。
 type Service struct {
 	mu sync.RWMutex
 
@@ -50,6 +55,7 @@ type channelState struct {
 	lastError    string
 }
 
+// NewService 根据通道定义创建 GPIO 控制服务。
 func NewService(store *store.MemoryStore, translator *i18n.Translator, definitions []ChannelDefinition, pinFactory PinFactory) *Service {
 	if pinFactory == nil {
 		pinFactory = func(number int) GPIOPin {
@@ -82,6 +88,7 @@ func NewService(store *store.MemoryStore, translator *i18n.Translator, definitio
 	}
 }
 
+// DefaultChannels 返回设备使用的 GPIO 通道映射。
 func DefaultChannels() []ChannelDefinition {
 	return []ChannelDefinition{
 		{ID: "io1", Label: "IO1", Pin: 96, Bands: []string{"433", "800", "900", "1.4"}},
@@ -91,6 +98,7 @@ func DefaultChannels() []ChannelDefinition {
 	}
 }
 
+// ListChannels 按稳定展示顺序返回通道状态。
 func (s *Service) ListChannels() []model.GpioChannel {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -102,6 +110,7 @@ func (s *Service) ListChannels() []model.GpioChannel {
 	return result
 }
 
+// SetState 将通道置为高电平或低电平，并返回更新后的通道状态。
 func (s *Service) SetState(id string, enabled bool, locale string) (model.GpioChannel, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -151,6 +160,7 @@ func (s *Service) SetState(id string, enabled bool, locale string) (model.GpioCh
 	return channel, nil
 }
 
+// Shutdown 将所有已初始化 GPIO 引脚置为低电平并释放资源。
 func (s *Service) Shutdown() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -170,6 +180,7 @@ func (s *Service) Shutdown() {
 	}
 }
 
+// markError 将通道更新为错误状态，并发布当前状态。
 func (s *Service) markError(state *channelState, locale string, err error) (model.GpioChannel, error) {
 	state.status = "error"
 	state.lastError = err.Error()
@@ -178,6 +189,7 @@ func (s *Service) markError(state *channelState, locale string, err error) (mode
 	return channel, fmt.Errorf("%s: %w", s.translator.T(locale, "errors", "gpio_update_failed"), err)
 }
 
+// dto 将可变通道状态复制到 API 模型。
 func (s *channelState) dto() model.GpioChannel {
 	bands := make([]string, len(s.def.Bands))
 	copy(bands, s.def.Bands)
@@ -196,6 +208,7 @@ func (s *channelState) dto() model.GpioChannel {
 	}
 }
 
+// initialStatus 返回通道定义对应的启动状态。
 func initialStatus(def ChannelDefinition) string {
 	if def.Reserved {
 		return "reserved"

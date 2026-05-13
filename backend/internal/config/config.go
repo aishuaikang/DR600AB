@@ -1,3 +1,4 @@
+// Package config 从环境变量加载后端运行配置。
 package config
 
 import (
@@ -7,6 +8,7 @@ import (
 	"time"
 )
 
+// Config 保存后端 API 和服务运行配置。
 type Config struct {
 	Addr                  string
 	DefaultLocale         string
@@ -25,6 +27,7 @@ type Config struct {
 	CORSAllowedOrigins    []string
 }
 
+// Load 读取环境变量，并返回带默认值的配置。
 func Load() Config {
 	return Config{
 		Addr:                  envString("API_ADDR", ":18080"),
@@ -45,6 +48,7 @@ func Load() Config {
 	}
 }
 
+// envString 返回去除空白后的环境变量值，空值时返回默认值。
 func envString(key, fallback string) string {
 	if v := strings.TrimSpace(os.Getenv(key)); v != "" {
 		return v
@@ -52,6 +56,7 @@ func envString(key, fallback string) string {
 	return fallback
 }
 
+// envInt 解析整数环境变量，失败时返回默认值。
 func envInt(key string, fallback int) int {
 	raw := strings.TrimSpace(os.Getenv(key))
 	if raw == "" {
@@ -64,6 +69,7 @@ func envInt(key string, fallback int) int {
 	return v
 }
 
+// envList 解析逗号分隔的环境变量列表，空列表时返回默认值。
 func envList(key string, fallback []string) []string {
 	raw := strings.TrimSpace(os.Getenv(key))
 	if raw == "" {

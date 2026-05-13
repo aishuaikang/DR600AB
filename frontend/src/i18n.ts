@@ -46,7 +46,7 @@ function pickInitialLocale() {
       return stored;
     }
   } catch {
-    // ignore storage errors
+    // 忽略本地存储错误。
   }
 
   const browserLocale = window.navigator.language.replace("_", "-");
@@ -89,7 +89,7 @@ export function persistLocale(locale: string) {
   try {
     window.localStorage.setItem(STORAGE_KEY, locale);
   } catch {
-    // ignore storage errors
+    // 忽略本地存储错误。
   }
 }
 

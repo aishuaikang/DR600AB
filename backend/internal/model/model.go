@@ -1,3 +1,4 @@
+// Package model 定义后端共享的请求、响应、事件和记录 DTO。
 package model
 
 import (
@@ -5,17 +6,20 @@ import (
 	"time"
 )
 
+// LocaleMeta 描述前端可用的本地化资源。
 type LocaleMeta struct {
 	Default    string   `json:"defaultLocale"`
 	Supported  []string `json:"supportedLocales"`
 	Namespaces []string `json:"namespaces"`
 }
 
+// PortInfo 描述一个串口，以及它是否被当前会话占用。
 type PortInfo struct {
 	Name   string `json:"name"`
 	Active bool   `json:"active"`
 }
 
+// DetectionSessionRequest 配置侦测串口会话。
 type DetectionSessionRequest struct {
 	PortName      string `json:"portName,omitempty"`
 	RxPortName    string `json:"rxPortName,omitempty"`
@@ -28,6 +32,7 @@ type DetectionSessionRequest struct {
 	AutoConnect   bool   `json:"autoConnect,omitempty"`
 }
 
+// DetectionSessionResponse 返回当前侦测会话状态。
 type DetectionSessionResponse struct {
 	Active        bool      `json:"active"`
 	SessionID     string    `json:"sessionId,omitempty"`
@@ -46,6 +51,7 @@ type DetectionSessionResponse struct {
 	Message       string    `json:"message"`
 }
 
+// ParsedMessage 保存单行串口数据的解析结果。
 type ParsedMessage struct {
 	Type string          `json:"type"`
 	Time time.Time       `json:"time"`
@@ -53,6 +59,7 @@ type ParsedMessage struct {
 	Data json.RawMessage `json:"data"`
 }
 
+// DetectionRecord 是侦测视图使用的标准化列表项。
 type DetectionRecord struct {
 	ID         string        `json:"id"`
 	SessionID  string        `json:"sessionId"`
@@ -69,6 +76,7 @@ type DetectionRecord struct {
 	FPVBand    string        `json:"fpvBand,omitempty"`
 }
 
+// FpvRecord 保存被识别为图传信号的侦测记录。
 type FpvRecord struct {
 	ID          string    `json:"id"`
 	DetectionID string    `json:"detectionId"`
@@ -83,6 +91,7 @@ type FpvRecord struct {
 	SourceKind  string    `json:"sourceKind"`
 }
 
+// GpioChannel 描述一个 GPIO 控制通道及其运行状态。
 type GpioChannel struct {
 	ID           string   `json:"id"`
 	Label        string   `json:"label"`
@@ -96,26 +105,31 @@ type GpioChannel struct {
 	LastError    string   `json:"lastError,omitempty"`
 }
 
+// GpioChannelStateRequest 更新 GPIO 通道是否启用。
 type GpioChannelStateRequest struct {
 	Enabled bool `json:"enabled"`
 }
 
+// GpioChannelStateResponse 返回更新后的 GPIO 通道和用户提示。
 type GpioChannelStateResponse struct {
 	Channel GpioChannel `json:"channel"`
 	Message string      `json:"message"`
 }
 
+// Event 是发送给服务端事件订阅者的运行时事件。
 type Event struct {
 	Type    string    `json:"type"`
 	Time    time.Time `json:"time"`
 	Payload any       `json:"payload,omitempty"`
 }
 
+// ListResponse 包装列表接口响应，并附带条目数量。
 type ListResponse[T any] struct {
 	Items []T `json:"items"`
 	Count int `json:"count"`
 }
 
+// ApiError 是标准 JSON 错误响应。
 type ApiError struct {
 	Code    string `json:"code"`
 	Message string `json:"message"`

@@ -1,3 +1,4 @@
+// Package app 负责组装后端服务为可运行应用。
 package app
 
 import (
@@ -10,10 +11,12 @@ import (
 	"dr600ab-api/internal/store"
 )
 
+// App 聚合后端 HTTP 服务及其运行依赖。
 type App struct {
 	server *httpapi.Server
 }
 
+// New 根据配置创建应用，并恢复已保存的侦测设置。
 func New(cfg config.Config) (*App, error) {
 	translator, err := i18n.New(cfg.DefaultLocale)
 	if err != nil {
@@ -40,10 +43,12 @@ func New(cfg config.Config) (*App, error) {
 	}, nil
 }
 
+// Listen 启动 HTTP API 服务。
 func (a *App) Listen(addr string) error {
 	return a.server.Listen(addr)
 }
 
+// Shutdown 停止 HTTP API 并释放服务资源。
 func (a *App) Shutdown() error {
 	return a.server.Shutdown()
 }
