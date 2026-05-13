@@ -1,6 +1,5 @@
 {
-  "app.title": "无人机侦测干扰系统",
-  "app.subtitle": "按消息类型查看实时上报并控制 GPIO 干扰",
+  "app.title": "无人机智能管控系统",
   "loading": "加载中",
   "refresh": "刷新",
   "start": "启动",

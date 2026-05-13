@@ -68,7 +68,7 @@ i18n.use(initReactI18next).init({
   fallbackLng: "zh-CN",
   ns: namespaces,
   defaultNS: "common",
-  nsSeparator: ".",
+  nsSeparator: false,
   keySeparator: false,
   interpolation: {
     escapeValue: false,

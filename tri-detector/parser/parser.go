@@ -129,6 +129,9 @@ func ParseLine(line string) (*Message, error) {
 		// 去掉 "RID " 前缀再解析 KV
 		kvPayload := strings.TrimPrefix(payload, "RID ")
 		fields := parseKeyValues(kvPayload)
+		if !looksLikeRID(fields) {
+			return nil, fmt.Errorf("unknown message type")
+		}
 		msg.Data = buildRID(fields)
 
 	case strings.Contains(payload, "Heart Beat"):
@@ -334,6 +337,26 @@ func looksLikeDetect(payload string, fields map[string]string) bool {
 	_, okModel := fields["model"]
 	_, okRSSI := fields["rssi"]
 	return okDevice && okModel && okRSSI
+}
+
+func looksLikeRID(fields map[string]string) bool {
+	required := []string{
+		"ssid",
+		"serial",
+		"model",
+		"UA_type",
+		"drone_GPS",
+		"pilot_GPS",
+		"MAC",
+		"rssi",
+		"freq",
+	}
+	for _, key := range required {
+		if strings.TrimSpace(fields[key]) == "" {
+			return false
+		}
+	}
+	return true
 }
 
 func toFloat(s string) float64 {

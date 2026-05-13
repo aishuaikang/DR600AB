@@ -20,7 +20,7 @@ func main() {
 
 	errCh := make(chan error, 1)
 	go func() {
-		log.Printf("无人机侦测干扰系统后端已启动: %s", cfg.Addr)
+		log.Printf("无人机智能管控系统后端已启动: %s", cfg.Addr)
 		errCh <- server.Listen(cfg.Addr)
 	}()
 

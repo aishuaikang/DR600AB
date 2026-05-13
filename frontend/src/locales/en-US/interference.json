@@ -1,6 +1,6 @@
 {
-  "title": "Interference Control",
-  "description": "IO1 / IO2 / IO3 map to different bands, IO4 is reserved.",
+  "title": "GPIO Control",
+  "description": "Control GPIO output for IO1 / IO2 / IO3. IO4 is reserved.",
   "channels": "Channels",
   "pin": "GPIO",
   "bands": "Band mapping",

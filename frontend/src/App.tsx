@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { ReactNode } from "react";
+import type { ReactNode, UIEvent } from "react";
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
 import {
   Activity,
+  ChevronDown,
   CircleAlert,
-  CircleCheck,
   FileText,
   Fingerprint,
   Languages,
@@ -15,7 +15,7 @@ import {
   Settings2,
   Shield,
   Square,
-  Unplug,
+  Wrench,
   Zap,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
@@ -45,22 +45,32 @@ import type {
 
 type Page = ParsedMessageType | "interference" | "settings";
 type Tone = "neutral" | "success" | "warning" | "error" | "info";
+type NavItem = { id: Page; icon: LucideIcon; labelKey: string };
 
 type MessageColumn = {
   labelKey: string;
+  width: string;
   render: (record: ParsedMessage, locale: string) => ReactNode;
+};
+
+type DetailContent = {
+  title: string;
+  value: string;
 };
 
 type MessagePageConfig = {
   icon: LucideIcon;
   navLabelKey: string;
   titleKey: string;
-  descriptionKey: string;
   tone: Tone;
   tableWidth: string;
-  subject: (record: ParsedMessage) => string;
   columns: MessageColumn[];
 };
+
+const VIRTUAL_TABLE_ROW_HEIGHT = 48;
+const VIRTUAL_TABLE_OVERSCAN = 8;
+const TIME_COLUMN_WIDTH = "w-[13rem]";
+const DETAIL_COLUMN_WIDTH = "w-[24rem]";
 
 const MESSAGE_PAGE_ORDER: ParsedMessageType[] = [
   "did_encrypted",
@@ -73,188 +83,193 @@ const MESSAGE_PAGE_ORDER: ParsedMessageType[] = [
 const MESSAGE_PAGE_CONFIG: Record<ParsedMessageType, MessagePageConfig> = {
   did_encrypted: {
     icon: Shield,
-    navLabelKey: "nav.didEncrypted",
+    navLabelKey: "didEncrypted",
     titleKey: "didEncrypted.title",
-    descriptionKey: "didEncrypted.description",
     tone: "info",
-    tableWidth: "min-w-[1100px]",
-    subject: (record) => {
-      const data = getRecordData(record);
-      return joinParts([getTextValue(data.device), getTextValue(data.encrypted_id)]);
-    },
+    tableWidth: "min-w-[118rem]",
     columns: [
       {
         labelKey: "didEncrypted.device",
+        width: "w-[18rem]",
         render: (record) => getTextValue(getRecordData(record).device),
       },
       {
         labelKey: "didEncrypted.encryptedId",
+        width: "w-[38rem]",
         render: (record) => getTextValue(getRecordData(record).encrypted_id),
       },
       {
         labelKey: "didEncrypted.frequency",
+        width: "w-[10rem]",
         render: (record, locale) => formatNumber(locale, getNumberValue(getRecordData(record).freq)),
       },
       {
         labelKey: "didEncrypted.rssi",
+        width: "w-[9rem]",
         render: (record, locale) => formatNumber(locale, getNumberValue(getRecordData(record).rssi)),
       },
       {
         labelKey: "didEncrypted.bytes",
+        width: "w-[24rem]",
         render: (record) => getTextValue(getRecordData(record).bytes),
       },
     ],
   },
   rid: {
     icon: Fingerprint,
-    navLabelKey: "nav.rid",
+    navLabelKey: "rid",
     titleKey: "rid.title",
-    descriptionKey: "rid.description",
     tone: "success",
-    tableWidth: "min-w-[1320px]",
-    subject: (record) => {
-      const data = getRecordData(record);
-      return joinParts([getTextValue(data.ssid), getTextValue(data.serial)]);
-    },
+    tableWidth: "min-w-[142rem]",
     columns: [
       {
         labelKey: "rid.ssid",
+        width: "w-[16rem]",
         render: (record) => getTextValue(getRecordData(record).ssid),
       },
       {
         labelKey: "rid.serial",
+        width: "w-[18rem]",
         render: (record) => getTextValue(getRecordData(record).serial),
       },
       {
         labelKey: "rid.model",
+        width: "w-[16rem]",
         render: (record) => getTextValue(getRecordData(record).model),
       },
       {
         labelKey: "rid.uaType",
-        render: (record) => getTextValue(getRecordData(record).UA_type),
+        width: "w-[10rem]",
+        render: (record) => getTextValue(getRecordField(record, "ua_type", "UA_type")),
       },
       {
         labelKey: "rid.droneGps",
-        render: (record) => formatGps(getRecordData(record).drone_GPS),
+        width: "w-[18rem]",
+        render: (record) => formatGps(getRecordField(record, "drone_gps", "drone_GPS")),
       },
       {
         labelKey: "rid.pilotGps",
-        render: (record) => formatGps(getRecordData(record).pilot_GPS),
+        width: "w-[18rem]",
+        render: (record) => formatGps(getRecordField(record, "pilot_gps", "pilot_GPS")),
       },
       {
         labelKey: "rid.frequency",
+        width: "w-[10rem]",
         render: (record, locale) => formatNumber(locale, getNumberValue(getRecordData(record).freq)),
       },
       {
         labelKey: "rid.rssi",
+        width: "w-[9rem]",
         render: (record, locale) => formatNumber(locale, getNumberValue(getRecordData(record).rssi)),
       },
     ],
   },
   did_plain: {
     icon: FileText,
-    navLabelKey: "nav.didPlain",
+    navLabelKey: "didPlain",
     titleKey: "didPlain.title",
-    descriptionKey: "didPlain.description",
     tone: "warning",
-    tableWidth: "min-w-[1180px]",
-    subject: (record) => {
-      const data = getRecordData(record);
-      return joinParts([getTextValue(data.device), getTextValue(data.uuid)]);
-    },
+    tableWidth: "min-w-[136rem]",
     columns: [
       {
         labelKey: "didPlain.device",
+        width: "w-[16rem]",
         render: (record) => getTextValue(getRecordData(record).device),
       },
       {
         labelKey: "didPlain.serial",
+        width: "w-[18rem]",
         render: (record) => getTextValue(getRecordData(record).serial),
       },
       {
         labelKey: "didPlain.model",
+        width: "w-[16rem]",
         render: (record) => getTextValue(getRecordData(record).model),
       },
       {
         labelKey: "didPlain.uuid",
+        width: "w-[30rem]",
         render: (record) => getTextValue(getRecordData(record).uuid),
       },
       {
         labelKey: "didPlain.distance",
+        width: "w-[10rem]",
         render: (record) => getTextValue(getRecordData(record).distance),
       },
       {
         labelKey: "didPlain.frequency",
+        width: "w-[10rem]",
         render: (record, locale) => formatNumber(locale, getNumberValue(getRecordData(record).freq)),
       },
       {
         labelKey: "didPlain.rssi",
+        width: "w-[9rem]",
         render: (record, locale) => formatNumber(locale, getNumberValue(getRecordData(record).rssi)),
       },
     ],
   },
   detect: {
     icon: Radio,
-    navLabelKey: "nav.detect",
+    navLabelKey: "detect",
     titleKey: "detect.title",
-    descriptionKey: "detect.description",
     tone: "info",
-    tableWidth: "min-w-[920px]",
-    subject: (record) => {
-      const data = getRecordData(record);
-      return joinParts([getTextValue(data.device), getTextValue(data.model)]);
-    },
+    tableWidth: "min-w-[90rem]",
     columns: [
       {
         labelKey: "detect.device",
+        width: "w-[20rem]",
         render: (record) => getTextValue(getRecordData(record).device),
       },
       {
         labelKey: "detect.model",
+        width: "w-[18rem]",
         render: (record) => getTextValue(getRecordData(record).model),
       },
       {
         labelKey: "detect.frequency",
+        width: "w-[10rem]",
         render: (record, locale) => formatNumber(locale, getNumberValue(getRecordData(record).freq)),
       },
       {
         labelKey: "detect.rssi",
+        width: "w-[9rem]",
         render: (record, locale) => formatNumber(locale, getNumberValue(getRecordData(record).rssi)),
       },
     ],
   },
   heartbeat: {
     icon: Activity,
-    navLabelKey: "nav.heartbeat",
+    navLabelKey: "heartbeat",
     titleKey: "heartbeat.title",
-    descriptionKey: "heartbeat.description",
     tone: "error",
-    tableWidth: "min-w-[840px]",
-    subject: (record) => {
-      const data = getRecordData(record);
-      return joinParts([getTextValue(data.device), getTextValue(data.seq)]);
-    },
+    tableWidth: "min-w-[72rem]",
     columns: [
       {
         labelKey: "heartbeat.device",
+        width: "w-[18rem]",
         render: (record) => getTextValue(getRecordData(record).device),
       },
       {
         labelKey: "heartbeat.seq",
+        width: "w-[12rem]",
         render: (record) => getTextValue(getRecordData(record).seq),
       },
     ],
   },
 };
 
-const pageItems: Array<{ id: Page; icon: LucideIcon; labelKey: string }> = [
-  { id: "did_encrypted", icon: MESSAGE_PAGE_CONFIG.did_encrypted.icon, labelKey: MESSAGE_PAGE_CONFIG.did_encrypted.navLabelKey },
-  { id: "rid", icon: MESSAGE_PAGE_CONFIG.rid.icon, labelKey: MESSAGE_PAGE_CONFIG.rid.navLabelKey },
-  { id: "did_plain", icon: MESSAGE_PAGE_CONFIG.did_plain.icon, labelKey: MESSAGE_PAGE_CONFIG.did_plain.navLabelKey },
-  { id: "detect", icon: MESSAGE_PAGE_CONFIG.detect.icon, labelKey: MESSAGE_PAGE_CONFIG.detect.navLabelKey },
+const debugPageItems: NavItem[] = [
   { id: "heartbeat", icon: MESSAGE_PAGE_CONFIG.heartbeat.icon, labelKey: MESSAGE_PAGE_CONFIG.heartbeat.navLabelKey },
-  { id: "interference", icon: Zap, labelKey: "nav.interference" },
-  { id: "settings", icon: Settings2, labelKey: "nav.settings" },
+  { id: "detect", icon: MESSAGE_PAGE_CONFIG.detect.icon, labelKey: MESSAGE_PAGE_CONFIG.detect.navLabelKey },
+  { id: "did_encrypted", icon: MESSAGE_PAGE_CONFIG.did_encrypted.icon, labelKey: MESSAGE_PAGE_CONFIG.did_encrypted.navLabelKey },
+  { id: "did_plain", icon: MESSAGE_PAGE_CONFIG.did_plain.icon, labelKey: MESSAGE_PAGE_CONFIG.did_plain.navLabelKey },
+  { id: "rid", icon: MESSAGE_PAGE_CONFIG.rid.icon, labelKey: MESSAGE_PAGE_CONFIG.rid.navLabelKey },
+  { id: "interference", icon: Zap, labelKey: "interference" },
+];
+
+const pageItems: NavItem[] = [
+  ...debugPageItems,
+  { id: "settings", icon: Settings2, labelKey: "settings" },
 ];
 
 type Banner = {
@@ -309,36 +324,6 @@ function formatNumber(locale: string, value?: number, digits = 1) {
   return new Intl.NumberFormat(locale, {
     maximumFractionDigits: digits,
   }).format(value);
-}
-
-function countByType(items: ParsedMessage[]) {
-  const counts = new Map<ParsedMessageType, number>();
-  for (const type of MESSAGE_PAGE_ORDER) {
-    counts.set(type, 0);
-  }
-  for (const item of items) {
-    if (MESSAGE_PAGE_ORDER.includes(item.type as ParsedMessageType)) {
-      const key = item.type as ParsedMessageType;
-      counts.set(key, (counts.get(key) ?? 0) + 1);
-    }
-  }
-  return MESSAGE_PAGE_ORDER.map((type) => [type, counts.get(type) ?? 0] as const);
-}
-
-function formatPortPair(receivePort?: string, sendPort?: string) {
-  const rx = receivePort?.trim() ?? "";
-  const tx = sendPort?.trim() ?? "";
-
-  if (!rx && !tx) {
-    return "";
-  }
-  if (!tx || tx === rx) {
-    return rx;
-  }
-  if (!rx) {
-    return tx;
-  }
-  return `${rx} / ${tx}`;
 }
 
 function serialKey(receivePort: string, sendPort: string) {
@@ -445,6 +430,16 @@ function getRecordData(record: ParsedMessage): Record<string, unknown> {
   return {};
 }
 
+function getRecordField(record: ParsedMessage, ...keys: string[]): unknown {
+  const data = getRecordData(record);
+  for (const key of keys) {
+    if (data[key] !== undefined && data[key] !== null) {
+      return data[key];
+    }
+  }
+  return undefined;
+}
+
 function getTextValue(value: unknown): string {
   if (value === null || value === undefined) {
     return "-";
@@ -492,19 +487,8 @@ function formatGps(value: unknown): string {
   return getTextValue(value);
 }
 
-function joinParts(parts: string[]): string {
-  return parts.filter((part) => part && part !== "-").join(" / ") || "-";
-}
-
 function buildSearchText(record: ParsedMessage): string {
   return `${record.type} ${record.raw} ${JSON.stringify(record.data ?? {})}`.toLowerCase();
-}
-
-function normalizeSummary(value: string, maxLength = 64): string {
-  if (value.length <= maxLength) {
-    return value;
-  }
-  return `${value.slice(0, maxLength - 1)}…`;
 }
 
 function Badge({
@@ -550,49 +534,14 @@ function SectionHeader({
 
 function Panel({ children, className }: { children: ReactNode; className?: string }) {
   return (
-    <section className={cx("rounded-lg border border-base-300 bg-base-200/80 shadow-sm shadow-black/20", className)}>
+    <section className={cx("rounded-3xl border border-base-300 bg-base-200/80 shadow-sm shadow-black/20", className)}>
       {children}
     </section>
   );
 }
 
 function PanelBody({ children, className }: { children: ReactNode; className?: string }) {
-  return <div className={cx("flex flex-col gap-5 p-5", className)}>{children}</div>;
-}
-
-function MetricCard({
-  icon,
-  label,
-  value,
-  hint,
-  tone = "info",
-}: {
-  icon: ReactNode;
-  label: string;
-  value: string;
-  hint: string;
-  tone?: Tone;
-}) {
-  const toneClass: Record<Tone, string> = {
-    neutral: "text-base-content bg-base-300/70",
-    success: "text-success bg-success/10",
-    warning: "text-warning bg-warning/10",
-    error: "text-error bg-error/10",
-    info: "text-info bg-info/10",
-  };
-
-  return (
-    <article className="rounded-lg border border-base-300 bg-base-200/75 p-4 shadow-sm shadow-black/20">
-      <div className="flex min-w-0 items-start gap-3">
-        <div className={cx("grid h-10 w-10 shrink-0 place-items-center rounded-md", toneClass[tone])}>{icon}</div>
-        <div className="min-w-0">
-          <p className="truncate text-xs font-medium text-base-content/60">{label}</p>
-          <strong className="mt-1 block break-words text-xl font-semibold leading-tight text-base-content">{value}</strong>
-          <span className="mt-1 block truncate text-xs text-base-content/50">{hint}</span>
-        </div>
-      </div>
-    </article>
-  );
+  return <div className={cx("flex flex-col gap-4 p-4 sm:p-5", className)}>{children}</div>;
 }
 
 function InfoTile({
@@ -605,34 +554,222 @@ function InfoTile({
   children?: ReactNode;
 }) {
   return (
-    <div className="min-w-0 rounded-md border border-base-300 bg-base-100/70 px-4 py-3">
+    <div className="min-w-0 rounded-3xl border border-base-300 bg-base-100/70 px-4 py-3">
       <span className="block text-xs font-medium text-base-content/55">{label}</span>
       <div className="mt-2 min-w-0 break-words text-sm font-semibold text-base-content">{children ?? value}</div>
     </div>
   );
 }
 
-function DataTable({
-  minWidth,
+function CellValue({
   children,
+  detail,
+  onOpenDetail,
 }: {
-  minWidth: string;
   children: ReactNode;
+  detail?: DetailContent;
+  onOpenDetail?: (detail: DetailContent) => void;
 }) {
+  if (typeof children !== "string") {
+    return <div className="max-w-full truncate whitespace-nowrap">{children}</div>;
+  }
+
+  return <LongTextCell value={children} detail={detail} onOpenDetail={onOpenDetail} />;
+}
+
+function LongTextCell({
+  value,
+  detail,
+  onOpenDetail,
+}: {
+  value: string;
+  detail?: DetailContent;
+  onOpenDetail?: (detail: DetailContent) => void;
+}) {
+  const canOpen = Boolean(detail && value !== "-");
+  const content = (
+    <code
+      className={cx(
+        "block max-w-full truncate whitespace-nowrap rounded-xl bg-base-200/80 px-2 py-1 text-xs leading-5 text-base-content/75",
+        canOpen ? "cursor-pointer hover:bg-base-300/80 hover:text-base-content" : "",
+      )}
+      title={value === "-" ? undefined : value}
+    >
+      {value}
+    </code>
+  );
+
+  if (!canOpen || !detail || !onOpenDetail) {
+    return content;
+  }
+
   return (
-    <div className="overflow-x-auto rounded-lg border border-base-300 bg-base-100/70">
-      <table className={cx("table table-zebra table-sm", minWidth)}>{children}</table>
-    </div>
+    <button
+      className="block max-w-full text-left"
+      type="button"
+      onClick={() => onOpenDetail(detail)}
+      aria-label={detail.title}
+    >
+      {content}
+    </button>
   );
 }
 
-function EmptyRow({ colSpan, message }: { colSpan: number; message: string }) {
+function VirtualMessageTable({
+  config,
+  records,
+  locale,
+  resetKey,
+  t,
+}: {
+  config: MessagePageConfig;
+  records: ParsedMessage[];
+  locale: string;
+  resetKey: string;
+  t: TFunction;
+}) {
+  const [scrollTop, setScrollTop] = useState(0);
+  const [viewportHeight, setViewportHeight] = useState(420);
+  const [detail, setDetail] = useState<DetailContent | null>(null);
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const totalHeight = records.length * VIRTUAL_TABLE_ROW_HEIGHT;
+  const visibleCount = Math.max(1, Math.ceil(viewportHeight / VIRTUAL_TABLE_ROW_HEIGHT));
+  const startIndex = Math.max(0, Math.floor(scrollTop / VIRTUAL_TABLE_ROW_HEIGHT) - VIRTUAL_TABLE_OVERSCAN);
+  const endIndex = Math.min(records.length, startIndex + visibleCount + VIRTUAL_TABLE_OVERSCAN * 2);
+  const visibleRecords = records.slice(startIndex, endIndex);
+  const topPadding = startIndex * VIRTUAL_TABLE_ROW_HEIGHT;
+  const bottomPadding = Math.max(0, totalHeight - topPadding - visibleRecords.length * VIRTUAL_TABLE_ROW_HEIGHT);
+  const colSpan = config.columns.length + 2;
+
+  const measureViewport = useCallback(() => {
+    const nextHeight = containerRef.current?.clientHeight;
+    if (nextHeight) {
+      setViewportHeight(nextHeight);
+    }
+  }, []);
+
+  useEffect(() => {
+    measureViewport();
+    window.addEventListener("resize", measureViewport);
+    return () => window.removeEventListener("resize", measureViewport);
+  }, [measureViewport]);
+
+  useEffect(() => {
+    setScrollTop(0);
+    if (containerRef.current) {
+      containerRef.current.scrollTop = 0;
+    }
+  }, [resetKey]);
+
+  const handleScroll = useCallback((event: UIEvent<HTMLDivElement>) => {
+    setScrollTop(event.currentTarget.scrollTop);
+  }, []);
+
   return (
-    <tr>
-      <td colSpan={colSpan} className="py-8 text-center text-sm text-base-content/55">
-        {message}
-      </td>
-    </tr>
+    <>
+      <div
+        ref={containerRef}
+        className="min-h-0 min-w-0 flex-1 overflow-auto rounded-3xl border border-base-300 bg-base-100/70"
+        onScroll={handleScroll}
+      >
+        <table className={cx("table table-zebra table-sm w-full table-fixed whitespace-nowrap", config.tableWidth)}>
+          <thead className="sticky top-0 z-10 bg-base-200">
+            <tr>
+              <th className={TIME_COLUMN_WIDTH}>{t("time", { ns: "common" })}</th>
+              {config.columns.map((column) => (
+                <th key={column.labelKey} className={column.width}>
+                  {t(column.labelKey, { ns: "messages" })}
+                </th>
+              ))}
+              <th className={DETAIL_COLUMN_WIDTH}>{t("details", { ns: "common" })}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {records.length === 0 ? (
+              <tr>
+                <td colSpan={colSpan} className="py-8 text-center text-sm text-base-content/55">
+                  {t("empty", { ns: "common" })}
+                </td>
+              </tr>
+            ) : (
+              <>
+                {topPadding > 0 ? (
+                  <tr aria-hidden="true">
+                    <td colSpan={colSpan} style={{ height: topPadding, padding: 0 }} />
+                  </tr>
+                ) : null}
+                {visibleRecords.map((record) => (
+                  <tr
+                    key={`${record.type}-${record.time}-${record.raw}`}
+                    className="row-hover"
+                    style={{ height: VIRTUAL_TABLE_ROW_HEIGHT }}
+                  >
+                    <td className={cx("align-middle tabular-nums whitespace-nowrap", TIME_COLUMN_WIDTH)}>
+                      <LongTextCell value={formatTime(locale, record.time)} />
+                    </td>
+                    {config.columns.map((column) => {
+                      const rendered = column.render(record, locale);
+                      const label = t(column.labelKey, { ns: "messages" });
+                      const detailValue = typeof rendered === "string" ? rendered : undefined;
+
+                      return (
+                        <td
+                          key={column.labelKey}
+                          className={cx(
+                            "align-middle overflow-hidden whitespace-nowrap",
+                            column.width,
+                            column.labelKey.includes("frequency") || column.labelKey.includes("rssi") ? "tabular-nums" : "",
+                          )}
+                        >
+                          <CellValue
+                            detail={detailValue ? { title: label, value: detailValue } : undefined}
+                            onOpenDetail={setDetail}
+                          >
+                            {rendered}
+                          </CellValue>
+                        </td>
+                      );
+                    })}
+                    <td className={cx("align-middle overflow-hidden whitespace-nowrap", DETAIL_COLUMN_WIDTH)}>
+                      <LongTextCell
+                        value={record.raw}
+                        detail={{ title: t("details", { ns: "common" }), value: JSON.stringify(record.data, null, 2) }}
+                        onOpenDetail={setDetail}
+                      />
+                    </td>
+                  </tr>
+                ))}
+                {bottomPadding > 0 ? (
+                  <tr aria-hidden="true">
+                    <td colSpan={colSpan} style={{ height: bottomPadding, padding: 0 }} />
+                  </tr>
+                ) : null}
+              </>
+            )}
+          </tbody>
+        </table>
+      </div>
+
+      {detail ? <DetailDialog detail={detail} onClose={() => setDetail(null)} /> : null}
+    </>
+  );
+}
+
+function DetailDialog({ detail, onClose }: { detail: DetailContent; onClose: () => void }) {
+  return (
+    <div className="fixed inset-0 z-50 grid place-items-center bg-black/55 p-4" role="dialog" aria-modal="true">
+      <div className="flex max-h-[80dvh] w-full max-w-3xl flex-col overflow-hidden rounded-[28px] border border-base-300 bg-base-100 shadow-2xl shadow-black/40">
+        <div className="flex shrink-0 items-center justify-between gap-3 border-b border-base-300 px-5 py-4">
+          <h2 className="min-w-0 truncate text-base font-semibold text-base-content">{detail.title}</h2>
+          <button className="btn btn-sm btn-outline" type="button" onClick={onClose}>
+            ×
+          </button>
+        </div>
+        <pre className="min-h-0 flex-1 overflow-auto whitespace-pre-wrap break-words p-5 text-sm leading-6 text-base-content/80">
+          {detail.value}
+        </pre>
+      </div>
+    </div>
   );
 }
 
@@ -695,26 +832,17 @@ function PortSelect({
 }
 
 function BannerAlert({ banner }: { banner: Banner }) {
-  if (!banner.message) {
+  if (!banner.message || banner.kind !== "error") {
     return null;
   }
 
-  const classes: Record<Banner["kind"], string> = {
-    idle: "alert-info",
-    loading: "alert-info",
-    success: "alert-success",
-    error: "alert-error",
-  };
-
-  const Icon = banner.kind === "error" ? CircleAlert : CircleCheck;
-
   return (
     <div
-      className={cx("alert alert-soft py-3 text-sm", classes[banner.kind])}
-      role={banner.kind === "error" ? "alert" : "status"}
-      aria-live={banner.kind === "error" ? "assertive" : "polite"}
+      className="alert alert-soft alert-error py-3 text-sm"
+      role="alert"
+      aria-live="assertive"
     >
-      <Icon size={16} />
+      <CircleAlert size={16} />
       <span className="min-w-0 [overflow-wrap:anywhere]">{banner.message}</span>
     </div>
   );
@@ -734,7 +862,7 @@ function ChannelCard({
   const bands = Array.isArray(channel.bands) ? channel.bands : [];
 
   return (
-    <article className="flex min-w-0 flex-col gap-4 rounded-lg border border-base-300 bg-base-100/70 p-4">
+    <article className="flex min-w-0 flex-col gap-4 rounded-3xl border border-base-300 bg-base-100/70 p-4">
       <div className="flex min-w-0 items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
@@ -765,7 +893,7 @@ function ChannelCard({
         <InfoTile label={t("actual", { ns: "interference" })} value={channel.actualLevel} />
       </div>
 
-      {channel.lastError ? <p className="rounded-md bg-error/10 px-3 py-2 text-sm text-error">{channel.lastError}</p> : null}
+      {channel.lastError ? <p className="rounded-3xl bg-error/10 px-3 py-2 text-sm text-error">{channel.lastError}</p> : null}
 
       <div className="mt-auto grid gap-2">
         <button
@@ -809,86 +937,21 @@ function MessagePagePanel({
     return records.filter((record) => buildSearchText(record).includes(needle));
   }, [query, records]);
 
-  const latest = filteredRecords[0];
-  const latestSubject = latest ? normalizeSummary(config.subject(latest)) : "-";
-  const latestTime = latest ? formatTime(locale, latest.time) : "-";
-
   return (
-    <section className="grid gap-5">
-      <Panel>
-        <PanelBody>
-          <SectionHeader
-            title={t(config.titleKey, { ns: "messages" })}
-            description={t(config.descriptionKey, { ns: "messages" })}
-            action={
-              <label className="grid min-w-[240px] gap-2">
-                <span className="text-xs font-medium text-base-content/60">{t("search", { ns: "common" })}</span>
-                <input
-                  className="input input-sm input-bordered w-full bg-base-100"
-                  value={query}
-                  onChange={(event) => onQueryChange(event.target.value)}
-                  placeholder={t("search", { ns: "common" })}
-                />
-              </label>
-            }
-          />
+    <section className="flex min-h-0 min-w-0 flex-1">
+      <Panel className="flex min-h-0 min-w-0 flex-1 flex-col">
+        <PanelBody className="min-h-0 min-w-0 flex-1">
+          <label className="grid max-w-md gap-2">
+            <span className="text-xs font-medium text-base-content/60">{t("search", { ns: "common" })}</span>
+            <input
+              className="input input-sm input-bordered w-full bg-base-100"
+              value={query}
+              onChange={(event) => onQueryChange(event.target.value)}
+              placeholder={t("search", { ns: "common" })}
+            />
+          </label>
 
-          <div className="grid gap-3 sm:grid-cols-3">
-            <MetricCard
-              icon={<config.icon size={18} />}
-              label={t("records", { ns: "common" })}
-              value={String(filteredRecords.length)}
-              hint={t(config.titleKey, { ns: "messages" })}
-              tone={config.tone}
-            />
-            <MetricCard
-              icon={<RefreshCw size={18} />}
-              label={t("latest", { ns: "common" })}
-              value={latestTime}
-              hint={latestSubject}
-              tone="neutral"
-            />
-            <MetricCard
-              icon={<Activity size={18} />}
-              label={t("summary", { ns: "common" })}
-              value={latestSubject}
-              hint={latest ? formatTime(locale, latest.time) : t("empty", { ns: "common" })}
-              tone="info"
-            />
-          </div>
-
-          <DataTable minWidth={config.tableWidth}>
-            <thead>
-              <tr>
-                <th>{t("time", { ns: "common" })}</th>
-                {config.columns.map((column) => (
-                  <th key={column.labelKey}>{t(column.labelKey, { ns: "messages" })}</th>
-                ))}
-                <th>{t("details", { ns: "common" })}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filteredRecords.map((record) => (
-                <tr key={`${record.type}-${record.time}-${record.raw}`} className="row-hover">
-                  <td>{formatTime(locale, record.time)}</td>
-                  {config.columns.map((column) => (
-                    <td key={column.labelKey} className={cx("align-top", column.labelKey.includes("frequency") || column.labelKey.includes("rssi") ? "tabular-nums" : "")}>
-                      {column.render(record, locale)}
-                    </td>
-                  ))}
-                  <td className="align-top">
-                    <details className="max-w-[420px]">
-                      <summary className="cursor-pointer [overflow-wrap:anywhere]">{normalizeSummary(record.raw, 140)}</summary>
-                      <pre className="mt-3 overflow-auto rounded-md border border-base-300 bg-base-200/80 p-3 text-xs leading-5 text-base-content/80">
-                        {JSON.stringify(record.data, null, 2)}
-                      </pre>
-                    </details>
-                  </td>
-                </tr>
-              ))}
-              {filteredRecords.length === 0 ? <EmptyRow colSpan={config.columns.length + 2} message={t("empty", { ns: "common" })} /> : null}
-            </tbody>
-          </DataTable>
+          <VirtualMessageTable config={config} records={filteredRecords} locale={locale} resetKey={`${page}:${query}`} t={t} />
         </PanelBody>
       </Panel>
     </section>
@@ -1074,23 +1137,21 @@ function App() {
     return close;
   }, [locale, syncSerialSelection, t]);
 
-  const messageCounts = useMemo(() => countByType(messages), [messages]);
   const sessionActive = Boolean(session?.active);
   const sessionStateLabel = session
     ? sessionBannerText(session, sessionActive ? t("active", { ns: "common" }) : t("idle", { ns: "common" }))
     : t("idle", { ns: "common" });
-  const sessionStateTone: Tone = session?.state === "connected"
-    ? "success"
-    : session?.state === "connecting" || session?.state === "reconnecting"
-      ? "warning"
-      : sessionActive
-        ? "success"
-        : "neutral";
   const currentReceivePort = session?.rxPortName || session?.portName || selectedReceivePort;
   const currentSendPort = session?.txPortName || selectedSendPort;
-  const currentPortPair = formatPortPair(currentReceivePort, currentSendPort);
   const appTitle = t("app.title", { ns: "common" });
-  const appSubtitle = t("app.subtitle", { ns: "common" });
+  const debugNavActive = debugPageItems.some((item) => item.id === page);
+  const isMessagePage = MESSAGE_PAGE_ORDER.includes(page as ParsedMessageType);
+  const showOverviewPanels = page === "settings";
+  const localeOptions = meta?.supportedLocales.length ? meta.supportedLocales : supportedLocales;
+
+  useEffect(() => {
+    document.title = appTitle;
+  }, [appTitle]);
 
   const handleToggleChannel = async (channel: GpioChannel) => {
     try {
@@ -1103,131 +1164,134 @@ function App() {
   };
 
   return (
-    <div className="min-h-screen bg-base-100 text-base-content">
-      <div className="grid min-h-screen grid-cols-1 xl:grid-cols-[280px_minmax(0,1fr)]">
-        <aside className="border-b border-base-300 bg-base-200/95 xl:border-b-0 xl:border-r">
-          <div className="flex h-full flex-col gap-5 p-4 sm:p-5">
+    <div className="h-dvh overflow-hidden bg-base-100 text-base-content">
+      <div className="grid h-full min-h-0 grid-cols-1 gap-0 overflow-hidden p-0 xl:grid-cols-[292px_minmax(0,1fr)] xl:gap-4 xl:p-4">
+        <aside className="min-h-0 overflow-hidden border-b border-base-300 bg-base-200/95 xl:rounded-[28px] xl:border xl:border-base-300/80 xl:bg-base-200/85 xl:shadow-2xl xl:shadow-black/20">
+          <div className="flex h-full min-h-0 flex-col gap-4 p-4">
             <div className="flex min-w-0 items-center gap-3">
-              <div className="grid h-11 w-11 shrink-0 place-items-center rounded-lg border border-primary/30 bg-primary/10 text-primary">
+              <div className="grid h-11 w-11 shrink-0 place-items-center rounded-3xl border border-primary/30 bg-primary/10 text-primary">
                 <Shield size={20} />
               </div>
-              <div className="min-w-0">
+              <div className="min-w-0 self-center">
                 <strong className="block truncate text-sm font-semibold">{appTitle}</strong>
-                <span className="mt-1 block truncate text-xs text-base-content/55">{appSubtitle}</span>
               </div>
             </div>
 
-            <nav className="flex gap-2 overflow-x-auto pb-1 xl:flex-col xl:overflow-visible" aria-label={appTitle}>
-              {pageItems.map((item) => {
-                const Icon = item.icon;
-                const active = page === item.id;
-                return (
-                  <a
-                    key={item.id}
-                    href={`#/${item.id}`}
-                    aria-current={active ? "page" : undefined}
-                    className={cx(
-                      "btn btn-sm min-w-max justify-start border-base-300 xl:w-full",
-                      active ? "btn-primary" : "btn-ghost text-base-content/70 hover:bg-base-300/70",
-                    )}
-                    onClick={() => navigate(item.id)}
-                  >
-                    <Icon size={17} />
-                    <span>{t(item.labelKey)}</span>
-                  </a>
-                );
-              })}
+            <nav className="flex min-h-0 gap-2 overflow-x-auto pb-1 xl:flex-col xl:overflow-y-auto xl:overflow-x-hidden" aria-label={appTitle}>
+              <details
+                className="group min-w-max rounded-3xl border border-base-300/80 bg-base-100/40 p-1 xl:min-w-0"
+                open={debugNavActive}
+              >
+                <summary
+                  className={cx(
+                    "flex h-10 cursor-pointer list-none items-center gap-2 rounded-3xl px-3 text-sm font-medium transition-colors",
+                    debugNavActive
+                      ? "bg-primary/10 text-primary shadow-[inset_0_0_0_1px_color-mix(in_oklab,var(--color-primary)_34%,transparent)]"
+                      : "text-base-content/72 hover:bg-base-300/70 hover:text-base-content",
+                  )}
+                >
+                  <Wrench size={17} />
+                  <span className="min-w-0 flex-1 truncate">{t("debugGroup", { ns: "nav" })}</span>
+                  <ChevronDown size={15} className="shrink-0 transition-transform group-open:rotate-180" />
+                </summary>
+
+                <div className="mt-1 flex gap-2 xl:flex-col xl:gap-1">
+                  {debugPageItems.map((item) => {
+                    const Icon = item.icon;
+                    const active = page === item.id;
+                    return (
+                      <a
+                        key={item.id}
+                        href={`#/${item.id}`}
+                        aria-current={active ? "page" : undefined}
+                        className={cx(
+                          "flex h-10 min-w-max items-center gap-2 rounded-3xl px-3 text-sm transition-colors xl:min-w-0",
+                          active
+                            ? "bg-primary/10 text-primary shadow-[inset_0_0_0_1px_color-mix(in_oklab,var(--color-primary)_34%,transparent)]"
+                            : "text-base-content/64 hover:bg-base-300/70 hover:text-base-content",
+                        )}
+                        onClick={() => navigate(item.id)}
+                      >
+                        <Icon size={16} />
+                        <span className="truncate">{t(item.labelKey, { ns: "nav" })}</span>
+                      </a>
+                    );
+                  })}
+                </div>
+              </details>
+
+              <a
+                href="#/settings"
+                aria-current={page === "settings" ? "page" : undefined}
+                className={cx(
+                  "flex h-11 min-w-max items-center gap-2 rounded-3xl border border-base-300/80 px-3 text-sm font-medium transition-colors xl:w-full",
+                  page === "settings"
+                    ? "bg-primary text-primary-content"
+                    : "bg-base-100/35 text-base-content/72 hover:bg-base-300/70 hover:text-base-content",
+                )}
+                onClick={() => navigate("settings")}
+              >
+                <Settings2 size={17} />
+                <span>{t("settings", { ns: "nav" })}</span>
+              </a>
             </nav>
 
             <div className="mt-auto grid gap-3">
-              <div className="rounded-lg border border-base-300 bg-base-100/65 p-3">
-                <div className="flex flex-wrap items-center gap-2">
-                  <Badge tone={sessionStateTone}>
-                    {sessionStateLabel}
-                  </Badge>
-                  <span className="min-w-0 text-xs text-base-content/60 [overflow-wrap:anywhere]">
-                    {currentPortPair || t("unknown", { ns: "common" })}
+              <div className="rounded-3xl border border-base-300 bg-base-100/65 p-3">
+                <label className="grid gap-2">
+                  <span className="flex items-center gap-2 text-xs font-medium text-base-content/60">
+                    <Languages size={15} />
+                    <span>{t("language", { ns: "settings" })}</span>
                   </span>
-                </div>
+                  <select
+                    className="select select-sm select-primary w-full bg-base-100"
+                    value={locale}
+                    onChange={(event) => setLocale(event.target.value)}
+                  >
+                    {localeOptions.map((option) => (
+                      <option key={option} value={option}>
+                        {detectLocaleName(option)}
+                      </option>
+                    ))}
+                  </select>
+                </label>
               </div>
-              <BannerAlert banner={banner} />
             </div>
           </div>
         </aside>
 
-        <div className="flex min-w-0 flex-col">
-          <header className="sticky top-0 z-20 border-b border-base-300 bg-base-100/90 backdrop-blur">
-            <div className="flex flex-col gap-4 px-4 py-4 sm:px-6 lg:flex-row lg:items-center lg:justify-between">
-              <div className="min-w-0">
-                <h1 className="truncate text-xl font-semibold leading-7">{appTitle}</h1>
-                <p className="mt-1 truncate text-sm text-base-content/60">{appSubtitle}</p>
-              </div>
-              <div className="flex flex-wrap items-center gap-2">
-                <div className="flex items-center gap-2 rounded-lg border border-base-300 bg-base-200/80 px-3 py-2 text-sm">
-                  <span
-                    className={cx(
-                      "status",
-                      sessionStateTone === "success"
-                        ? "status-success"
-                        : sessionStateTone === "warning"
-                          ? "status-warning"
-                          : "status-neutral",
-                    )}
-                  />
-                  <span className="text-base-content/70">{sessionStateLabel}</span>
-                </div>
-                <button className="btn btn-sm btn-outline btn-info" type="button" onClick={() => void bootstrap()}>
-                  <RefreshCw size={16} />
-                  <span>{t("refresh", { ns: "common" })}</span>
-                </button>
-              </div>
-            </div>
-          </header>
+        <div className="flex min-h-0 min-w-0 flex-col overflow-hidden">
+          <main
+            className={cx(
+              "flex min-h-0 min-w-0 flex-1 flex-col gap-4 overflow-x-hidden",
+              isMessagePage ? "overflow-hidden" : "overflow-y-auto",
+            )}
+          >
+            {showOverviewPanels ? (
+              <>
+                <Panel>
+                  <PanelBody>
+                    <SectionHeader
+                      title={t("serialTitle", { ns: "detection" })}
+                      description={t("sessionHint", { ns: "detection" })}
+                    />
 
-          <main className="flex min-w-0 flex-1 flex-col gap-5 px-4 py-5 sm:px-6">
-            <Panel>
-              <PanelBody>
-                <SectionHeader
-                  title={t("serialTitle", { ns: "detection" })}
-                  description={t("sessionHint", { ns: "detection" })}
-                  action={
-                    <button className="btn btn-sm btn-outline btn-info" type="button" onClick={() => navigate("settings")}>
-                      <Settings2 size={16} />
-                      <span>{t("title", { ns: "settings" })}</span>
-                    </button>
-                  }
-                />
+                    <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_auto]">
+                      <div className="grid gap-4 md:grid-cols-3">
+                        <InfoTile label={t("sessionTitle", { ns: "detection" })}>
+                          {sessionStateLabel}
+                        </InfoTile>
+                        <InfoTile label={t("receivePort", { ns: "detection" })} value={currentReceivePort || t("unknown", { ns: "common" })} />
+                        <InfoTile label={t("sendPort", { ns: "detection" })} value={currentSendPort || t("unknown", { ns: "common" })} />
+                      </div>
+                    </div>
+                    {banner.kind === "error" ? <BannerAlert banner={banner} /> : null}
+                  </PanelBody>
+                </Panel>
+              </>
+            ) : null}
 
-                <div className="grid gap-3 xl:grid-cols-[minmax(0,1fr)_auto]">
-                  <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-                    <InfoTile label={t("sessionTitle", { ns: "detection" })}>
-                      {sessionStateLabel}
-                    </InfoTile>
-                    <InfoTile label={t("receivePort", { ns: "detection" })} value={currentReceivePort || t("unknown", { ns: "common" })} />
-                    <InfoTile label={t("sendPort", { ns: "detection" })} value={currentSendPort || t("unknown", { ns: "common" })} />
-                    <InfoTile label={t("advanced", { ns: "detection" })} value={t("fixedSerialHint", { ns: "detection" })} />
-                  </div>
-                </div>
-              </PanelBody>
-            </Panel>
-
-            <section className="grid gap-3 sm:grid-cols-2 2xl:grid-cols-5">
-              {messageCounts.map(([type, count]) => {
-                const config = MESSAGE_PAGE_CONFIG[type];
-                return (
-                  <MetricCard
-                    key={type}
-                    icon={<config.icon size={18} />}
-                    label={t(config.navLabelKey)}
-                    value={String(count)}
-                    hint={t(config.titleKey, { ns: "messages" })}
-                    tone={config.tone}
-                  />
-                );
-              })}
-            </section>
-
-            {MESSAGE_PAGE_ORDER.includes(page as ParsedMessageType) ? (
+            {isMessagePage ? (
               <MessagePagePanel
                 page={page as ParsedMessageType}
                 records={messages.filter((item) => item.type === page)}
@@ -1239,7 +1303,7 @@ function App() {
             ) : null}
 
             {page === "interference" ? (
-              <section className="grid gap-5">
+              <section className="grid gap-4">
                 <Panel>
                   <PanelBody>
                     <SectionHeader
@@ -1257,7 +1321,7 @@ function App() {
             ) : null}
 
             {page === "settings" ? (
-              <section className="grid gap-5 lg:grid-cols-2">
+              <section className="grid gap-4">
                 <Panel>
                   <PanelBody>
                     <SectionHeader
@@ -1290,81 +1354,7 @@ function App() {
                       />
                     </div>
 
-                    <div className="alert alert-soft alert-info py-3 text-sm">
-                      <CircleCheck size={16} />
-                      <span>{t("serialHint", { ns: "settings" })}</span>
-                    </div>
-
-                    <div className="flex flex-wrap gap-2">
-                      {ports.length > 0 ? (
-                        ports.map((port) => (
-                          <Badge key={port.name} tone={port.active ? "success" : "neutral"} outline={!port.active}>
-                            {port.name}
-                          </Badge>
-                        ))
-                      ) : (
-                        <span className="text-sm text-base-content/55">{t("noPorts", { ns: "settings" })}</span>
-                      )}
-                    </div>
-                  </PanelBody>
-                </Panel>
-
-                <Panel>
-                  <PanelBody>
-                    <SectionHeader
-                      title={t("languageTitle", { ns: "settings" })}
-                      description={t("languageDescription", { ns: "settings" })}
-                    />
-                    <SelectField label={t("language", { ns: "settings" })} value={locale} onChange={setLocale}>
-                      {(meta?.supportedLocales.length ? meta.supportedLocales : supportedLocales).map((option) => (
-                        <option key={option} value={option}>
-                          {detectLocaleName(option)}
-                        </option>
-                      ))}
-                    </SelectField>
-
-                    <div className="grid gap-3">
-                      <InfoTile label={t("currentLocale", { ns: "settings" })} value={locale} />
-                      <InfoTile label={t("defaultLocale", { ns: "settings" })} value={meta?.defaultLocale || "zh-CN"} />
-                      <InfoTile label={t("apiHint", { ns: "settings" })} value="/api/v1" />
-                    </div>
-                  </PanelBody>
-                </Panel>
-
-                <Panel className="lg:col-span-2">
-                  <PanelBody>
-                    <SectionHeader
-                      title={t("backendLocales", { ns: "settings" })}
-                      description={t("namespaces", { ns: "settings" })}
-                    />
-                    <div className="grid gap-4 md:grid-cols-2">
-                      <div className="grid gap-2">
-                        <div className="flex items-center gap-2 text-sm font-semibold">
-                          <Languages size={16} />
-                          <span>{t("supportedLocales", { ns: "settings" })}</span>
-                        </div>
-                        <div className="flex flex-wrap gap-2">
-                          {(meta?.supportedLocales.length ? meta.supportedLocales : supportedLocales).map((item) => (
-                            <Badge key={item} tone={item === locale ? "success" : "neutral"} outline={item !== locale}>
-                              {detectLocaleName(item)}
-                            </Badge>
-                          ))}
-                        </div>
-                      </div>
-                      <div className="grid gap-2">
-                        <div className="flex items-center gap-2 text-sm font-semibold">
-                          <Unplug size={16} />
-                          <span>{t("namespaces", { ns: "settings" })}</span>
-                        </div>
-                        <div className="flex flex-wrap gap-2">
-                          {(meta?.namespaces.length ? meta.namespaces : ["common", "nav", "messages", "interference", "settings"]).map((item) => (
-                            <Badge key={item} tone="info" outline>
-                              {item}
-                            </Badge>
-                          ))}
-                        </div>
-                      </div>
-                    </div>
+                    {ports.length === 0 ? <span className="text-sm text-base-content/55">{t("noPorts", { ns: "settings" })}</span> : null}
                   </PanelBody>
                 </Panel>
               </section>

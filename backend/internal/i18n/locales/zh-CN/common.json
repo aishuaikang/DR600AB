@@ -1,5 +1,5 @@
 {
-  "app.title": "无人机侦测干扰系统",
+  "app.title": "无人机智能管控系统",
   "session.connecting": "侦测会话正在自动连接",
   "session.started": "侦测会话已启动",
   "session.reconnecting": "侦测会话已断开，正在自动重连",

@@ -1,5 +1,5 @@
 {
-  "app.title": "Drone Detection and Interference System",
+  "app.title": "UAV Control System",
   "session.connecting": "Detection session is connecting automatically",
   "session.started": "Detection session started",
   "session.reconnecting": "Connection was lost, reconnecting automatically",

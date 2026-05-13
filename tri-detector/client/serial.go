@@ -40,6 +40,7 @@ func NewDuplexSerialClient(readPort serial.Port, readPortName string, writePort 
 
 func newSerialClient(readPort serial.Port, readPortName string, writePort serial.Port, writePortName string, sharedPort bool, verbose bool) *SerialClient {
 	scanner := bufio.NewScanner(readPort)
+	scanner.Split(scanSerialRecords)
 	scanner.Buffer(make([]byte, 0, 4096), 1024*1024)
 
 	return &SerialClient{

@@ -4,6 +4,7 @@
   "didPlain": "DID Plain",
   "detect": "Detection",
   "heartbeat": "Heartbeat",
-  "interference": "Interference",
+  "interference": "GPIO Control",
+  "debugGroup": "Debug",
   "settings": "Settings"
 }

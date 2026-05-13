@@ -57,6 +57,7 @@ func TestIngestLineStoresDetectionAndFPVRecords(t *testing.T) {
 type fakeSerialPort struct {
 	closeCount int
 	closeCh    chan struct{}
+	writes     []string
 }
 
 func newFakeSerialPort() *fakeSerialPort {
@@ -71,6 +72,7 @@ func (p *fakeSerialPort) Read(b []byte) (int, error) {
 }
 
 func (p *fakeSerialPort) Write(b []byte) (int, error) {
+	p.writes = append(p.writes, string(b))
 	return len(b), nil
 }
 
@@ -150,6 +152,10 @@ func TestStartSessionSupportsSeparateReceiveAndSendPorts(t *testing.T) {
 	if len(opened) != 2 {
 		t.Fatalf("opened ports = %d, want 2", len(opened))
 	}
+	if got := opened["/dev/rx"].writes; len(got) != 0 {
+		t.Fatalf("rx writes = %v, want none", got)
+	}
+	assertPortWrites(t, opened["/dev/tx"], startDetectionCommand+"\n")
 
 	ports, err := svc.ListPorts()
 	if err != nil {
@@ -177,9 +183,11 @@ func TestStartSessionFallsBackToLegacyPortName(t *testing.T) {
 	svc := NewService(st, tr, settings.NewStore(filepath.Join(t.TempDir(), "settings.json")), Options{})
 
 	openCount := 0
+	var opened *fakeSerialPort
 	svc.SetSerialOpener(func(cfg *serialport.Config) (serial.Port, error) {
 		openCount++
-		return newFakeSerialPort(), nil
+		opened = newFakeSerialPort()
+		return opened, nil
 	})
 
 	resp, err := svc.Start(model.DetectionSessionRequest{
@@ -201,6 +209,67 @@ func TestStartSessionFallsBackToLegacyPortName(t *testing.T) {
 	}
 	if resp.TxPortName != "/dev/legacy" {
 		t.Fatalf("tx port = %q, want /dev/legacy", resp.TxPortName)
+	}
+	current := svc.Current("zh-CN")
+	if !current.Active {
+		t.Fatal("expected legacy session to be active")
+	}
+	assertPortWrites(t, opened, startDetectionCommand+"\n")
+
+	_ = svc.Stop("zh-CN")
+}
+
+func TestStartSessionSendsStartCommandAfterSwitchingTxPort(t *testing.T) {
+	tr, err := i18n.New("zh-CN")
+	if err != nil {
+		t.Fatalf("i18n.New() error = %v", err)
+	}
+	st := store.NewMemoryStore(10, 10, 10)
+	svc := NewService(st, tr, settings.NewStore(filepath.Join(t.TempDir(), "settings.json")), Options{})
+
+	opened := map[string][]*fakeSerialPort{}
+	svc.SetSerialOpener(func(cfg *serialport.Config) (serial.Port, error) {
+		port := newFakeSerialPort()
+		opened[cfg.PortName] = append(opened[cfg.PortName], port)
+		return port, nil
+	})
+
+	_, err = svc.Start(model.DetectionSessionRequest{
+		RxPortName: "/dev/rx",
+		TxPortName: "/dev/tx1",
+		BaudRate:   115200,
+		DataBits:   8,
+		StopBits:   1,
+		Parity:     "none",
+	}, "zh-CN")
+	if err != nil {
+		t.Fatalf("Start() first error = %v", err)
+	}
+
+	_, err = svc.Start(model.DetectionSessionRequest{
+		RxPortName: "/dev/rx",
+		TxPortName: "/dev/tx2",
+		BaudRate:   115200,
+		DataBits:   8,
+		StopBits:   1,
+		Parity:     "none",
+	}, "zh-CN")
+	if err != nil {
+		t.Fatalf("Start() second error = %v", err)
+	}
+
+	if got := len(opened["/dev/tx1"]); got != 1 {
+		t.Fatalf("tx1 open count = %d, want 1", got)
+	}
+	if got := len(opened["/dev/tx2"]); got != 1 {
+		t.Fatalf("tx2 open count = %d, want 1", got)
+	}
+	assertPortWrites(t, opened["/dev/tx1"][0], startDetectionCommand+"\n")
+	assertPortWrites(t, opened["/dev/tx2"][0], startDetectionCommand+"\n")
+
+	current := svc.Current("zh-CN")
+	if current.TxPortName != "/dev/tx2" {
+		t.Fatalf("current tx port = %q, want /dev/tx2", current.TxPortName)
 	}
 
 	_ = svc.Stop("zh-CN")
@@ -304,6 +373,7 @@ func TestReconnectsAfterPortClosesAutomatically(t *testing.T) {
 	}
 	firstPort := ports[0]
 	mu.Unlock()
+	assertPortWrites(t, firstPort, startDetectionCommand+"\n")
 	firstPort.Close()
 
 	waitForCondition(t, 2*time.Second, func() bool {
@@ -326,6 +396,10 @@ func TestReconnectsAfterPortClosesAutomatically(t *testing.T) {
 	if openCount < 2 {
 		t.Fatalf("reconnect opened %d ports, want at least 2", openCount)
 	}
+	mu.Lock()
+	reconnectedPort := ports[openCount-1]
+	mu.Unlock()
+	assertPortWrites(t, reconnectedPort, startDetectionCommand+"\n")
 
 	_ = svc.Stop("zh-CN")
 }
@@ -362,4 +436,19 @@ func waitForCondition(t *testing.T, timeout time.Duration, fn func() bool) {
 		time.Sleep(10 * time.Millisecond)
 	}
 	t.Fatal("condition was not met before timeout")
+}
+
+func assertPortWrites(t *testing.T, port *fakeSerialPort, want ...string) {
+	t.Helper()
+	if port == nil {
+		t.Fatal("port is nil")
+	}
+	if len(port.writes) != len(want) {
+		t.Fatalf("writes = %v, want %v", port.writes, want)
+	}
+	for i, got := range port.writes {
+		if got != want[i] {
+			t.Fatalf("write[%d] = %q, want %q", i, got, want[i])
+		}
+	}
 }

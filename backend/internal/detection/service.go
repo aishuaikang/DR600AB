@@ -30,6 +30,8 @@ type Options struct {
 
 type SerialOpener func(cfg *serialport.Config) (serial.Port, error)
 
+const startDetectionCommand = "start -freq 1"
+
 type SettingsStore interface {
 	Load() (model.DetectionSessionRequest, bool, error)
 	Save(model.DetectionSessionRequest) error
@@ -461,18 +463,25 @@ func (s *Service) connectOnce(cfg *serialport.Config, txPortName string) (*clien
 		return nil, err
 	}
 
+	var serialClient *client.SerialClient
 	if txPortName == "" || txPortName == cfg.PortName {
-		return client.NewSerialClient(readPort, cfg.PortName, false), nil
+		serialClient = client.NewSerialClient(readPort, cfg.PortName, false)
+	} else {
+		txCfg := *cfg
+		txCfg.PortName = txPortName
+		writePort, err := openPort(&txCfg)
+		if err != nil {
+			_ = readPort.Close()
+			return nil, err
+		}
+		serialClient = client.NewDuplexSerialClient(readPort, cfg.PortName, writePort, txPortName, false)
 	}
 
-	txCfg := *cfg
-	txCfg.PortName = txPortName
-	writePort, err := openPort(&txCfg)
-	if err != nil {
-		_ = readPort.Close()
-		return nil, err
+	if err := serialClient.Send(startDetectionCommand); err != nil {
+		serialClient.Close()
+		return nil, fmt.Errorf("发送启动命令失败: %w", err)
 	}
-	return client.NewDuplexSerialClient(readPort, cfg.PortName, writePort, txPortName, false), nil
+	return serialClient, nil
 }
 
 func (s *Service) assignConnectedClient(seq uint64, sess *session, c *client.SerialClient) bool {

@@ -1,6 +1,5 @@
 {
-  "app.title": "Drone Detection and Interference System",
-  "app.subtitle": "View live output by message type and control GPIO interference",
+  "app.title": "UAV Control System",
   "loading": "Loading",
   "refresh": "Refresh",
   "start": "Start",

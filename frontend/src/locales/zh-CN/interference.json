@@ -1,6 +1,6 @@
 {
-  "title": "干扰控制",
-  "description": "IO1 / IO2 / IO3 对应不同频段，IO4 为预留通道。",
+  "title": "GPIO 控制",
+  "description": "控制 IO1 / IO2 / IO3 的 GPIO 输出，IO4 为预留通道。",
   "channels": "通道",
   "pin": "GPIO",
   "bands": "频段映射",
