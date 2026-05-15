@@ -5,14 +5,14 @@ import type { Page } from "../app/types";
 
 export function useHashPage(): [Page, (page: Page) => void] {
   const [page, setPage] = useState<Page>(() =>
-    typeof window === "undefined" ? "did_encrypted" : normalizePage(window.location.hash),
+    typeof window === "undefined" ? "screen" : normalizePage(window.location.hash),
   );
 
   useEffect(() => {
     const onHashChange = () => setPage(normalizePage(window.location.hash));
     window.addEventListener("hashchange", onHashChange);
     if (!window.location.hash) {
-      window.location.hash = "#/did_encrypted";
+      window.location.hash = "#/screen";
     }
     return () => window.removeEventListener("hashchange", onHashChange);
   }, []);

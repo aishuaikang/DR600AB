@@ -6,6 +6,15 @@
   "session.stopped": "Detection session stopped",
   "session.inactive": "No active detection session",
   "session.disconnected": "Serial connection was lost",
+  "gps.session.connecting": "GPS session is connecting automatically",
+  "gps.session.started": "GPS session started",
+  "gps.session.reconnecting": "GPS connection was lost, reconnecting automatically",
+  "gps.session.stopped": "GPS session stopped",
+  "gps.session.inactive": "No active GPS session",
+  "gps.session.disconnected": "GPS serial connection was lost",
   "gpio.enabled": "Interference channel enabled",
-  "gpio.disabled": "Interference channel disabled"
+  "gpio.disabled": "Interference channel disabled",
+  "developer.login": "Developer login is active",
+  "network.updated": "Network interface configuration updated",
+  "wifi.connected": "Wi-Fi connection request submitted"
 }

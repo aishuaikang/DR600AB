@@ -1,10 +1,18 @@
 {
+  "screen": "Situation Screen",
   "didEncrypted": "DID Encrypted",
   "rid": "Remote ID",
   "didPlain": "DID Plain",
   "detect": "Detection",
   "heartbeat": "Heartbeat",
   "interference": "GPIO Control",
+  "networkSettings": "Network Settings",
   "debugGroup": "Debug",
-  "settings": "Settings"
+  "settings": "Settings",
+  "developerSettings": "Developer Settings",
+  "developerLogin": "Developer Login",
+  "developerLogout": "Exit Developer Login",
+  "developerActive": "Developer",
+  "developerCode": "6-digit TOTP code",
+  "developerCodeRequired": "Enter the developer code"
 }

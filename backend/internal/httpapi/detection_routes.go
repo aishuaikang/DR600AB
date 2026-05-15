@@ -16,15 +16,130 @@ func (s *Server) registerDetectionRoutes(api fiber.Router) {
 	api.Post("/detection/session", s.handleStartSession)
 	api.Put("/detection/settings", s.handleUpdateDetectionSettings)
 	api.Delete("/detection/session", s.handleStopSession)
+	api.Get("/gps/settings", s.handleGPSSettings)
+	api.Get("/gps/session", s.handleCurrentGPSSession)
+	api.Post("/gps/session", s.handleStartGPSSession)
+	api.Put("/gps/settings", s.handleUpdateGPSSettings)
+	api.Delete("/gps/session", s.handleStopGPSSession)
+	api.Get("/gps/records", s.handleGPSRecords)
 	api.Get("/detection/stream", s.handleStream)
 	api.Get("/detection/records", s.handleDetectionRecords)
 	api.Get("/parsed/records", s.handleParsedRecords)
 	api.Get("/fpv/records", s.handleFPVRecords)
 }
 
+// handleCurrentGPSSession 返回当前 GPS 会话响应。
+func (s *Server) handleCurrentGPSSession(c *fiber.Ctx) error {
+	locale := s.resolveLocale(c)
+	if err := s.requireDeveloper(c, locale); err != nil {
+		return err
+	}
+	return c.JSON(s.gps.Current(locale))
+}
+
+// handleStartGPSSession 使用与设置更新相同的请求体启动 GPS。
+func (s *Server) handleStartGPSSession(c *fiber.Ctx) error {
+	return s.handleUpdateGPSSettings(c)
+}
+
+// handleGPSSettings 在存在持久化设置时返回 GPS 设置。
+func (s *Server) handleGPSSettings(c *fiber.Ctx) error {
+	locale := s.resolveLocale(c)
+	if err := s.requireDeveloper(c, locale); err != nil {
+		return err
+	}
+	settings, ok, err := s.gps.Settings()
+	if err != nil {
+		return s.respondError(
+			c,
+			fiber.StatusInternalServerError,
+			"internal",
+			s.translator.T(locale, "errors", "internal"),
+			err.Error(),
+		)
+	}
+	if !ok {
+		return c.JSON(fiber.Map{})
+	}
+	return c.JSON(settings)
+}
+
+// handleUpdateGPSSettings 校验设置，并启动或更新 GPS 会话。
+func (s *Server) handleUpdateGPSSettings(c *fiber.Ctx) error {
+	locale := s.resolveLocale(c)
+	if err := s.requireDeveloper(c, locale); err != nil {
+		return err
+	}
+	var req model.GPSSessionRequest
+	if err := c.BodyParser(&req); err != nil {
+		return s.respondError(
+			c,
+			fiber.StatusBadRequest,
+			"invalid_request",
+			s.translator.T(locale, "errors", "invalid_request"),
+			err.Error(),
+		)
+	}
+	if strings.TrimSpace(req.DataPortName) == "" && strings.TrimSpace(req.PortName) == "" {
+		return s.respondError(
+			c,
+			fiber.StatusBadRequest,
+			"gps_data_port_required",
+			s.translator.T(locale, "errors", "gps_data_port_required"),
+			nil,
+		)
+	}
+	if strings.TrimSpace(req.ControlPortName) == "" {
+		return s.respondError(
+			c,
+			fiber.StatusBadRequest,
+			"gps_control_port_required",
+			s.translator.T(locale, "errors", "gps_control_port_required"),
+			nil,
+		)
+	}
+
+	response, err := s.gps.Start(req, locale)
+	if err != nil {
+		code := "gps_port_open_failed"
+		status := fiber.StatusBadRequest
+		if strings.HasPrefix(err.Error(), s.translator.T(locale, "errors", "internal")) {
+			code = "internal"
+			status = fiber.StatusInternalServerError
+		}
+		return s.respondError(c, status, code, err.Error(), nil)
+	}
+	return c.JSON(response)
+}
+
+// handleStopGPSSession 停止当前 GPS 会话。
+func (s *Server) handleStopGPSSession(c *fiber.Ctx) error {
+	locale := s.resolveLocale(c)
+	if err := s.requireDeveloper(c, locale); err != nil {
+		return err
+	}
+	return c.JSON(s.gps.Stop(locale))
+}
+
+// handleGPSRecords 返回最新 GPS NMEA 记录。
+func (s *Server) handleGPSRecords(c *fiber.Ctx) error {
+	locale := s.resolveLocale(c)
+	if err := s.requireDeveloper(c, locale); err != nil {
+		return err
+	}
+	items := s.gps.Records(parseLimit(c, 100))
+	return c.JSON(model.ListResponse[model.GPSRecord]{
+		Items: items,
+		Count: len(items),
+	})
+}
+
 // handlePorts 返回可用串口和当前会话状态。
 func (s *Server) handlePorts(c *fiber.Ctx) error {
 	locale := s.resolveLocale(c)
+	if err := s.requireDeveloper(c, locale); err != nil {
+		return err
+	}
 	ports, err := s.detection.ListPorts()
 	if err != nil {
 		return s.respondError(
@@ -35,6 +150,14 @@ func (s *Server) handlePorts(c *fiber.Ctx) error {
 			err.Error(),
 		)
 	}
+	gpsSession := s.gps.Current(locale)
+	if gpsSession.Active {
+		for index := range ports {
+			if ports[index].Name == gpsSession.DataPortName || ports[index].Name == gpsSession.ControlPortName {
+				ports[index].Active = true
+			}
+		}
+	}
 	return c.JSON(fiber.Map{
 		"ports":         ports,
 		"activeSession": s.detection.Current(locale),
@@ -43,7 +166,11 @@ func (s *Server) handlePorts(c *fiber.Ctx) error {
 
 // handleCurrentSession 返回当前侦测会话响应。
 func (s *Server) handleCurrentSession(c *fiber.Ctx) error {
-	return c.JSON(s.detection.Current(s.resolveLocale(c)))
+	locale := s.resolveLocale(c)
+	if err := s.requireDeveloper(c, locale); err != nil {
+		return err
+	}
+	return c.JSON(s.detection.Current(locale))
 }
 
 // handleStartSession 使用与设置更新相同的请求体启动侦测。
@@ -53,9 +180,12 @@ func (s *Server) handleStartSession(c *fiber.Ctx) error {
 
 // handleDetectionSettings 在存在持久化设置时返回侦测设置。
 func (s *Server) handleDetectionSettings(c *fiber.Ctx) error {
+	locale := s.resolveLocale(c)
+	if err := s.requireDeveloper(c, locale); err != nil {
+		return err
+	}
 	settings, ok, err := s.detection.Settings()
 	if err != nil {
-		locale := s.resolveLocale(c)
 		return s.respondError(
 			c,
 			fiber.StatusInternalServerError,
@@ -73,6 +203,9 @@ func (s *Server) handleDetectionSettings(c *fiber.Ctx) error {
 // handleUpdateDetectionSettings 校验设置，并启动或更新侦测会话。
 func (s *Server) handleUpdateDetectionSettings(c *fiber.Ctx) error {
 	locale := s.resolveLocale(c)
+	if err := s.requireDeveloper(c, locale); err != nil {
+		return err
+	}
 	var req model.DetectionSessionRequest
 	if err := c.BodyParser(&req); err != nil {
 		return s.respondError(
@@ -108,11 +241,19 @@ func (s *Server) handleUpdateDetectionSettings(c *fiber.Ctx) error {
 
 // handleStopSession 停止当前侦测会话。
 func (s *Server) handleStopSession(c *fiber.Ctx) error {
-	return c.JSON(s.detection.Stop(s.resolveLocale(c)))
+	locale := s.resolveLocale(c)
+	if err := s.requireDeveloper(c, locale); err != nil {
+		return err
+	}
+	return c.JSON(s.detection.Stop(locale))
 }
 
 // handleDetectionRecords 返回标准化侦测列表行。
 func (s *Server) handleDetectionRecords(c *fiber.Ctx) error {
+	locale := s.resolveLocale(c)
+	if err := s.requireDeveloper(c, locale); err != nil {
+		return err
+	}
 	items := s.detection.Records(parseLimit(c, 200))
 	return c.JSON(model.ListResponse[model.DetectionRecord]{
 		Items: items,
@@ -122,6 +263,10 @@ func (s *Server) handleDetectionRecords(c *fiber.Ctx) error {
 
 // handleParsedRecords 返回原始解析结果行。
 func (s *Server) handleParsedRecords(c *fiber.Ctx) error {
+	locale := s.resolveLocale(c)
+	if err := s.requireDeveloper(c, locale); err != nil {
+		return err
+	}
 	items := s.detection.Parsed(parseLimit(c, 200))
 	return c.JSON(model.ListResponse[model.ParsedMessage]{
 		Items: items,
@@ -131,6 +276,10 @@ func (s *Server) handleParsedRecords(c *fiber.Ctx) error {
 
 // handleFPVRecords 返回已归类到图传频段的侦测记录。
 func (s *Server) handleFPVRecords(c *fiber.Ctx) error {
+	locale := s.resolveLocale(c)
+	if err := s.requireDeveloper(c, locale); err != nil {
+		return err
+	}
 	items := s.detection.FPV(parseLimit(c, 100))
 	return c.JSON(model.ListResponse[model.FpvRecord]{
 		Items: items,

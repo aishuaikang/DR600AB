@@ -1,10 +1,18 @@
 {
+  "screen": "态势大屏",
   "didEncrypted": "DID 秘文",
   "rid": "Remote ID",
   "didPlain": "DID 明文",
   "detect": "侦测数据",
   "heartbeat": "心跳",
   "interference": "GPIO 控制",
+  "networkSettings": "网络设置",
   "debugGroup": "调试",
-  "settings": "设置"
+  "settings": "设置",
+  "developerSettings": "开发设置",
+  "developerLogin": "开发者登录",
+  "developerLogout": "退出开发者登录",
+  "developerActive": "开发者",
+  "developerCode": "6 位动态验证码",
+  "developerCodeRequired": "请输入开发者验证码"
 }

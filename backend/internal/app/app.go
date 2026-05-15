@@ -4,9 +4,12 @@ package app
 import (
 	"dr600ab-api/internal/config"
 	"dr600ab-api/internal/detection"
+	"dr600ab-api/internal/developer"
+	"dr600ab-api/internal/gps"
 	"dr600ab-api/internal/httpapi"
 	"dr600ab-api/internal/i18n"
 	"dr600ab-api/internal/interference"
+	"dr600ab-api/internal/network"
 	"dr600ab-api/internal/settings"
 	"dr600ab-api/internal/store"
 )
@@ -35,11 +38,26 @@ func New(cfg config.Config) (*App, error) {
 		ReconnectMaxDelay:     cfg.ReconnectMaxDelay,
 	})
 	interferenceSvc := interference.NewService(state, translator, interference.DefaultChannels(), nil)
+	developerSvc, err := developer.NewService(cfg.DeveloperTOTPSecret, cfg.DeveloperSessionTTL)
+	if err != nil {
+		return nil, err
+	}
+	gpsSvc := gps.NewService(state, translator, settingsStore, gps.Options{
+		DefaultBaudRate:       cfg.DefaultBaudRate,
+		DefaultDataBits:       cfg.DefaultDataBits,
+		DefaultStopBits:       cfg.DefaultStopBits,
+		DefaultParity:         cfg.DefaultParity,
+		DefaultReadTimeout:    cfg.DefaultReadTimeout,
+		ReconnectInitialDelay: cfg.ReconnectInitialDelay,
+		ReconnectMaxDelay:     cfg.ReconnectMaxDelay,
+	})
+	networkSvc := network.NewService(nil)
 
 	detectionSvc.RestoreSavedSettings(cfg.DefaultLocale)
+	gpsSvc.RestoreSavedSettings(cfg.DefaultLocale)
 
 	return &App{
-		server: httpapi.New(cfg, translator, detectionSvc, interferenceSvc),
+		server: httpapi.New(cfg, translator, detectionSvc, interferenceSvc, developerSvc, gpsSvc, networkSvc),
 	}, nil
 }
 

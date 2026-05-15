@@ -24,6 +24,8 @@ type Config struct {
 	MaxParsedMessages     int
 	MaxFPVRecords         int
 	EventBufferSize       int
+	DeveloperTOTPSecret   string
+	DeveloperSessionTTL   time.Duration
 	CORSAllowedOrigins    []string
 }
 
@@ -44,6 +46,8 @@ func Load() Config {
 		MaxParsedMessages:     envInt("API_MAX_PARSED_MESSAGES", 500),
 		MaxFPVRecords:         envInt("API_MAX_FPV_RECORDS", 300),
 		EventBufferSize:       envInt("API_EVENT_BUFFER_SIZE", 64),
+		DeveloperTOTPSecret:   envString("API_DEVELOPER_TOTP_SECRET", "VUPSQXCB6U5WPBKOKTQ6WICVWHAUX2S4"),
+		DeveloperSessionTTL:   time.Duration(envInt("API_DEVELOPER_SESSION_TTL_SECONDS", 600)) * time.Second,
 		CORSAllowedOrigins:    envList("API_CORS_ORIGINS", []string{"http://localhost:5173", "http://127.0.0.1:5173"}),
 	}
 }

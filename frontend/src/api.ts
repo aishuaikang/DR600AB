@@ -5,19 +5,34 @@ import type {
   DetectionSessionRequest,
   DetectionSessionResponse,
   DetectionSettings,
+  DeveloperLoginRequest,
+  DeveloperSessionResponse,
   EventMessage,
   FpvRecord,
   GpioChannel,
   GpioChannelStateRequest,
   GpioChannelStateResponse,
+  GPSSessionRequest,
+  GPSSessionResponse,
+  GPSSettings,
   ListResponse,
   LocaleMeta,
+  NetworkInterfacesResponse,
+  NetworkInterfaceUpdateRequest,
+  NetworkInterfaceUpdateResponse,
   ParsedMessage,
   PortsResponse,
   StreamHandlers,
+  WiFiConnectRequest,
+  WiFiConnectResponse,
+  WiFiNetworksResponse,
 } from "./types";
 
 const API_PREFIX = "/api/v1";
+
+function developerHeaders(developerToken: string) {
+  return developerToken ? { "X-Developer-Token": developerToken } : undefined;
+}
 
 export class ApiRequestError extends Error {
   status: number;
@@ -75,55 +90,174 @@ export function getLocales(): Promise<LocaleMeta> {
   return requestJson<LocaleMeta>("/meta/locales");
 }
 
-export function getPorts(locale: string): Promise<PortsResponse> {
-  return requestJson<PortsResponse>("/serial/ports", {}, locale);
+export function getPorts(locale: string, developerToken: string): Promise<PortsResponse> {
+  return requestJson<PortsResponse>("/serial/ports", {
+    headers: developerHeaders(developerToken),
+  }, locale);
 }
 
-export function getSession(locale: string): Promise<DetectionSessionResponse> {
-  return requestJson<DetectionSessionResponse>("/detection/session", {}, locale);
+export function getSession(locale: string, developerToken: string): Promise<DetectionSessionResponse> {
+  return requestJson<DetectionSessionResponse>("/detection/session", {
+    headers: developerHeaders(developerToken),
+  }, locale);
 }
 
-export function getDetectionSettings(locale: string): Promise<DetectionSettings> {
-  return requestJson<DetectionSettings>("/detection/settings", {}, locale);
+export function getDetectionSettings(locale: string, developerToken: string): Promise<DetectionSettings> {
+  return requestJson<DetectionSettings>("/detection/settings", {
+    headers: developerHeaders(developerToken),
+  }, locale);
 }
 
-export function updateDetectionSettings(payload: DetectionSessionRequest, locale: string): Promise<DetectionSessionResponse> {
+export function updateDetectionSettings(
+  payload: DetectionSessionRequest,
+  locale: string,
+  developerToken: string,
+): Promise<DetectionSessionResponse> {
   return requestJson<DetectionSessionResponse>("/detection/settings", {
     method: "PUT",
+    headers: developerHeaders(developerToken),
     body: JSON.stringify(payload),
   }, locale);
 }
 
-export function startSession(payload: DetectionSessionRequest, locale: string): Promise<DetectionSessionResponse> {
-  return updateDetectionSettings(payload, locale);
+export function startSession(
+  payload: DetectionSessionRequest,
+  locale: string,
+  developerToken: string,
+): Promise<DetectionSessionResponse> {
+  return updateDetectionSettings(payload, locale, developerToken);
 }
 
-export function stopSession(locale: string): Promise<DetectionSessionResponse> {
+export function stopSession(locale: string, developerToken: string): Promise<DetectionSessionResponse> {
   return requestJson<DetectionSessionResponse>("/detection/session", {
     method: "DELETE",
+    headers: developerHeaders(developerToken),
   }, locale);
 }
 
-export function getDetections(locale: string, limit = 200): Promise<ListResponse<DetectionRecord>> {
-  return requestJson<ListResponse<DetectionRecord>>(`/detection/records?limit=${limit}`, {}, locale);
+export function getGPSSession(locale: string, developerToken: string): Promise<GPSSessionResponse> {
+  return requestJson<GPSSessionResponse>("/gps/session", {
+    headers: developerHeaders(developerToken),
+  }, locale);
 }
 
-export function getParsed(locale: string, limit = 200): Promise<ListResponse<ParsedMessage>> {
-  return requestJson<ListResponse<ParsedMessage>>(`/parsed/records?limit=${limit}`, {}, locale);
+export function getGPSSettings(locale: string, developerToken: string): Promise<GPSSettings> {
+  return requestJson<GPSSettings>("/gps/settings", {
+    headers: developerHeaders(developerToken),
+  }, locale);
 }
 
-export function getFpv(locale: string, limit = 100): Promise<ListResponse<FpvRecord>> {
-  return requestJson<ListResponse<FpvRecord>>(`/fpv/records?limit=${limit}`, {}, locale);
+export function updateGPSSettings(
+  payload: GPSSessionRequest,
+  locale: string,
+  developerToken: string,
+): Promise<GPSSessionResponse> {
+  return requestJson<GPSSessionResponse>("/gps/settings", {
+    method: "PUT",
+    headers: developerHeaders(developerToken),
+    body: JSON.stringify(payload),
+  }, locale);
 }
 
-export function getChannels(locale: string): Promise<ChannelsResponse> {
-  return requestJson<ChannelsResponse>("/interference/channels", {}, locale);
+export function stopGPSSession(locale: string, developerToken: string): Promise<GPSSessionResponse> {
+  return requestJson<GPSSessionResponse>("/gps/session", {
+    method: "DELETE",
+    headers: developerHeaders(developerToken),
+  }, locale);
 }
 
-export function setChannelState(id: string, payload: GpioChannelStateRequest, locale: string): Promise<GpioChannelStateResponse> {
+export function getDetections(
+  locale: string,
+  developerToken: string,
+  limit = 200,
+): Promise<ListResponse<DetectionRecord>> {
+  return requestJson<ListResponse<DetectionRecord>>(`/detection/records?limit=${limit}`, {
+    headers: developerHeaders(developerToken),
+  }, locale);
+}
+
+export function getParsed(locale: string, developerToken: string, limit = 200): Promise<ListResponse<ParsedMessage>> {
+  return requestJson<ListResponse<ParsedMessage>>(`/parsed/records?limit=${limit}`, {
+    headers: developerHeaders(developerToken),
+  }, locale);
+}
+
+export function getFpv(locale: string, developerToken: string, limit = 100): Promise<ListResponse<FpvRecord>> {
+  return requestJson<ListResponse<FpvRecord>>(`/fpv/records?limit=${limit}`, {
+    headers: developerHeaders(developerToken),
+  }, locale);
+}
+
+export function getChannels(locale: string, developerToken: string): Promise<ChannelsResponse> {
+  return requestJson<ChannelsResponse>("/interference/channels", {
+    headers: developerHeaders(developerToken),
+  }, locale);
+}
+
+export function setChannelState(
+  id: string,
+  payload: GpioChannelStateRequest,
+  locale: string,
+  developerToken: string,
+): Promise<GpioChannelStateResponse> {
   return requestJson<GpioChannelStateResponse>(`/interference/channels/${encodeURIComponent(id)}/state`, {
     method: "POST",
+    headers: developerHeaders(developerToken),
     body: JSON.stringify(payload),
+  }, locale);
+}
+
+export function getNetworkInterfaces(locale: string, developerToken: string): Promise<NetworkInterfacesResponse> {
+  return requestJson<NetworkInterfacesResponse>("/network/interfaces", {
+    headers: developerHeaders(developerToken),
+  }, locale);
+}
+
+export function updateNetworkInterface(
+  name: string,
+  payload: NetworkInterfaceUpdateRequest,
+  locale: string,
+  developerToken: string,
+): Promise<NetworkInterfaceUpdateResponse> {
+  return requestJson<NetworkInterfaceUpdateResponse>(`/network/interfaces/${encodeURIComponent(name)}`, {
+    method: "PUT",
+    headers: developerHeaders(developerToken),
+    body: JSON.stringify(payload),
+  }, locale);
+}
+
+export function getWiFiNetworks(locale: string, developerToken: string): Promise<WiFiNetworksResponse> {
+  return requestJson<WiFiNetworksResponse>("/network/wifi", {
+    headers: developerHeaders(developerToken),
+  }, locale);
+}
+
+export function connectWiFi(
+  payload: WiFiConnectRequest,
+  locale: string,
+  developerToken: string,
+): Promise<WiFiConnectResponse> {
+  return requestJson<WiFiConnectResponse>("/network/wifi/connect", {
+    method: "POST",
+    headers: developerHeaders(developerToken),
+    body: JSON.stringify(payload),
+  }, locale);
+}
+
+export function createDeveloperSessionRequest(
+  payload: DeveloperLoginRequest,
+  locale: string,
+): Promise<DeveloperSessionResponse> {
+  return requestJson<DeveloperSessionResponse>("/developer/session", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  }, locale);
+}
+
+export function deleteDeveloperSessionRequest(token: string, locale: string): Promise<void> {
+  return requestJson<void>("/developer/session", {
+    method: "DELETE",
+    headers: developerHeaders(token),
   }, locale);
 }
 
@@ -135,8 +269,12 @@ function parseStreamEvent<T>(raw: string): EventMessage<T> | null {
   }
 }
 
-export function openDetectionStream(locale: string, handlers: StreamHandlers): () => void {
-  const source = new EventSource(`${API_PREFIX}/detection/stream?locale=${encodeURIComponent(locale)}`);
+export function openDetectionStream(locale: string, developerToken: string, handlers: StreamHandlers): () => void {
+  const params = new URLSearchParams({ locale });
+  if (developerToken) {
+    params.set("developerToken", developerToken);
+  }
+  const source = new EventSource(`${API_PREFIX}/detection/stream?${params.toString()}`);
 
   const bind = <T,>(type: string, handler?: (event: EventMessage<T>) => void) => {
     if (!handler) {
@@ -154,6 +292,11 @@ export function openDetectionStream(locale: string, handlers: StreamHandlers): (
   bind("session.stopped", handlers.onSessionStopped);
   bind("session.connecting", handlers.onSessionState);
   bind("session.reconnecting", handlers.onSessionState);
+  bind("gps.session.started", handlers.onGPSSessionStarted);
+  bind("gps.session.stopped", handlers.onGPSSessionStopped);
+  bind("gps.session.connecting", handlers.onGPSSessionState);
+  bind("gps.session.reconnecting", handlers.onGPSSessionState);
+  bind("gps.record", handlers.onGPSRecord);
   bind("detection.parsed", handlers.onParsed);
   bind("detection.record", handlers.onDetection);
   bind("fpv.record", handlers.onFpv);

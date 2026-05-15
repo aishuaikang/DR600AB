@@ -16,7 +16,7 @@ function SelectField({
   onChange: (value: string) => void;
 }) {
   return (
-    <label className="grid min-w-0 gap-2">
+    <label className="grid min-w-0 gap-1.5">
       <span className="text-xs font-medium text-base-content/60">{label}</span>
       <select
         className="select select-sm select-primary w-full bg-base-100"

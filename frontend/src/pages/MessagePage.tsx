@@ -35,7 +35,7 @@ export function MessagePage({
     <section className="flex min-h-0 min-w-0 flex-1">
       <Panel className="flex min-h-0 min-w-0 flex-1 flex-col">
         <PanelBody className="min-h-0 min-w-0 flex-1">
-          <label className="grid max-w-md gap-2">
+          <label className="grid max-w-sm gap-1.5">
             <span className="text-xs font-medium text-base-content/60">{t("search", { ns: "common" })}</span>
             <input
               className="input input-sm input-bordered w-full bg-base-100"

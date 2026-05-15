@@ -9,7 +9,7 @@ import { formatTime } from "../utils/format";
 import { DetailDialog } from "./DetailDialog";
 import { CellValue, LongTextCell } from "./LongTextCell";
 
-const VIRTUAL_TABLE_ROW_HEIGHT = 48;
+const VIRTUAL_TABLE_ROW_HEIGHT = 42;
 const VIRTUAL_TABLE_OVERSCAN = 8;
 const TIME_COLUMN_WIDTH = "w-[13rem]";
 const DETAIL_COLUMN_WIDTH = "w-[24rem]";
@@ -68,7 +68,7 @@ export function VirtualMessageTable({
     <>
       <div
         ref={containerRef}
-        className="min-h-0 min-w-0 flex-1 overflow-auto rounded-3xl border border-base-300 bg-base-100/70"
+        className="min-h-0 min-w-0 flex-1 overflow-auto rounded-2xl border border-base-300 bg-base-100/70"
         onScroll={handleScroll}
       >
         <table className={cx("table table-zebra table-sm w-full table-fixed whitespace-nowrap", config.tableWidth)}>

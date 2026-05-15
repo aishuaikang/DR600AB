@@ -2,6 +2,8 @@ import type { Banner } from "../app/types";
 import type {
   DetectionSessionResponse,
   DetectionSettings,
+  GPSSessionResponse,
+  GPSSettings,
   ParsedMessage,
   PortInfo,
 } from "../types";
@@ -32,6 +34,27 @@ export function resolveInitialPorts(
   return { receivePort, sendPort };
 }
 
+export function resolveInitialGPSPorts(
+  session: GPSSessionResponse | null,
+  settings: GPSSettings | null,
+  ports: PortInfo[],
+) {
+  const sessionDataPort = session?.dataPortName || session?.portName || "";
+  const sessionControlPort = session?.controlPortName || "";
+  const savedDataPort = settings?.dataPortName || settings?.portName || "";
+  const savedControlPort = settings?.controlPortName || "";
+  const firstPort = ports[0]?.name || "";
+
+  const dataPort = sessionDataPort || savedDataPort || firstPort;
+  const controlPort =
+    sessionControlPort
+    || savedControlPort
+    || ports.find((item) => item.name !== dataPort)?.name
+    || dataPort;
+
+  return { dataPort, controlPort };
+}
+
 export function sessionBannerText(session: DetectionSessionResponse, fallback: string) {
   const message = session.message || fallback;
   if (session.lastError && session.state && session.state !== "connected" && session.state !== "inactive") {
@@ -41,6 +64,24 @@ export function sessionBannerText(session: DetectionSessionResponse, fallback: s
 }
 
 export function sessionBannerKind(session: DetectionSessionResponse): Banner["kind"] {
+  if (session.state === "connected" || session.active) {
+    return "success";
+  }
+  if (session.state === "connecting" || session.state === "reconnecting") {
+    return "loading";
+  }
+  return "idle";
+}
+
+export function gpsSessionBannerText(session: GPSSessionResponse, fallback: string) {
+  const message = session.message || fallback;
+  if (session.lastError && session.state && session.state !== "connected" && session.state !== "inactive") {
+    return `${message}：${session.lastError}`;
+  }
+  return message;
+}
+
+export function gpsSessionBannerKind(session: GPSSessionResponse): Banner["kind"] {
   if (session.state === "connected" || session.active) {
     return "success";
   }

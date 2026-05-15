@@ -1,27 +1,35 @@
 const SETTINGS_KEY = "dr600ab.settings";
 
 export interface StoredSettings {
+  appTitle: string;
   receivePort: string;
   sendPort: string;
 }
 
+const EMPTY_SETTINGS: StoredSettings = {
+  appTitle: "",
+  receivePort: "",
+  sendPort: "",
+};
+
 function readStorage(): StoredSettings {
   if (typeof window === "undefined") {
-    return { receivePort: "", sendPort: "" };
+    return EMPTY_SETTINGS;
   }
 
   try {
     const raw = window.localStorage.getItem(SETTINGS_KEY);
     if (!raw) {
-      return { receivePort: "", sendPort: "" };
+      return EMPTY_SETTINGS;
     }
     const parsed = JSON.parse(raw) as Partial<StoredSettings>;
     return {
+      appTitle: typeof parsed.appTitle === "string" ? parsed.appTitle : "",
       receivePort: typeof parsed.receivePort === "string" ? parsed.receivePort : "",
       sendPort: typeof parsed.sendPort === "string" ? parsed.sendPort : "",
     };
   } catch {
-    return { receivePort: "", sendPort: "" };
+    return EMPTY_SETTINGS;
   }
 }
 

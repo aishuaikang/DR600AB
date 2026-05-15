@@ -23,11 +23,11 @@ function ChannelCard({
   const bands = Array.isArray(channel.bands) ? channel.bands : [];
 
   return (
-    <article className="flex min-w-0 flex-col gap-4 rounded-3xl border border-base-300 bg-base-100/70 p-4">
+    <article className="flex min-w-0 flex-col gap-3 rounded-2xl border border-base-300 bg-base-100/70 p-3">
       <div className="flex min-w-0 items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
-            <h3 className="text-base font-semibold leading-6 text-base-content">{channel.label}</h3>
+            <h3 className="text-sm font-semibold leading-5 text-base-content">{channel.label}</h3>
             {channel.reserved ? <Badge tone="warning">{t("reserved", { ns: "common" })}</Badge> : null}
           </div>
           <p className="mt-1 text-xs text-base-content/55">
@@ -54,7 +54,7 @@ function ChannelCard({
         <InfoTile label={t("actual", { ns: "interference" })} value={channel.actualLevel} />
       </div>
 
-      {channel.lastError ? <p className="rounded-3xl bg-error/10 px-3 py-2 text-sm text-error">{channel.lastError}</p> : null}
+      {channel.lastError ? <p className="rounded-2xl bg-error/10 px-3 py-2 text-sm text-error">{channel.lastError}</p> : null}
 
       <div className="mt-auto grid gap-2">
         <button
@@ -84,14 +84,14 @@ export function InterferencePage({
   onToggleChannel: (channel: GpioChannel) => void;
 }) {
   return (
-    <section className="grid gap-4">
+    <section className="grid gap-3">
       <Panel>
         <PanelBody>
           <SectionHeader
             title={t("title", { ns: "interference" })}
             description={t("description", { ns: "interference" })}
           />
-          <div className="grid gap-4 lg:grid-cols-2 2xl:grid-cols-4">
+          <div className="grid gap-3 lg:grid-cols-2 2xl:grid-cols-4">
             {channels.map((channel) => (
               <ChannelCard key={channel.id} channel={channel} t={t} onToggle={onToggleChannel} />
             ))}

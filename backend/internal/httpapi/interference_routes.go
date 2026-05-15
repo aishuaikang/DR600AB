@@ -14,6 +14,10 @@ func (s *Server) registerInterferenceRoutes(api fiber.Router) {
 
 // handleInterferenceChannels 返回全部已配置 GPIO 通道。
 func (s *Server) handleInterferenceChannels(c *fiber.Ctx) error {
+	locale := s.resolveLocale(c)
+	if err := s.requireDeveloper(c, locale); err != nil {
+		return err
+	}
 	channels := s.interference.ListChannels()
 	return c.JSON(fiber.Map{
 		"channels": channels,
@@ -24,6 +28,9 @@ func (s *Server) handleInterferenceChannels(c *fiber.Ctx) error {
 // handleSetChannelState 启用或禁用一个 GPIO 输出通道。
 func (s *Server) handleSetChannelState(c *fiber.Ctx) error {
 	locale := s.resolveLocale(c)
+	if err := s.requireDeveloper(c, locale); err != nil {
+		return err
+	}
 	var req model.GpioChannelStateRequest
 	if err := c.BodyParser(&req); err != nil {
 		return s.respondError(

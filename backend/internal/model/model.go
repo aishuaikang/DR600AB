@@ -51,6 +51,63 @@ type DetectionSessionResponse struct {
 	Message       string    `json:"message"`
 }
 
+// GPSSessionRequest 配置 GPS NMEA 0183 串口会话。
+type GPSSessionRequest struct {
+	PortName        string `json:"portName,omitempty"`
+	DataPortName    string `json:"dataPortName,omitempty"`
+	ControlPortName string `json:"controlPortName,omitempty"`
+	BaudRate        int    `json:"baudRate"`
+	DataBits        int    `json:"dataBits"`
+	StopBits        int    `json:"stopBits"`
+	Parity          string `json:"parity"`
+	ReadTimeoutMs   int    `json:"readTimeoutMs,omitempty"`
+	AutoConnect     bool   `json:"autoConnect,omitempty"`
+}
+
+// GPSFix 描述从 NMEA 0183 中解析出的定位结果。
+type GPSFix struct {
+	Latitude     float64 `json:"latitude"`
+	Longitude    float64 `json:"longitude"`
+	AltitudeM    float64 `json:"altitudeM,omitempty"`
+	SpeedKnots   float64 `json:"speedKnots,omitempty"`
+	CourseDegree float64 `json:"courseDegree,omitempty"`
+	FixQuality   int     `json:"fixQuality,omitempty"`
+	Satellites   int     `json:"satellites,omitempty"`
+	Valid        bool    `json:"valid"`
+}
+
+// GPSRecord 保存一条 GPS NMEA 0183 原始数据及其解析结果。
+type GPSRecord struct {
+	SessionID  string    `json:"sessionId"`
+	PortName   string    `json:"portName"`
+	ReceivedAt time.Time `json:"receivedAt"`
+	Type       string    `json:"type"`
+	Raw        string    `json:"raw"`
+	Fix        *GPSFix   `json:"fix,omitempty"`
+}
+
+// GPSSessionResponse 返回当前 GPS 会话状态。
+type GPSSessionResponse struct {
+	Active          bool       `json:"active"`
+	SessionID       string     `json:"sessionId,omitempty"`
+	PortName        string     `json:"portName,omitempty"`
+	DataPortName    string     `json:"dataPortName,omitempty"`
+	ControlPortName string     `json:"controlPortName,omitempty"`
+	BaudRate        int        `json:"baudRate,omitempty"`
+	DataBits        int        `json:"dataBits,omitempty"`
+	StopBits        int        `json:"stopBits,omitempty"`
+	Parity          string     `json:"parity,omitempty"`
+	StartedAt       time.Time  `json:"startedAt,omitempty"`
+	State           string     `json:"state,omitempty"`
+	AutoReconnect   bool       `json:"autoReconnect,omitempty"`
+	LastError       string     `json:"lastError,omitempty"`
+	RetryCount      int        `json:"retryCount,omitempty"`
+	LastNMEA        string     `json:"lastNmea,omitempty"`
+	LastFix         *GPSFix    `json:"lastFix,omitempty"`
+	LastRecord      *GPSRecord `json:"lastRecord,omitempty"`
+	Message         string     `json:"message"`
+}
+
 // ParsedMessage 保存单行串口数据的解析结果。
 type ParsedMessage struct {
 	Type string          `json:"type"`
@@ -114,6 +171,101 @@ type GpioChannelStateRequest struct {
 type GpioChannelStateResponse struct {
 	Channel GpioChannel `json:"channel"`
 	Message string      `json:"message"`
+}
+
+// DeveloperLoginRequest 使用动态码换取短时开发者会话。
+type DeveloperLoginRequest struct {
+	Code string `json:"code"`
+}
+
+// DeveloperSessionResponse 返回开发者短时会话。
+type DeveloperSessionResponse struct {
+	Token     string `json:"token"`
+	ExpiresAt int64  `json:"expiresAt"`
+	Message   string `json:"message"`
+}
+
+// NetworkAddress 描述一个接口地址和前缀长度。
+type NetworkAddress struct {
+	Address string `json:"address"`
+	Prefix  int    `json:"prefix"`
+}
+
+// NetworkInterface 描述一个系统网络接口的可配置状态。
+type NetworkInterface struct {
+	Name            string           `json:"name"`
+	Type            string           `json:"type"`
+	State           string           `json:"state"`
+	ConnectionName  string           `json:"connectionName,omitempty"`
+	HardwareAddress string           `json:"hardwareAddress,omitempty"`
+	MTU             int              `json:"mtu,omitempty"`
+	IPv4            []NetworkAddress `json:"ipv4"`
+	IPv6            []NetworkAddress `json:"ipv6"`
+	Gateway4        string           `json:"gateway4,omitempty"`
+	Gateway6        string           `json:"gateway6,omitempty"`
+	DNS4            []string         `json:"dns4"`
+	DNS6            []string         `json:"dns6"`
+	IPv4Method      string           `json:"ipv4Method"`
+	Managed         bool             `json:"managed"`
+}
+
+// NetworkInterfacesResponse 返回全部网口配置状态。
+type NetworkInterfacesResponse struct {
+	Interfaces []NetworkInterface `json:"interfaces"`
+	Count      int                `json:"count"`
+	Backend    string             `json:"backend"`
+	Available  bool               `json:"available"`
+	ReadOnly   bool               `json:"readOnly"`
+	Message    string             `json:"message,omitempty"`
+}
+
+// NetworkInterfaceUpdateRequest 更新单个网口 IPv4 配置。
+type NetworkInterfaceUpdateRequest struct {
+	Mode        string   `json:"mode"`
+	IPv4Address string   `json:"ipv4Address,omitempty"`
+	Prefix      int      `json:"prefix,omitempty"`
+	Gateway4    string   `json:"gateway4,omitempty"`
+	DNS4        []string `json:"dns4,omitempty"`
+}
+
+// NetworkInterfaceUpdateResponse 返回更新后的网口状态和提示。
+type NetworkInterfaceUpdateResponse struct {
+	Interface NetworkInterface `json:"interface"`
+	Message   string           `json:"message"`
+}
+
+// WiFiNetwork 描述扫描到的无线网络。
+type WiFiNetwork struct {
+	SSID     string `json:"ssid"`
+	BSSID    string `json:"bssid,omitempty"`
+	Device   string `json:"device,omitempty"`
+	Mode     string `json:"mode,omitempty"`
+	Channel  string `json:"channel,omitempty"`
+	Rate     string `json:"rate,omitempty"`
+	Signal   int    `json:"signal"`
+	Security string `json:"security,omitempty"`
+	Active   bool   `json:"active"`
+}
+
+// WiFiNetworksResponse 返回无线网络扫描结果。
+type WiFiNetworksResponse struct {
+	Networks  []WiFiNetwork `json:"networks"`
+	Count     int           `json:"count"`
+	Available bool          `json:"available"`
+	ReadOnly  bool          `json:"readOnly"`
+	Message   string        `json:"message,omitempty"`
+}
+
+// WiFiConnectRequest 连接指定无线网络。
+type WiFiConnectRequest struct {
+	SSID     string `json:"ssid"`
+	Password string `json:"password,omitempty"`
+	Device   string `json:"device,omitempty"`
+}
+
+// WiFiConnectResponse 返回无线连接操作结果。
+type WiFiConnectResponse struct {
+	Message string `json:"message"`
 }
 
 // Event 是发送给服务端事件订阅者的运行时事件。

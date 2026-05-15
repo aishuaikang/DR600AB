@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 43 39" fill="none" aria-hidden="true">
+  <path
+    d="M3 16.5L21.5 2.5L40 16.5M8 15.5V36.5H35V15.5M17 36.5V25.5H26V36.5"
+    stroke="currentColor"
+    stroke-width="4"
+    stroke-linecap="square"
+    stroke-linejoin="miter"
+  />
+</svg>

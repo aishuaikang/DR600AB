@@ -16,7 +16,7 @@ func (s *Server) routes() {
 	s.app.Use(logger.New())
 	s.app.Use(cors.New(cors.Config{
 		AllowOrigins: strings.Join(s.cfg.CORSAllowedOrigins, ","),
-		AllowHeaders: "Origin, Content-Type, Accept, X-Locale",
+		AllowHeaders: "Origin, Content-Type, Accept, X-Locale, X-Developer-Token",
 		AllowMethods: "GET,POST,PUT,DELETE,OPTIONS",
 	}))
 
@@ -24,8 +24,10 @@ func (s *Server) routes() {
 
 	api := s.app.Group("/api/v1")
 	s.registerMetaRoutes(api)
+	s.registerDeveloperRoutes(api)
 	s.registerDetectionRoutes(api)
 	s.registerInterferenceRoutes(api)
+	s.registerNetworkRoutes(api)
 }
 
 // handleHealth 返回进程存活状态，供本地检查使用。

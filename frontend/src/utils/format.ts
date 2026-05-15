@@ -1,3 +1,5 @@
+import { compactLocaleName } from "./locales";
+
 export function formatTime(locale: string, value?: string) {
   if (!value) {
     return "-";
@@ -18,9 +20,5 @@ export function formatNumber(locale: string, value?: number, digits = 1) {
 }
 
 export function detectLocaleName(locale: string) {
-  const labels: Record<string, string> = {
-    "zh-CN": "中文 / zh-CN",
-    "en-US": "English / en-US",
-  };
-  return labels[locale] ?? locale;
+  return compactLocaleName(locale);
 }

@@ -8,3 +8,10 @@ document.documentElement.setAttribute("data-theme", "dr600ab");
 
 const root = createRoot(document.getElementById("root") as HTMLElement);
 root.render(<App />);
+
+window.setTimeout(() => {
+  document.documentElement.classList.add("app-hydrated");
+  window.setTimeout(() => {
+    document.querySelector(".app-boot-loader")?.remove();
+  }, 420);
+}, 80);

@@ -18,6 +18,7 @@ type MemoryStore struct {
 	detections []model.DetectionRecord
 	parsed     []model.ParsedMessage
 	fpv        []model.FpvRecord
+	gps        []model.GPSRecord
 
 	subscribers map[chan model.Event]struct{}
 }
@@ -59,6 +60,15 @@ func (s *MemoryStore) AddFPV(record model.FpvRecord) {
 	s.Publish(model.Event{Type: "fpv.record", Time: record.ReceivedAt, Payload: record})
 }
 
+// AddGPS 追加 GPS 记录，并发布 GPS 事件。
+func (s *MemoryStore) AddGPS(record model.GPSRecord) {
+	s.mu.Lock()
+	s.gps = appendBounded(s.gps, record, s.maxParsed)
+	s.mu.Unlock()
+
+	s.Publish(model.Event{Type: "gps.record", Time: record.ReceivedAt, Payload: record})
+}
+
 // ListParsed 按时间倒序返回最新解析消息。
 func (s *MemoryStore) ListParsed(limit int) []model.ParsedMessage {
 	s.mu.RLock()
@@ -78,6 +88,13 @@ func (s *MemoryStore) ListFPV(limit int) []model.FpvRecord {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return latest(s.fpv, limit)
+}
+
+// ListGPS 按时间倒序返回最新 GPS 记录。
+func (s *MemoryStore) ListGPS(limit int) []model.GPSRecord {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return latest(s.gps, limit)
 }
 
 // Subscribe 注册事件通道，并返回取消订阅函数。
