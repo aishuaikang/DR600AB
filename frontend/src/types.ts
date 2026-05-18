@@ -206,6 +206,7 @@ export interface NetworkInterface {
   dns4: string[];
   dns6: string[];
   ipv4Method: string;
+  routeMetric?: number;
   managed: boolean;
 }
 
@@ -224,10 +225,29 @@ export interface NetworkInterfaceUpdateRequest {
   prefix?: number;
   gateway4?: string;
   dns4?: string[];
+  routeMetric?: number;
 }
 
 export interface NetworkInterfaceUpdateResponse {
   interface: NetworkInterface;
+  message: string;
+}
+
+export interface NetworkPriorityRequest {
+  routeMetric: number;
+}
+
+export interface NetworkPriorityBatchItem {
+  interfaceName: string;
+  routeMetric: number;
+}
+
+export interface NetworkPriorityBatchRequest {
+  priorities: NetworkPriorityBatchItem[];
+}
+
+export interface NetworkPriorityBatchResponse {
+  interfaces: NetworkInterface[];
   message: string;
 }
 

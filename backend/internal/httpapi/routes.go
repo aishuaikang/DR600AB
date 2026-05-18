@@ -28,6 +28,8 @@ func (s *Server) routes() {
 	s.registerDetectionRoutes(api)
 	s.registerInterferenceRoutes(api)
 	s.registerNetworkRoutes(api)
+
+	s.registerFrontendRoutes()
 }
 
 // handleHealth 返回进程存活状态，供本地检查使用。

@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"gpio-controller/board"
 	"gpio-controller/gpio"
 	"gpio-controller/ui"
 	"log"
@@ -11,10 +12,15 @@ import (
 	"syscall"
 )
 
-// I01 96 （433 800 900 1.4）
-// I02 107 （1.2 1.5）
-// IO3 106 （2.4 5.2 5.8）
-// IO4 62
+// GPIO编号（一共8个脚，只使用前三个，后面为预留）
+// IOC4 20 （433 800 900 1.4）
+// IOC2 18 （1.2 1.5）
+// IOC3 19 （2.4 5.2 5.8）
+// IOC5 21
+// I3B4 108
+// I3B5 109
+// I3C0 112
+// I3C1 113
 
 func main() {
 	fmt.Println("╔════════════════════════════════════════╗")
@@ -22,6 +28,11 @@ func main() {
 	fmt.Println("║         输出模式 / 电平控制工具       ║")
 	fmt.Println("╚════════════════════════════════════════╝")
 	fmt.Println("输入 GPIO 编号后进入控制菜单。")
+	fmt.Println()
+	fmt.Println("板卡 GPIO 映射:")
+	for _, def := range board.DefaultPins() {
+		fmt.Printf("  %s\n", board.FormatPinUsage(def))
+	}
 	fmt.Println()
 
 	// 1. 选择并初始化引脚（支持重试）

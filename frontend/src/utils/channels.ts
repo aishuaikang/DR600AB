@@ -21,9 +21,6 @@ export function toneForStatus(kind: string): Tone {
 }
 
 export function channelStatusLabel(channel: GpioChannel, t: TFunction) {
-  if (channel.reserved) {
-    return t("reserved", { ns: "common" });
-  }
   if (channel.status === "active" || channel.status === "enabled") {
     return t("statusActive", { ns: "interference" });
   }

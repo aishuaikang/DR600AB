@@ -46,10 +46,6 @@ func (s *Server) handleSetChannelState(c *fiber.Ctx) error {
 	if err != nil {
 		status := fiber.StatusInternalServerError
 		code := "gpio_update_failed"
-		if channel.Reserved {
-			status = fiber.StatusConflict
-			code = "channel_reserved"
-		}
 		if channel.ID == "" {
 			status = fiber.StatusNotFound
 			code = "channel_not_found"

@@ -45,6 +45,7 @@
         border: 2px solid rgba(38, 201, 255, 0.18);
         border-top-color: #26c9ff;
         border-radius: 999px;
+        animation: app-boot-spin 0.9s linear infinite;
       }
 
       .app-boot-loader__frame strong {
@@ -57,6 +58,12 @@
         color: rgba(184, 235, 248, 0.76);
         font-size: 13px;
         font-weight: 700;
+      }
+
+      @keyframes app-boot-spin {
+        to {
+          transform: rotate(360deg);
+        }
       }
 
     </style>

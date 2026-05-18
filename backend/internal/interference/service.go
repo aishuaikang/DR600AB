@@ -4,12 +4,14 @@ package interference
 import (
 	"fmt"
 	"sort"
+	"strconv"
 	"sync"
 	"time"
 
 	"dr600ab-api/internal/i18n"
 	"dr600ab-api/internal/model"
 	"dr600ab-api/internal/store"
+	"gpio-controller/board"
 	"gpio-controller/gpio"
 )
 
@@ -18,6 +20,7 @@ type GPIOPin interface {
 	Setup() error
 	SetHigh() error
 	SetLow() error
+	GetValue() (int, error)
 	Cleanup()
 }
 
@@ -90,12 +93,20 @@ func NewService(store *store.MemoryStore, translator *i18n.Translator, definitio
 
 // DefaultChannels 返回设备使用的 GPIO 通道映射。
 func DefaultChannels() []ChannelDefinition {
-	return []ChannelDefinition{
-		{ID: "io1", Label: "IO1", Pin: 96, Bands: []string{"433", "800", "900", "1.4"}},
-		{ID: "io2", Label: "IO2", Pin: 107, Bands: []string{"1.2", "1.5"}},
-		{ID: "io3", Label: "IO3", Pin: 106, Bands: []string{"2.4", "5.2", "5.8"}},
-		{ID: "io4", Label: "IO4", Pin: 62, Bands: []string{}, Reserved: true},
+	pins := board.DefaultPins()
+	definitions := make([]ChannelDefinition, 0, len(pins))
+	for _, pin := range pins {
+		bands := make([]string, len(pin.Bands))
+		copy(bands, pin.Bands)
+		definitions = append(definitions, ChannelDefinition{
+			ID:       pin.ID,
+			Label:    pin.Label,
+			Pin:      pin.Number,
+			Bands:    bands,
+			Reserved: pin.Reserved,
+		})
 	}
+	return definitions
 }
 
 // ListChannels 按稳定展示顺序返回通道状态。
@@ -105,7 +116,7 @@ func (s *Service) ListChannels() []model.GpioChannel {
 
 	result := make([]model.GpioChannel, 0, len(s.order))
 	for _, id := range s.order {
-		result = append(result, s.channels[id].dto())
+		result = append(result, s.dtoWithActual(s.channels[id]))
 	}
 	return result
 }
@@ -118,9 +129,6 @@ func (s *Service) SetState(id string, enabled bool, locale string) (model.GpioCh
 	state, ok := s.channels[id]
 	if !ok {
 		return model.GpioChannel{}, fmt.Errorf("%s", s.translator.T(locale, "errors", "channel_not_found"))
-	}
-	if state.def.Reserved {
-		return state.dto(), fmt.Errorf("%s", s.translator.T(locale, "errors", "channel_reserved"))
 	}
 
 	if state.pin == nil {
@@ -147,6 +155,9 @@ func (s *Service) SetState(id string, enabled bool, locale string) (model.GpioCh
 			if err := state.pin.SetLow(); err != nil {
 				return s.markError(state, locale, err)
 			}
+			state.pin.Cleanup()
+			state.pin = nil
+			state.initialized = false
 		}
 		state.enabled = false
 		state.actualLevel = "low"
@@ -155,7 +166,7 @@ func (s *Service) SetState(id string, enabled bool, locale string) (model.GpioCh
 		state.lastError = ""
 	}
 
-	channel := state.dto()
+	channel := s.dtoWithActual(state)
 	s.store.Publish(model.Event{Type: "gpio.channel.updated", Time: time.Now(), Payload: channel})
 	return channel, nil
 }
@@ -208,10 +219,40 @@ func (s *channelState) dto() model.GpioChannel {
 	}
 }
 
+func (s *Service) dtoWithActual(state *channelState) model.GpioChannel {
+	channel := state.dto()
+
+	pin := state.pin
+	if pin == nil {
+		pin = s.pinFactory(state.def.Pin)
+	}
+	value, err := pin.GetValue()
+	if err != nil {
+		return channel
+	}
+
+	switch value {
+	case 0:
+		channel.Enabled = false
+		channel.ActualLevel = "low"
+		channel.Status = "idle"
+	case 1:
+		channel.Enabled = true
+		channel.ActualLevel = "high"
+		channel.Status = "active"
+	default:
+		channel.Enabled = value != 0
+		channel.ActualLevel = strconv.Itoa(value)
+		if channel.Enabled {
+			channel.Status = "active"
+		} else {
+			channel.Status = "idle"
+		}
+	}
+	return channel
+}
+
 // initialStatus 返回通道定义对应的启动状态。
 func initialStatus(def ChannelDefinition) string {
-	if def.Reserved {
-		return "reserved"
-	}
 	return "idle"
 }

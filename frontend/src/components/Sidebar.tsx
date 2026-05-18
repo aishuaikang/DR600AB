@@ -7,6 +7,7 @@ import {
   Globe2,
   KeyRound,
   LogOut,
+  Menu,
   Monitor,
   Settings2,
   ShieldCheck,
@@ -16,6 +17,7 @@ import {
 
 import { debugPageItems } from "../app/navigation";
 import type { Page } from "../app/types";
+import { LoadingSpinner } from "../components/LoadingState";
 import { cx } from "../utils/classnames";
 import { compactLocaleName, fullLocaleName } from "../utils/locales";
 
@@ -37,9 +39,12 @@ export function Sidebar({
   localeOptions,
   developerActive,
   developerExpiresAt,
+  mobileOpen,
   t,
   onLocaleChange,
   onNavigate,
+  onMobileClose,
+  onMobileOpen,
   onDeveloperLogin,
   onDeveloperLogout,
 }: {
@@ -49,19 +54,29 @@ export function Sidebar({
   localeOptions: string[];
   developerActive: boolean;
   developerExpiresAt: number;
+  mobileOpen: boolean;
   t: TFunction;
   onLocaleChange: (locale: string) => void;
   onNavigate: (page: Page) => void;
+  onMobileClose: () => void;
+  onMobileOpen: () => void;
   onDeveloperLogin: (code: string) => Promise<void>;
   onDeveloperLogout: () => void;
 }) {
   const [languageOpen, setLanguageOpen] = useState(false);
   const [developerOpen, setDeveloperOpen] = useState(false);
+  const [debugOpen, setDebugOpen] = useState(false);
   const [developerCode, setDeveloperCode] = useState("");
   const [developerBusy, setDeveloperBusy] = useState(false);
   const [developerError, setDeveloperError] = useState("");
   const debugNavActive = debugPageItems.some((item) => item.id === page);
+  const debugGroupOpen = debugNavActive || debugOpen;
   const developerExpiryLabel = formatDeveloperExpiry(developerExpiresAt);
+
+  const handleNavigate = (nextPage: Page) => {
+    onNavigate(nextPage);
+    onMobileClose();
+  };
 
   const openDeveloperLogin = () => {
     setDeveloperOpen(true);
@@ -91,15 +106,30 @@ export function Sidebar({
   };
 
   return (
-    <aside className="min-h-0 overflow-hidden border-b border-base-300 bg-base-200/95 xl:rounded-2xl xl:border xl:border-base-300/80 xl:bg-base-200/85 xl:shadow-xl xl:shadow-black/20">
-      <div className="flex h-full min-h-0 flex-col gap-3 p-3">
-        <div className="flex min-w-0 items-center gap-2">
+    <>
+      {mobileOpen ? (
+        <button
+          className="admin-sidebar__scrim xl:hidden"
+          type="button"
+          aria-label={t("close", { ns: "common" })}
+          onClick={onMobileClose}
+        />
+      ) : null}
+
+      <aside
+        className={cx(
+          "admin-sidebar min-h-0 overflow-hidden border-b border-base-300 bg-base-200/95 xl:rounded-2xl xl:border xl:border-base-300/80 xl:bg-base-200/85 xl:shadow-xl xl:shadow-black/20",
+          mobileOpen && "admin-sidebar--open",
+        )}
+      >
+        <div className="admin-sidebar__body flex h-full min-h-0 flex-col gap-3 p-3">
+        <div className="admin-sidebar__header flex min-w-0 items-center gap-2">
           <a
             href="#/screen"
             aria-label={t("screen", { ns: "nav" })}
             title={t("screen", { ns: "nav" })}
             className="grid h-9 w-9 shrink-0 place-items-center rounded-2xl border border-primary/30 bg-primary/10 text-primary hover:border-primary/45 hover:bg-primary/15"
-            onClick={() => onNavigate("screen")}
+            onClick={() => handleNavigate("screen")}
           >
             <Monitor size={18} />
           </a>
@@ -112,9 +142,18 @@ export function Sidebar({
               </span>
             ) : null}
           </div>
+          <button
+            className="admin-sidebar__menu-button btn btn-ghost btn-sm h-9 min-h-9 w-9 shrink-0 rounded-2xl px-0 xl:hidden"
+            type="button"
+            aria-label={mobileOpen ? t("close", { ns: "common" }) : t("openMenu", { ns: "nav" })}
+            aria-expanded={mobileOpen}
+            onClick={mobileOpen ? onMobileClose : onMobileOpen}
+          >
+            {mobileOpen ? <X size={18} /> : <Menu size={18} />}
+          </button>
         </div>
 
-        <nav className="flex min-h-0 gap-2 overflow-x-auto pb-1 xl:flex-col xl:overflow-y-auto xl:overflow-x-hidden" aria-label={appTitle}>
+        <nav className="admin-nav flex min-h-0 gap-2 overflow-x-auto pb-1 xl:flex-col xl:overflow-y-auto xl:overflow-x-hidden" aria-label={appTitle}>
           <a
             href="#/settings"
             aria-current={page === "settings" ? "page" : undefined}
@@ -124,7 +163,7 @@ export function Sidebar({
                 ? "bg-primary text-primary-content"
                 : "bg-base-100/35 text-base-content/72 hover:bg-base-300/70 hover:text-base-content",
             )}
-            onClick={() => onNavigate("settings")}
+            onClick={() => handleNavigate("settings")}
           >
             <Settings2 size={16} />
             <span>{t("settings", { ns: "nav" })}</span>
@@ -133,7 +172,8 @@ export function Sidebar({
           {developerActive ? (
             <details
               className="group min-w-max rounded-2xl border border-base-300/80 bg-base-100/35 p-1 xl:min-w-0"
-              open={debugNavActive}
+              open={debugGroupOpen}
+              onToggle={(event) => setDebugOpen(event.currentTarget.open)}
             >
               <summary
                 className={cx(
@@ -163,7 +203,7 @@ export function Sidebar({
                           ? "bg-primary/10 text-primary shadow-[inset_0_0_0_1px_color-mix(in_oklab,var(--color-primary)_34%,transparent)]"
                           : "text-base-content/64 hover:bg-base-300/70 hover:text-base-content",
                       )}
-                      onClick={() => onNavigate(item.id)}
+                      onClick={() => handleNavigate(item.id)}
                     >
                       <Icon size={15} />
                       <span className="truncate">{t(item.labelKey, { ns: "nav" })}</span>
@@ -175,7 +215,7 @@ export function Sidebar({
           ) : null}
         </nav>
 
-        <div className="mt-auto grid gap-2">
+        <div className="admin-sidebar__footer mt-auto grid gap-2">
           <div className="flex items-center gap-2 rounded-2xl border border-base-300 bg-base-100/55 p-1.5">
             <div
               className="relative min-w-0 flex-1"
@@ -261,8 +301,8 @@ export function Sidebar({
       </div>
 
       {developerOpen ? (
-        <div className="fixed inset-0 z-50 grid place-items-center bg-black/55 p-4" role="dialog" aria-modal="true">
-          <form className="grid w-full max-w-sm gap-3 rounded-2xl border border-base-300 bg-base-100 p-4 shadow-2xl shadow-black/40" onSubmit={handleDeveloperSubmit}>
+        <div className="app-modal-backdrop fixed inset-0 z-50 grid place-items-center bg-black/55 p-4" role="dialog" aria-modal="true">
+          <form className="app-modal-card grid w-full max-w-sm gap-3 rounded-2xl border border-base-300 bg-base-100 p-4 shadow-2xl shadow-black/40" onSubmit={handleDeveloperSubmit}>
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
                 <h2 className="text-sm font-semibold text-base-content">{t("developerLogin", { ns: "nav" })}</h2>
@@ -293,13 +333,15 @@ export function Sidebar({
             {developerError ? <p className="rounded-xl bg-error/10 px-3 py-2 text-xs text-error">{developerError}</p> : null}
 
             <div className="flex items-center justify-end gap-2">
-              <button className="btn btn-primary btn-sm" type="submit" disabled={developerBusy || developerCode.trim().length !== 6}>
+              <button className={cx("btn btn-primary btn-sm", developerBusy && "app-busy-button")} type="submit" disabled={developerBusy || developerCode.trim().length !== 6}>
+                {developerBusy ? <LoadingSpinner size={15} /> : null}
                 {developerBusy ? t("loading", { ns: "common" }) : t("developerLogin", { ns: "nav" })}
               </button>
             </div>
           </form>
         </div>
       ) : null}
-    </aside>
+      </aside>
+    </>
   );
 }

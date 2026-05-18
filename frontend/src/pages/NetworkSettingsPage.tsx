@@ -1,9 +1,16 @@
 import { useEffect, useMemo, useState } from "react";
 import type { TFunction } from "i18next";
-import { CircleAlert, RefreshCw, Save, Wifi } from "lucide-react";
+import { ArrowDown, ArrowUp, Cable, CircleAlert, Eye, EyeOff, RefreshCw, Save, Wifi } from "lucide-react";
 
-import { connectWiFi, getNetworkInterfaces, getWiFiNetworks, updateNetworkInterface } from "../api";
+import {
+  connectWiFi,
+  getNetworkInterfaces,
+  getWiFiNetworks,
+  updateNetworkInterface,
+  updateNetworkInterfacePriorities,
+} from "../api";
 import { BannerAlert } from "../components/BannerAlert";
+import { LoadingSpinner } from "../components/LoadingState";
 import { Panel, PanelBody } from "../components/Panel";
 import { SectionHeader } from "../components/SectionHeader";
 import type { Banner } from "../app/types";
@@ -17,6 +24,7 @@ type Draft = {
   prefix: string;
   gateway4: string;
   dns4: string;
+  routeMetric: string;
 };
 
 function toDraft(item: NetworkInterface): Draft {
@@ -27,6 +35,7 @@ function toDraft(item: NetworkInterface): Draft {
     prefix: primary?.prefix ? String(primary.prefix) : "24",
     gateway4: item.gateway4 ?? "",
     dns4: item.dns4.join(", "),
+    routeMetric: typeof item.routeMetric === "number" ? String(item.routeMetric) : "",
   };
 }
 
@@ -50,7 +59,13 @@ function isIPv4(value: string) {
 
 function validateDraft(draft: Draft, t: TFunction) {
   if (draft.mode === "dhcp") {
+    if (draft.routeMetric.trim() && !isRouteMetric(draft.routeMetric)) {
+      return t("networkInvalidRouteMetric", { ns: "settings" });
+    }
     return "";
+  }
+  if (draft.routeMetric.trim() && !isRouteMetric(draft.routeMetric)) {
+    return t("networkInvalidRouteMetric", { ns: "settings" });
   }
   if (!isIPv4(draft.ipv4Address)) {
     return t("networkInvalidIPv4", { ns: "settings" });
@@ -70,8 +85,9 @@ function validateDraft(draft: Draft, t: TFunction) {
 }
 
 function buildPayload(draft: Draft): NetworkInterfaceUpdateRequest {
+  const routeMetric = parseRouteMetric(draft.routeMetric) ?? -1;
   if (draft.mode === "dhcp") {
-    return { mode: "dhcp" };
+    return { mode: "dhcp", routeMetric };
   }
   return {
     mode: "static",
@@ -79,7 +95,43 @@ function buildPayload(draft: Draft): NetworkInterfaceUpdateRequest {
     prefix: Number(draft.prefix),
     gateway4: draft.gateway4.trim(),
     dns4: parseDNS(draft.dns4),
+    routeMetric,
   };
+}
+
+function parseRouteMetric(value: string) {
+  const trimmed = value.trim();
+  if (!trimmed || !isRouteMetric(trimmed)) {
+    return undefined;
+  }
+  return Number(trimmed);
+}
+
+function isRouteMetric(value: string) {
+  const trimmed = value.trim();
+  if (!/^\d{1,4}$/.test(trimmed)) {
+    return false;
+  }
+  const metric = Number(trimmed);
+  return metric >= 0 && metric <= 9999;
+}
+
+function formatRouteMetric(value?: number) {
+  return typeof value === "number" ? String(value) : "-";
+}
+
+function priorityLabel(value: string, t: TFunction) {
+  const metric = parseRouteMetric(value);
+  if (typeof metric !== "number") {
+    return t("networkPriorityAuto", { ns: "settings" });
+  }
+  if (metric <= 200) {
+    return t("networkPriorityHigh", { ns: "settings" });
+  }
+  if (metric <= 700) {
+    return t("networkPriorityNormal", { ns: "settings" });
+  }
+  return t("networkPriorityLow", { ns: "settings" });
 }
 
 function formatAddresses(addresses: NetworkInterface["ipv4"]) {
@@ -87,6 +139,71 @@ function formatAddresses(addresses: NetworkInterface["ipv4"]) {
     return "-";
   }
   return addresses.map((item) => `${item.address}/${item.prefix || ""}`).join(", ");
+}
+
+function pickDefaultInterface(items: NetworkInterface[]) {
+  return (
+    items.find((item) => item.managed && item.state === "connected" && item.type === "wifi") ??
+    items.find((item) => item.managed && item.state === "connected") ??
+    items.find((item) => item.managed) ??
+    items[0]
+  );
+}
+
+function getPriorityMetric(index: number) {
+  return 100 + index * 200;
+}
+
+function isWiFiInterface(item: NetworkInterface) {
+  return item.type.toLowerCase().includes("wifi") || item.type.toLowerCase().includes("wireless");
+}
+
+function isWiredInterface(item: NetworkInterface) {
+  return item.type.toLowerCase().includes("ethernet") || item.name.toLowerCase().startsWith("eth");
+}
+
+function interfaceSortScore(item: NetworkInterface) {
+  if (item.managed && item.state === "connected") {
+    return 0;
+  }
+  if (item.managed) {
+    return 1;
+  }
+  return 2;
+}
+
+function sortedInterfacePickerItems(items: NetworkInterface[]) {
+  return [...items].sort((a, b) => {
+    const score = interfaceSortScore(a) - interfaceSortScore(b);
+    if (score !== 0) {
+      return score;
+    }
+    const leftMetric = typeof a.routeMetric === "number" ? a.routeMetric : Number.MAX_SAFE_INTEGER;
+    const rightMetric = typeof b.routeMetric === "number" ? b.routeMetric : Number.MAX_SAFE_INTEGER;
+    if (leftMetric !== rightMetric) {
+      return leftMetric - rightMetric;
+    }
+    return a.name.localeCompare(b.name);
+  });
+}
+
+function sortedPriorityInterfaces(items: NetworkInterface[]) {
+  return [...items]
+    .filter((item) => item.managed)
+    .sort((a, b) => {
+      const left = typeof a.routeMetric === "number" ? a.routeMetric : Number.MAX_SAFE_INTEGER;
+      const right = typeof b.routeMetric === "number" ? b.routeMetric : Number.MAX_SAFE_INTEGER;
+      if (left !== right) {
+        return left - right;
+      }
+      if (a.state === "connected" && b.state !== "connected") {
+        return -1;
+      }
+      if (a.state !== "connected" && b.state === "connected") {
+        return 1;
+      }
+      return a.name.localeCompare(b.name);
+    });
 }
 
 function InterfaceCard({
@@ -107,125 +224,323 @@ function InterfaceCard({
   const validation = validateDraft(draft, t);
   const editable = item.managed;
 
+  const statusLabel = item.managed ? item.state || "-" : t("networkUnmanaged", { ns: "settings" });
+
+  return (
+    <div className="grid gap-3 2xl:grid-cols-[minmax(0,1fr)_minmax(20rem,24rem)]">
+      <div className="grid content-start gap-3">
+        <div className="rounded-2xl border border-base-300 bg-base-100/45 p-3">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="flex min-w-0 items-center gap-3">
+              <div className="grid size-10 shrink-0 place-items-center rounded-xl border border-primary/25 bg-primary/10 text-primary">
+                {isWiFiInterface(item) ? <Wifi size={19} /> : <Cable size={19} />}
+              </div>
+              <div className="min-w-0">
+                <h3 className="truncate text-base font-semibold text-base-content">{item.name}</h3>
+                <p className="mt-0.5 truncate text-xs leading-5 text-base-content/55">
+                  {item.type || "-"} · {item.connectionName || t("networkUnmanaged", { ns: "settings" })}
+                </p>
+              </div>
+            </div>
+            <span
+              className={cx(
+                "badge badge-sm shrink-0 border-0 font-semibold",
+                item.state === "connected" ? "badge-success" : item.managed ? "badge-warning" : "badge-error",
+              )}
+            >
+              {statusLabel}
+            </span>
+          </div>
+
+          <div className="mt-3 grid gap-2">
+            <DetailItem label={t("networkIPv4", { ns: "settings" })} value={formatAddresses(item.ipv4)} mono strong />
+            <div className="grid gap-2 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+              <DetailItem label={t("networkGateway", { ns: "settings" })} value={item.gateway4 || "-"} mono />
+              <DetailItem label={t("networkRouteMetric", { ns: "settings" })} value={formatRouteMetric(item.routeMetric)} />
+            </div>
+            <DetailItem label={t("networkDNS", { ns: "settings" })} value={item.dns4.length ? item.dns4.join(", ") : "-"} mono />
+          </div>
+        </div>
+
+        <details className="rounded-2xl border border-base-300 bg-base-100/35">
+          <summary className="cursor-pointer px-3 py-2 text-sm font-semibold text-base-content/70">
+            {t("networkAdvancedDetails", { ns: "settings" })}
+          </summary>
+          <div className="grid gap-2 border-t border-base-300 p-3 md:grid-cols-2">
+            <DetailItem label={t("networkConnection", { ns: "settings" })} value={item.connectionName || "-"} />
+            <DetailItem label={t("networkMAC", { ns: "settings" })} value={item.hardwareAddress || "-"} mono />
+            <DetailItem label={t("networkMTU", { ns: "settings" })} value={item.mtu ? String(item.mtu) : "-"} />
+            <DetailItem label={t("networkMethod", { ns: "settings" })} value={item.ipv4Method || "-"} />
+          </div>
+        </details>
+      </div>
+
+      <div className="grid content-start gap-3 rounded-2xl border border-base-300 bg-base-100/45 p-3">
+        <div>
+          <h4 className="text-sm font-semibold text-base-content">{t("networkConfiguration", { ns: "settings" })}</h4>
+          <p className="mt-1 text-xs leading-5 text-base-content/55">{t("networkConfigurationHint", { ns: "settings" })}</p>
+        </div>
+
+        <div className="grid grid-cols-2 gap-2">
+          <button
+            className={cx("btn btn-sm", draft.mode === "dhcp" ? "btn-primary" : "btn-outline")}
+            type="button"
+            disabled={!editable || busy}
+            onClick={() => onDraftChange({ ...draft, mode: "dhcp" })}
+          >
+            {t("networkDHCP", { ns: "settings" })}
+          </button>
+          <button
+            className={cx("btn btn-sm", draft.mode === "static" ? "btn-primary" : "btn-outline")}
+            type="button"
+            disabled={!editable || busy}
+            onClick={() => onDraftChange({ ...draft, mode: "static" })}
+          >
+            {t("networkStatic", { ns: "settings" })}
+          </button>
+        </div>
+
+        <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_5rem]">
+          <label className="grid gap-1.5">
+            <span className="text-xs font-medium text-base-content/60">{t("networkIPv4Address", { ns: "settings" })}</span>
+            <input
+              className="input input-sm input-bordered w-full bg-base-100"
+              value={draft.ipv4Address}
+              inputMode="decimal"
+              disabled={!editable || draft.mode === "dhcp" || busy}
+              onChange={(event) => onDraftChange({ ...draft, ipv4Address: event.target.value })}
+              placeholder="192.168.10.10"
+            />
+          </label>
+          <label className="grid gap-1.5">
+            <span className="text-xs font-medium text-base-content/60">{t("networkPrefix", { ns: "settings" })}</span>
+            <input
+              className="input input-sm input-bordered w-full bg-base-100"
+              value={draft.prefix}
+              inputMode="numeric"
+              disabled={!editable || draft.mode === "dhcp" || busy}
+              onChange={(event) => onDraftChange({ ...draft, prefix: event.target.value.replace(/\D/g, "").slice(0, 2) })}
+              placeholder="24"
+            />
+          </label>
+        </div>
+
+        <label className="grid gap-1.5">
+          <span className="text-xs font-medium text-base-content/60">{t("networkGateway", { ns: "settings" })}</span>
+          <input
+            className="input input-sm input-bordered w-full bg-base-100"
+            value={draft.gateway4}
+            inputMode="decimal"
+            disabled={!editable || draft.mode === "dhcp" || busy}
+            onChange={(event) => onDraftChange({ ...draft, gateway4: event.target.value })}
+            placeholder="192.168.10.1"
+          />
+        </label>
+
+        <label className="grid gap-1.5">
+          <span className="text-xs font-medium text-base-content/60">{t("networkDNS", { ns: "settings" })}</span>
+          <input
+            className="input input-sm input-bordered w-full bg-base-100"
+            value={draft.dns4}
+            inputMode="decimal"
+            disabled={!editable || draft.mode === "dhcp" || busy}
+            onChange={(event) => onDraftChange({ ...draft, dns4: event.target.value })}
+            placeholder="8.8.8.8, 114.114.114.114"
+          />
+        </label>
+
+        <label className="grid gap-1.5">
+          <span className="text-xs font-medium text-base-content/60">{t("networkRouteMetric", { ns: "settings" })}</span>
+          <input
+            className="input input-sm input-bordered w-full bg-base-100"
+            value={draft.routeMetric}
+            inputMode="numeric"
+            disabled={!editable || busy}
+            onChange={(event) => onDraftChange({ ...draft, routeMetric: event.target.value.replace(/\D/g, "").slice(0, 4) })}
+            placeholder={t("networkPriorityAuto", { ns: "settings" })}
+          />
+          <span className="text-xs leading-5 text-base-content/50">
+            {t("networkRouteMetricHint", { ns: "settings" })} · {priorityLabel(draft.routeMetric, t)}
+          </span>
+        </label>
+
+        {!editable ? (
+          <p className="flex items-start gap-2 rounded-xl bg-warning/10 px-3 py-2 text-xs leading-5 text-warning">
+            <CircleAlert size={14} className="mt-0.5 shrink-0" />
+            {t("networkUnmanagedHint", { ns: "settings" })}
+          </p>
+        ) : validation ? (
+          <p className="rounded-xl bg-error/10 px-3 py-2 text-xs leading-5 text-error">{validation}</p>
+        ) : null}
+
+        <button
+          className={cx("btn btn-primary btn-sm", busy && "app-busy-button")}
+          type="button"
+          disabled={!editable || Boolean(validation) || busy}
+          onClick={onSave}
+        >
+          {busy ? <LoadingSpinner size={15} /> : <Save size={15} />}
+          {busy ? t("loading", { ns: "common" }) : t("networkApply", { ns: "settings" })}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function InterfacePicker({
+  items,
+  selectedName,
+  t,
+  onSelect,
+}: {
+  items: NetworkInterface[];
+  selectedName: string;
+  t: TFunction;
+  onSelect: (name: string) => void;
+}) {
+  return (
+    <div className="grid max-h-[34rem] gap-2 overflow-y-auto pr-1">
+      {items.map((item) => (
+        <button
+          className={cx(
+            "grid min-w-0 gap-2 rounded-2xl border p-2.5 text-left",
+            item.name === selectedName
+              ? "border-primary/60 bg-primary/10 text-primary shadow-[0_0_0_1px_rgba(59,130,246,0.18)]"
+              : "border-base-300 bg-base-100/35 text-base-content hover:border-primary/25 hover:bg-base-300/45",
+          )}
+          key={item.name}
+          type="button"
+          onClick={() => onSelect(item.name)}
+        >
+          <span className="flex min-w-0 items-center gap-2">
+            <span
+              className={cx(
+                "grid size-8 shrink-0 place-items-center rounded-xl border",
+                item.name === selectedName ? "border-primary/25 bg-primary/15" : "border-base-300 bg-base-100/45 text-base-content/60",
+              )}
+            >
+              {isWiFiInterface(item) ? <Wifi size={15} /> : <Cable size={15} />}
+            </span>
+            <span className="min-w-0 flex-1">
+              <span className="flex min-w-0 items-center justify-between gap-2">
+                <strong className="truncate text-sm font-semibold">{item.name}</strong>
+                <span
+                  className={cx(
+                    "badge badge-xs shrink-0 border-0 font-semibold",
+                    item.state === "connected" ? "badge-success" : item.managed ? "badge-warning" : "badge-error",
+                  )}
+                >
+                  {item.managed ? item.state || "-" : t("networkUnmanaged", { ns: "settings" })}
+                </span>
+              </span>
+              <span className="mt-0.5 block truncate text-xs text-base-content/55">
+                {item.type || "-"} · {formatAddresses(item.ipv4)}
+              </span>
+            </span>
+          </span>
+          <span className="grid grid-cols-2 gap-2 text-[11px] text-base-content/45">
+            <span className="truncate">{item.connectionName || "-"}</span>
+            <span
+              className={cx(
+                "justify-self-end rounded-full px-2 py-0.5 tabular-nums",
+                item.name === selectedName ? "bg-primary/15 text-primary" : "bg-base-300/50",
+              )}
+            >
+              {t("networkRouteMetric", { ns: "settings" })}: {formatRouteMetric(item.routeMetric)}
+            </span>
+          </span>
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function NetworkPriorityPanel({
+  items,
+  busy,
+  t,
+  onPreferWired,
+  onPreferWiFi,
+  onAuto,
+  onMove,
+}: {
+  items: NetworkInterface[];
+  busy: boolean;
+  t: TFunction;
+  onPreferWired: () => void;
+  onPreferWiFi: () => void;
+  onAuto: () => void;
+  onMove: (fromIndex: number, toIndex: number) => void;
+}) {
+  if (!items.length) {
+    return null;
+  }
+
   return (
     <Panel>
       <PanelBody>
-        <div className="grid gap-3 xl:grid-cols-[minmax(0,1fr)_minmax(20rem,24rem)]">
-          <div className="grid gap-3">
-            <div className="flex flex-wrap items-start justify-between gap-2">
-              <div className="min-w-0">
-                <h3 className="truncate text-sm font-semibold text-base-content">{item.name}</h3>
-                <p className="mt-1 text-xs leading-5 text-base-content/55">
-                  {item.type || "-"} · {item.state || "-"} · {item.connectionName || t("networkUnmanaged", { ns: "settings" })}
-                </p>
-              </div>
-              <span
-                className={cx(
-                  "badge badge-sm border-0 font-semibold",
-                  item.state === "connected" ? "badge-success" : item.managed ? "badge-warning" : "badge-error",
-                )}
-              >
-                {item.managed ? item.state || "-" : t("networkUnmanaged", { ns: "settings" })}
-              </span>
-            </div>
-
-            <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
-              <Info label={t("networkIPv4", { ns: "settings" })} value={formatAddresses(item.ipv4)} />
-              <Info label={t("networkGateway", { ns: "settings" })} value={item.gateway4 || "-"} />
-              <Info label={t("networkDNS", { ns: "settings" })} value={item.dns4.length ? item.dns4.join(", ") : "-"} />
-              <Info label={t("networkMAC", { ns: "settings" })} value={item.hardwareAddress || "-"} />
-              <Info label={t("networkMTU", { ns: "settings" })} value={item.mtu ? String(item.mtu) : "-"} />
-              <Info label={t("networkMethod", { ns: "settings" })} value={item.ipv4Method || "-"} />
-            </div>
-          </div>
-
-          <div className="grid gap-3 rounded-2xl border border-base-300 bg-base-100/45 p-3">
-            <div className="grid grid-cols-2 gap-2">
-              <button
-                className={cx("btn btn-sm", draft.mode === "dhcp" ? "btn-primary" : "btn-outline")}
-                type="button"
-                disabled={!editable || busy}
-                onClick={() => onDraftChange({ ...draft, mode: "dhcp" })}
-              >
-                {t("networkDHCP", { ns: "settings" })}
-              </button>
-              <button
-                className={cx("btn btn-sm", draft.mode === "static" ? "btn-primary" : "btn-outline")}
-                type="button"
-                disabled={!editable || busy}
-                onClick={() => onDraftChange({ ...draft, mode: "static" })}
-              >
-                {t("networkStatic", { ns: "settings" })}
-              </button>
-            </div>
-
-            <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_5rem]">
-              <label className="grid gap-1.5">
-                <span className="text-xs font-medium text-base-content/60">{t("networkIPv4Address", { ns: "settings" })}</span>
-                <input
-                  className="input input-sm input-bordered w-full bg-base-100"
-                  value={draft.ipv4Address}
-                  inputMode="decimal"
-                  disabled={!editable || draft.mode === "dhcp" || busy}
-                  onChange={(event) => onDraftChange({ ...draft, ipv4Address: event.target.value })}
-                  placeholder="192.168.10.10"
-                />
-              </label>
-              <label className="grid gap-1.5">
-                <span className="text-xs font-medium text-base-content/60">{t("networkPrefix", { ns: "settings" })}</span>
-                <input
-                  className="input input-sm input-bordered w-full bg-base-100"
-                  value={draft.prefix}
-                  inputMode="numeric"
-                  disabled={!editable || draft.mode === "dhcp" || busy}
-                  onChange={(event) => onDraftChange({ ...draft, prefix: event.target.value.replace(/\D/g, "").slice(0, 2) })}
-                  placeholder="24"
-                />
-              </label>
-            </div>
-
-            <label className="grid gap-1.5">
-              <span className="text-xs font-medium text-base-content/60">{t("networkGateway", { ns: "settings" })}</span>
-              <input
-                className="input input-sm input-bordered w-full bg-base-100"
-                value={draft.gateway4}
-                inputMode="decimal"
-                disabled={!editable || draft.mode === "dhcp" || busy}
-                onChange={(event) => onDraftChange({ ...draft, gateway4: event.target.value })}
-                placeholder="192.168.10.1"
-              />
-            </label>
-
-            <label className="grid gap-1.5">
-              <span className="text-xs font-medium text-base-content/60">{t("networkDNS", { ns: "settings" })}</span>
-              <input
-                className="input input-sm input-bordered w-full bg-base-100"
-                value={draft.dns4}
-                inputMode="decimal"
-                disabled={!editable || draft.mode === "dhcp" || busy}
-                onChange={(event) => onDraftChange({ ...draft, dns4: event.target.value })}
-                placeholder="8.8.8.8, 114.114.114.114"
-              />
-            </label>
-
-            {!editable ? (
-              <p className="flex items-start gap-2 rounded-xl bg-warning/10 px-3 py-2 text-xs leading-5 text-warning">
-                <CircleAlert size={14} className="mt-0.5 shrink-0" />
-                {t("networkUnmanagedHint", { ns: "settings" })}
-              </p>
-            ) : validation ? (
-              <p className="rounded-xl bg-error/10 px-3 py-2 text-xs leading-5 text-error">{validation}</p>
-            ) : null}
-
-            <button
-              className="btn btn-primary btn-sm"
-              type="button"
-              disabled={!editable || Boolean(validation) || busy}
-              onClick={onSave}
-            >
-              <Save size={15} />
-              {busy ? t("loading", { ns: "common" }) : t("networkApply", { ns: "settings" })}
+        <SectionHeader
+          title={t("networkPriorityTitle", { ns: "settings" })}
+          description={t("networkPriorityDescription", { ns: "settings" })}
+        />
+        <div className="grid gap-3 lg:grid-cols-[14rem_minmax(0,1fr)]">
+          <div className="grid content-start gap-2">
+            <button className={cx("btn btn-sm btn-outline justify-start", busy && "app-busy-button")} type="button" disabled={busy} onClick={onPreferWired}>
+              {busy ? <LoadingSpinner size={15} /> : <Cable size={15} />}
+              {t("networkPreferWired", { ns: "settings" })}
             </button>
+            <button className={cx("btn btn-sm btn-outline justify-start", busy && "app-busy-button")} type="button" disabled={busy} onClick={onPreferWiFi}>
+              {busy ? <LoadingSpinner size={15} /> : <Wifi size={15} />}
+              {t("networkPreferWifi", { ns: "settings" })}
+            </button>
+            <button className={cx("btn btn-sm btn-ghost justify-start", busy && "app-busy-button")} type="button" disabled={busy} onClick={onAuto}>
+              {busy ? <LoadingSpinner size={15} /> : <RefreshCw size={15} />}
+              {t("networkPriorityAutoAction", { ns: "settings" })}
+            </button>
+          </div>
+          <div className="grid gap-2">
+            {items.map((item, index) => (
+              <div
+                className="grid gap-2 rounded-2xl border border-base-300 bg-base-100/40 p-2 sm:grid-cols-[2.25rem_minmax(0,1fr)_auto]"
+                key={item.name}
+              >
+                <div className="grid size-9 place-items-center rounded-xl bg-primary/10 text-sm font-bold text-primary">
+                  {index + 1}
+                </div>
+                <div className="min-w-0 self-center">
+                  <div className="flex min-w-0 flex-wrap items-center gap-2">
+                    <strong className="truncate text-sm font-semibold text-base-content">{item.name}</strong>
+                    <span className="badge badge-xs border-0 bg-base-300 text-base-content/70">{item.type || "-"}</span>
+                    {item.state === "connected" ? <span className="badge badge-success badge-xs">{t("active", { ns: "common" })}</span> : null}
+                  </div>
+                  <p className="mt-1 truncate text-xs text-base-content/50">
+                    {item.connectionName || "-"} · {t("networkRouteMetric", { ns: "settings" })}: {formatRouteMetric(item.routeMetric)}
+                  </p>
+                </div>
+                <div className="join justify-self-start sm:justify-self-end">
+                  <button
+                    className="btn btn-xs join-item"
+                    type="button"
+                    disabled={busy || index === 0}
+                    aria-label={t("networkPriorityMoveUp", { ns: "settings" })}
+                    title={t("networkPriorityMoveUp", { ns: "settings" })}
+                    onClick={() => onMove(index, index - 1)}
+                  >
+                    <ArrowUp size={14} />
+                  </button>
+                  <button
+                    className="btn btn-xs join-item"
+                    type="button"
+                    disabled={busy || index === items.length - 1}
+                    aria-label={t("networkPriorityMoveDown", { ns: "settings" })}
+                    title={t("networkPriorityMoveDown", { ns: "settings" })}
+                    onClick={() => onMove(index, index + 1)}
+                  >
+                    <ArrowDown size={14} />
+                  </button>
+                </div>
+              </div>
+            ))}
           </div>
         </div>
       </PanelBody>
@@ -239,6 +554,96 @@ function Info({ label, value }: { label: string; value: string }) {
       <span className="block text-[11px] font-semibold uppercase text-base-content/45">{label}</span>
       <strong className="mt-1 block min-w-0 break-words text-xs font-semibold leading-5 text-base-content">{value}</strong>
     </div>
+  );
+}
+
+function DetailItem({
+  label,
+  value,
+  mono = false,
+  strong = false,
+}: {
+  label: string;
+  value: string;
+  mono?: boolean;
+  strong?: boolean;
+}) {
+  return (
+    <div className="grid min-w-0 gap-1 rounded-xl border border-base-300/80 bg-base-100/35 px-3 py-2 sm:grid-cols-[5.75rem_minmax(0,1fr)] sm:items-center">
+      <span className="text-[11px] font-semibold text-base-content/45">{label}</span>
+      <strong
+        className={cx(
+          "min-w-0 text-sm leading-5 text-base-content",
+          mono ? "font-mono tabular-nums [overflow-wrap:anywhere]" : "break-words font-semibold",
+          strong ? "font-bold text-primary" : "",
+        )}
+      >
+        {value}
+      </strong>
+    </div>
+  );
+}
+
+function getSignalLevel(signal: number) {
+  const value = Math.max(0, Math.min(100, signal || 0));
+  if (value >= 75) {
+    return 4;
+  }
+  if (value >= 50) {
+    return 3;
+  }
+  if (value >= 25) {
+    return 2;
+  }
+  if (value > 0) {
+    return 1;
+  }
+  return 0;
+}
+
+function getSignalLabelKey(level: number) {
+  if (level >= 4) {
+    return "wifiSignalExcellent";
+  }
+  if (level === 3) {
+    return "wifiSignalGood";
+  }
+  if (level === 2) {
+    return "wifiSignalFair";
+  }
+  if (level === 1) {
+    return "wifiSignalWeak";
+  }
+  return "wifiSignalNone";
+}
+
+function SignalStrength({ signal, t }: { signal: number; t: TFunction }) {
+  const normalized = Math.max(0, Math.min(100, signal || 0));
+  const level = getSignalLevel(normalized);
+  const label = t(getSignalLabelKey(level), { ns: "settings" });
+  const activeColor = level >= 3 ? "bg-success" : level === 2 ? "bg-warning" : "bg-error";
+  const textColor = level >= 3 ? "text-success" : level === 2 ? "text-warning" : "text-error";
+  const heights = ["h-1.5", "h-2.5", "h-3.5", "h-5"];
+
+  return (
+    <span className="flex shrink-0 items-center gap-2" aria-label={`${label} ${normalized}%`} title={`${label} ${normalized}%`}>
+      <span className="flex h-5 items-end gap-0.5" aria-hidden="true">
+        {heights.map((height, index) => (
+          <span
+            className={cx(
+              "w-1.5 rounded-sm",
+              height,
+              index < level ? activeColor : "bg-base-content/15",
+            )}
+            key={height}
+          />
+        ))}
+      </span>
+      <span className="grid justify-items-end leading-none">
+        <strong className={cx("min-w-8 text-right text-[11px] font-bold tabular-nums", textColor)}>{normalized}%</strong>
+        <span className="mt-1 text-[10px] font-semibold text-base-content/45">{label}</span>
+      </span>
+    </span>
   );
 }
 
@@ -270,6 +675,7 @@ function WiFiPanel({
   const selected = networks.find((item) => item.ssid === selectedSSID);
   const requiresPassword = Boolean(selected?.security && selected.security !== "--");
   const passwordDisabled = busy || Boolean(selected && !requiresPassword);
+  const [showPassword, setShowPassword] = useState(true);
 
   return (
     <Panel>
@@ -278,8 +684,8 @@ function WiFiPanel({
           title={t("wifiTitle", { ns: "settings" })}
           description={t("wifiDescription", { ns: "settings" })}
           action={
-            <button className="btn btn-sm btn-outline btn-info" type="button" disabled={busy} onClick={onScan}>
-              <RefreshCw size={16} />
+            <button className={cx("btn btn-sm btn-outline btn-info", busy && "app-busy-button")} type="button" disabled={busy} onClick={onScan}>
+              {busy ? <LoadingSpinner size={16} /> : <RefreshCw size={16} />}
               <span>{t("wifiScan", { ns: "settings" })}</span>
             </button>
           }
@@ -291,13 +697,15 @@ function WiFiPanel({
             <span className="min-w-0 [overflow-wrap:anywhere]">{message || t("wifiUnavailable", { ns: "settings" })}</span>
           </div>
         ) : (
-          <div className="grid gap-3 xl:grid-cols-[minmax(0,1fr)_minmax(20rem,24rem)]">
+          <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(18rem,22rem)]">
             <div className="grid max-h-80 gap-2 overflow-y-auto pr-1">
               {networks.map((network) => (
                 <button
                   className={cx(
                     "flex min-w-0 items-center justify-between gap-3 rounded-2xl border p-3 text-left",
-                    network.ssid === selectedSSID
+                    network.active
+                      ? "border-success/45 bg-success/10 text-success"
+                      : network.ssid === selectedSSID
                       ? "border-primary/45 bg-primary/10 text-primary"
                       : "border-base-300 bg-base-100/35 text-base-content hover:bg-base-300/55",
                   )}
@@ -316,7 +724,7 @@ function WiFiPanel({
                   </span>
                   <span className="flex shrink-0 items-center gap-2">
                     {network.active ? <span className="badge badge-success badge-sm">{t("active", { ns: "common" })}</span> : null}
-                    <span className="text-xs font-semibold">{network.signal}%</span>
+                    <SignalStrength signal={network.signal} t={t} />
                   </span>
                 </button>
               ))}
@@ -340,22 +748,35 @@ function WiFiPanel({
               </label>
               <label className="grid gap-1.5">
                 <span className="text-xs font-medium text-base-content/60">{t("wifiPassword", { ns: "settings" })}</span>
-                <input
-                  className="input input-sm input-bordered w-full bg-base-100"
-                  value={password}
-                  type="password"
-                  disabled={passwordDisabled}
-                  onChange={(event) => onPasswordChange(event.target.value)}
-                  placeholder={passwordDisabled ? t("wifiOpen", { ns: "settings" }) : t("wifiPasswordPlaceholder", { ns: "settings" })}
-                />
+                <div className="join w-full">
+                  <input
+                    className="input input-sm input-bordered join-item min-w-0 flex-1 bg-base-100"
+                    value={password}
+                    type={showPassword ? "text" : "password"}
+                    data-keyboard="ascii"
+                    disabled={passwordDisabled}
+                    onChange={(event) => onPasswordChange(event.target.value)}
+                    placeholder={passwordDisabled ? t("wifiOpen", { ns: "settings" }) : t("wifiPasswordPlaceholder", { ns: "settings" })}
+                  />
+                  <button
+                    className="btn btn-sm btn-outline join-item border-base-300 px-3"
+                    type="button"
+                    disabled={passwordDisabled}
+                    aria-label={t(showPassword ? "wifiHidePassword" : "wifiShowPassword", { ns: "settings" })}
+                    title={t(showPassword ? "wifiHidePassword" : "wifiShowPassword", { ns: "settings" })}
+                    onClick={() => setShowPassword((value) => !value)}
+                  >
+                    {showPassword ? <EyeOff size={15} /> : <Eye size={15} />}
+                  </button>
+                </div>
               </label>
               <button
-                className="btn btn-primary btn-sm"
+                className={cx("btn btn-primary btn-sm", busy && "app-busy-button")}
                 type="button"
                 disabled={busy || !selectedSSID.trim() || (requiresPassword && password.trim().length < 8)}
                 onClick={() => onConnect(selected?.device)}
               >
-                <Wifi size={15} />
+                {busy ? <LoadingSpinner size={15} /> : <Wifi size={15} />}
                 {busy ? t("loading", { ns: "common" }) : t("wifiConnect", { ns: "settings" })}
               </button>
             </div>
@@ -383,23 +804,35 @@ export function NetworkSettingsPage({
   const [wifiState, setWifiState] = useState({ available: true, readOnly: false, message: "" });
   const [selectedSSID, setSelectedSSID] = useState("");
   const [wifiPassword, setWifiPassword] = useState("");
+  const [selectedInterfaceName, setSelectedInterfaceName] = useState("");
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState("");
+  const [prioritySaving, setPrioritySaving] = useState(false);
   const [wifiBusy, setWifiBusy] = useState(false);
 
-  const load = async () => {
+  const load = async (options?: { silent?: boolean }) => {
     setLoading(true);
-    setBanner({ kind: "loading", message: "" });
+    if (!options?.silent) {
+      setBanner({ kind: "loading", message: t("loading", { ns: "common" }) });
+    }
     try {
       const response = await getNetworkInterfaces(locale, developerToken);
       setInterfaces(response.interfaces);
       setDrafts(Object.fromEntries(response.interfaces.map((item) => [item.name, toDraft(item)])));
+      setSelectedInterfaceName((current) => {
+        if (current && response.interfaces.some((item) => item.name === current)) {
+          return current;
+        }
+        return pickDefaultInterface(response.interfaces)?.name ?? "";
+      });
       setBackendState({
         available: response.available,
         readOnly: response.readOnly,
         message: response.message ?? "",
       });
-      setBanner({ kind: "idle", message: "" });
+      if (!options?.silent) {
+        setBanner({ kind: "idle", message: "" });
+      }
     } catch (error) {
       setBanner({ kind: "error", message: extractErrorMessage(error) });
     } finally {
@@ -418,7 +851,10 @@ export function NetworkSettingsPage({
         message: response.message ?? "",
       });
       if (!selectedSSID && response.networks.length > 0) {
-        setSelectedSSID(response.networks.find((item) => item.active)?.ssid ?? response.networks[0].ssid);
+        const activeNetwork = response.networks.find((item) => item.active);
+        if (activeNetwork) {
+          setSelectedSSID(activeNetwork.ssid);
+        }
       }
     } catch (error) {
       setWifiState({ available: false, readOnly: true, message: extractErrorMessage(error) });
@@ -433,6 +869,76 @@ export function NetworkSettingsPage({
   }, [locale, developerToken]);
 
   const managedCount = useMemo(() => interfaces.filter((item) => item.managed).length, [interfaces]);
+  const pickerInterfaces = useMemo(() => sortedInterfacePickerItems(interfaces), [interfaces]);
+  const priorityInterfaces = useMemo(() => sortedPriorityInterfaces(interfaces), [interfaces]);
+  const selectedInterface = useMemo(
+    () => interfaces.find((item) => item.name === selectedInterfaceName) ?? pickDefaultInterface(interfaces),
+    [interfaces, selectedInterfaceName],
+  );
+
+  const applyPriorityOrder = async (orderedItems: NetworkInterface[]) => {
+    if (orderedItems.length === 0) {
+      return;
+    }
+    setPrioritySaving(true);
+    setBanner({ kind: "loading", message: t("loading", { ns: "common" }) });
+    try {
+      const response = await updateNetworkInterfacePriorities(
+        {
+          priorities: orderedItems.map((item, index) => ({
+            interfaceName: item.name,
+            routeMetric: getPriorityMetric(index),
+          })),
+        },
+        locale,
+        developerToken,
+      );
+      const latest = response.interfaces;
+      setInterfaces(latest);
+      setDrafts((items) => ({
+        ...items,
+        ...Object.fromEntries(latest.map((item) => [item.name, toDraft(item)])),
+      }));
+      setBanner({ kind: "success", message: response.message || t("networkPriorityUpdated", { ns: "settings" }) });
+      await load({ silent: true });
+    } catch (error) {
+      setBanner({ kind: "error", message: extractErrorMessage(error) });
+    } finally {
+      setPrioritySaving(false);
+    }
+  };
+
+  const applyAutomaticPriority = async () => {
+    if (priorityInterfaces.length === 0) {
+      return;
+    }
+    setPrioritySaving(true);
+    setBanner({ kind: "loading", message: t("loading", { ns: "common" }) });
+    try {
+      const response = await updateNetworkInterfacePriorities(
+        {
+          priorities: priorityInterfaces.map((item) => ({
+            interfaceName: item.name,
+            routeMetric: -1,
+          })),
+        },
+        locale,
+        developerToken,
+      );
+      const latest = response.interfaces;
+      setInterfaces(latest);
+      setDrafts((items) => ({
+        ...items,
+        ...Object.fromEntries(latest.map((item) => [item.name, toDraft(item)])),
+      }));
+      setBanner({ kind: "success", message: response.message || t("networkPriorityUpdated", { ns: "settings" }) });
+      await load({ silent: true });
+    } catch (error) {
+      setBanner({ kind: "error", message: extractErrorMessage(error) });
+    } finally {
+      setPrioritySaving(false);
+    }
+  };
 
   return (
     <section className="grid gap-3">
@@ -442,8 +948,8 @@ export function NetworkSettingsPage({
             title={t("networkTitle", { ns: "settings" })}
             description={t("networkDescription", { ns: "settings" })}
             action={
-              <button className="btn btn-sm btn-outline btn-info" type="button" disabled={loading} onClick={() => void load()}>
-                <RefreshCw size={16} />
+              <button className={cx("btn btn-sm btn-outline btn-info", loading && "app-busy-button")} type="button" disabled={loading} onClick={() => void load()}>
+                {loading ? <LoadingSpinner size={16} /> : <RefreshCw size={16} />}
                 <span>{t("refresh", { ns: "common" })}</span>
               </button>
             }
@@ -482,13 +988,21 @@ export function NetworkSettingsPage({
         onConnect={(device) => {
           void (async () => {
             setWifiBusy(true);
-            setBanner({ kind: "loading", message: "" });
+            setBanner({ kind: "loading", message: t("loading", { ns: "common" }) });
             try {
-              const response = await connectWiFi({ ssid: selectedSSID.trim(), password: wifiPassword, device }, locale, developerToken);
+              const response = await connectWiFi(
+                {
+                  ssid: selectedSSID.trim(),
+                  password: wifiPassword,
+                  device,
+                },
+                locale,
+                developerToken,
+              );
               setBanner({ kind: "success", message: response.message });
               setWifiPassword("");
               await scanWiFi();
-              await load();
+              await load({ silent: true });
             } catch (error) {
               setBanner({ kind: "error", message: extractErrorMessage(error) });
             } finally {
@@ -498,33 +1012,78 @@ export function NetworkSettingsPage({
         }}
       />
 
-      {interfaces.map((item) => (
-        <InterfaceCard
-          key={item.name}
-          item={item}
-          draft={drafts[item.name] ?? toDraft(item)}
-          busy={saving === item.name}
-          t={t}
-          onDraftChange={(draft) => setDrafts((items) => ({ ...items, [item.name]: draft }))}
-          onSave={() => {
-            void (async () => {
-              const draft = drafts[item.name] ?? toDraft(item);
-              setSaving(item.name);
-              setBanner({ kind: "loading", message: "" });
-              try {
-                const response = await updateNetworkInterface(item.name, buildPayload(draft), locale, developerToken);
-                setInterfaces((items) => items.map((current) => (current.name === item.name ? response.interface : current)));
-                setDrafts((items) => ({ ...items, [item.name]: toDraft(response.interface) }));
-                setBanner({ kind: "success", message: response.message });
-              } catch (error) {
-                setBanner({ kind: "error", message: extractErrorMessage(error) });
-              } finally {
-                setSaving("");
-              }
-            })();
-          }}
-        />
-      ))}
+      <NetworkPriorityPanel
+        items={priorityInterfaces}
+        busy={prioritySaving || loading}
+        t={t}
+        onPreferWired={() => {
+          const wired = priorityInterfaces.filter(isWiredInterface);
+          const wifi = priorityInterfaces.filter(isWiFiInterface);
+          const other = priorityInterfaces.filter((item) => !isWiredInterface(item) && !isWiFiInterface(item));
+          void applyPriorityOrder([...wired, ...wifi, ...other]);
+        }}
+        onPreferWiFi={() => {
+          const wifi = priorityInterfaces.filter(isWiFiInterface);
+          const wired = priorityInterfaces.filter(isWiredInterface);
+          const other = priorityInterfaces.filter((item) => !isWiredInterface(item) && !isWiFiInterface(item));
+          void applyPriorityOrder([...wifi, ...wired, ...other]);
+        }}
+        onAuto={() => void applyAutomaticPriority()}
+        onMove={(fromIndex, toIndex) => {
+          const ordered = [...priorityInterfaces];
+          const [item] = ordered.splice(fromIndex, 1);
+          if (!item) {
+            return;
+          }
+          ordered.splice(toIndex, 0, item);
+          void applyPriorityOrder(ordered);
+        }}
+      />
+
+      {selectedInterface ? (
+        <Panel>
+          <PanelBody>
+            <div className="grid gap-3 lg:grid-cols-[13rem_minmax(0,1fr)]">
+              <div className="grid content-start gap-3">
+                <div>
+                  <h3 className="text-sm font-semibold text-base-content">{t("networkSelectInterface", { ns: "settings" })}</h3>
+                  <p className="mt-1 text-xs leading-5 text-base-content/55">{t("networkSelectInterfaceHint", { ns: "settings" })}</p>
+                </div>
+                <InterfacePicker
+                  items={pickerInterfaces}
+                  selectedName={selectedInterface.name}
+                  t={t}
+                  onSelect={setSelectedInterfaceName}
+                />
+              </div>
+              <InterfaceCard
+                item={selectedInterface}
+                draft={drafts[selectedInterface.name] ?? toDraft(selectedInterface)}
+                busy={saving === selectedInterface.name}
+                t={t}
+                onDraftChange={(draft) => setDrafts((items) => ({ ...items, [selectedInterface.name]: draft }))}
+                onSave={() => {
+                  void (async () => {
+                    const draft = drafts[selectedInterface.name] ?? toDraft(selectedInterface);
+                    setSaving(selectedInterface.name);
+                    setBanner({ kind: "loading", message: t("loading", { ns: "common" }) });
+                    try {
+                      const response = await updateNetworkInterface(selectedInterface.name, buildPayload(draft), locale, developerToken);
+                      setInterfaces((items) => items.map((current) => (current.name === selectedInterface.name ? response.interface : current)));
+                      setDrafts((items) => ({ ...items, [selectedInterface.name]: toDraft(response.interface) }));
+                      setBanner({ kind: "success", message: response.message });
+                    } catch (error) {
+                      setBanner({ kind: "error", message: extractErrorMessage(error) });
+                    } finally {
+                      setSaving("");
+                    }
+                  })();
+                }}
+              />
+            </div>
+          </PanelBody>
+        </Panel>
+      ) : null}
 
       {!loading && interfaces.length === 0 && !banner.message && backendState.available ? (
         <Panel>

@@ -4,6 +4,9 @@
 backend/bin/
 backend/data/
 backend/backend/data/
+backend/internal/webassets/dist/*
+!backend/internal/webassets/dist/placeholder.txt
+/dist/
 
 frontend/node_modules/
 frontend/dist/

@@ -1,6 +1,6 @@
 {
   "title": "GPIO Control",
-  "description": "Control GPIO output for IO1 / IO2 / IO3. IO4 is reserved.",
+  "description": "Control GPIO output for IO1 through IO8. IO4 through IO8 are reserved debug channels.",
   "channels": "Channels",
   "pin": "GPIO",
   "bands": "Band mapping",

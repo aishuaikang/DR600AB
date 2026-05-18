@@ -1,4 +1,4 @@
-import { Monitor, Network, Settings2, Zap } from "lucide-react";
+import { Monitor, Network, Satellite, Settings2, Zap } from "lucide-react";
 
 import { MESSAGE_PAGE_CONFIG } from "./message-pages";
 import type { NavItem, Page } from "./types";
@@ -9,6 +9,7 @@ export const debugPageItems: NavItem[] = [
   { id: "did_encrypted", icon: MESSAGE_PAGE_CONFIG.did_encrypted.icon, labelKey: MESSAGE_PAGE_CONFIG.did_encrypted.navLabelKey },
   { id: "did_plain", icon: MESSAGE_PAGE_CONFIG.did_plain.icon, labelKey: MESSAGE_PAGE_CONFIG.did_plain.navLabelKey },
   { id: "rid", icon: MESSAGE_PAGE_CONFIG.rid.icon, labelKey: MESSAGE_PAGE_CONFIG.rid.navLabelKey },
+  { id: "gps-records", icon: Satellite, labelKey: "gpsRecords" },
   { id: "interference", icon: Zap, labelKey: "interference" },
   { id: "network-settings", icon: Network, labelKey: "networkSettings" },
   { id: "developer-settings", icon: Settings2, labelKey: "developerSettings" },

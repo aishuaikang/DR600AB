@@ -2,7 +2,7 @@ import type { TFunction } from "i18next";
 import { Play, Square } from "lucide-react";
 
 import { Badge } from "../components/Badge";
-import { InfoTile } from "../components/InfoTile";
+import { LoadingSpinner, SkeletonBlock } from "../components/LoadingState";
 import { Panel, PanelBody } from "../components/Panel";
 import { SectionHeader } from "../components/SectionHeader";
 import type { GpioChannel } from "../types";
@@ -11,33 +11,45 @@ import { channelStatusLabel, toneForStatus } from "../utils/channels";
 
 function ChannelCard({
   channel,
+  busy,
+  disabled,
   t,
   onToggle,
 }: {
   channel: GpioChannel;
+  busy: boolean;
+  disabled: boolean;
   t: TFunction;
   onToggle: (channel: GpioChannel) => void;
 }) {
-  const tone = channel.reserved ? "warning" : toneForStatus(channel.status);
+  const tone = toneForStatus(channel.status);
   const toggleLabel = channel.enabled ? t("disable", { ns: "interference" }) : t("enable", { ns: "interference" });
   const bands = Array.isArray(channel.bands) ? channel.bands : [];
 
   return (
-    <article className="flex min-w-0 flex-col gap-3 rounded-2xl border border-base-300 bg-base-100/70 p-3">
-      <div className="flex min-w-0 items-start justify-between gap-3">
-        <div className="min-w-0">
-          <div className="flex flex-wrap items-center gap-2">
-            <h3 className="text-sm font-semibold leading-5 text-base-content">{channel.label}</h3>
-            {channel.reserved ? <Badge tone="warning">{t("reserved", { ns: "common" })}</Badge> : null}
-          </div>
-          <p className="mt-1 text-xs text-base-content/55">
-            {t("pin", { ns: "interference" })} GPIO{channel.pin}
-          </p>
+    <article
+      className={cx(
+        "app-card-motion flex min-w-0 flex-col gap-2 rounded-2xl border p-2.5",
+        busy && "app-card-motion--busy",
+        channel.reserved
+          ? "border-base-300/70 bg-base-100/35 text-base-content/70"
+          : "border-base-300 bg-base-100/75",
+      )}
+    >
+      <div className="flex min-w-0 items-center justify-between gap-2">
+        <div className="flex min-w-0 items-center gap-2">
+          <h3 className="shrink-0 text-sm font-bold leading-5 text-base-content">{channel.label}</h3>
+          <span className="truncate font-mono text-xs font-semibold text-base-content/60">
+            GPIO{channel.pin}
+          </span>
+          {channel.reserved ? <Badge tone="warning">{t("reserved", { ns: "common" })}</Badge> : null}
         </div>
-        <Badge tone={tone}>{channelStatusLabel(channel, t)}</Badge>
+        <div className="shrink-0">
+          <Badge tone={tone}>{channelStatusLabel(channel, t)}</Badge>
+        </div>
       </div>
 
-      <div className="flex flex-wrap gap-2">
+      <div className="flex min-h-6 flex-wrap content-start gap-1.5">
         {bands.length > 0 ? (
           bands.map((band) => (
             <Badge key={band} tone="info" outline>
@@ -45,30 +57,44 @@ function ChannelCard({
             </Badge>
           ))
         ) : (
-          <span className="text-sm text-base-content/55">{t("reservedChannel", { ns: "interference" })}</span>
+          <span className="inline-flex min-h-5 items-center rounded-full border border-base-300/80 px-2 text-[11px] font-semibold text-base-content/45">
+            {t("reservedChannel", { ns: "interference" })}
+          </span>
         )}
       </div>
 
-      <div className="grid gap-2 sm:grid-cols-2">
-        <InfoTile label={t("desired", { ns: "interference" })} value={channel.desiredLevel} />
-        <InfoTile label={t("actual", { ns: "interference" })} value={channel.actualLevel} />
+      <div className="grid grid-cols-2 gap-1.5 text-xs">
+        <div className="min-w-0 rounded-xl border border-base-300/70 bg-base-200/45 px-2 py-1.5">
+          <span className="block truncate text-[11px] font-medium text-base-content/45">
+            {t("desired", { ns: "interference" })}
+          </span>
+          <strong className="block truncate font-mono text-xs text-base-content">{channel.desiredLevel}</strong>
+        </div>
+        <div className="min-w-0 rounded-xl border border-base-300/70 bg-base-200/45 px-2 py-1.5">
+          <span className="block truncate text-[11px] font-medium text-base-content/45">
+            {t("actual", { ns: "interference" })}
+          </span>
+          <strong className="block truncate font-mono text-xs text-base-content">{channel.actualLevel}</strong>
+        </div>
       </div>
 
-      {channel.lastError ? <p className="rounded-2xl bg-error/10 px-3 py-2 text-sm text-error">{channel.lastError}</p> : null}
+      {channel.lastError ? <p className="rounded-xl bg-error/10 px-2 py-1.5 text-xs text-error">{channel.lastError}</p> : null}
 
-      <div className="mt-auto grid gap-2">
+      <div className="mt-auto grid gap-1.5">
         <button
-          className={cx("btn btn-sm btn-block", channel.enabled ? "btn-outline btn-error" : "btn-primary")}
+          className={cx(
+            "btn btn-xs btn-block min-h-8",
+            channel.enabled ? "btn-outline btn-error" : "btn-primary",
+            busy && "app-busy-button",
+          )}
           type="button"
-          disabled={channel.reserved}
+          disabled={disabled}
           onClick={() => onToggle(channel)}
         >
-          {channel.enabled ? <Square size={16} /> : <Play size={16} />}
+          {busy ? <LoadingSpinner size={14} /> : channel.enabled ? <Square size={14} /> : <Play size={14} />}
           <span>{toggleLabel}</span>
         </button>
-        <span className="text-xs text-base-content/50">
-          {channel.reserved ? t("reservedChannel", { ns: "interference" }) : t("toggle", { ns: "interference" })}
-        </span>
+        <span className="truncate text-[11px] leading-4 text-base-content/45">{t("toggle", { ns: "interference" })}</span>
       </div>
     </article>
   );
@@ -76,13 +102,17 @@ function ChannelCard({
 
 export function InterferencePage({
   channels,
+  busyChannelId,
   t,
   onToggleChannel,
 }: {
   channels: GpioChannel[];
+  busyChannelId?: string;
   t: TFunction;
   onToggleChannel: (channel: GpioChannel) => void;
 }) {
+  const busy = Boolean(busyChannelId);
+
   return (
     <section className="grid gap-3">
       <Panel>
@@ -91,10 +121,29 @@ export function InterferencePage({
             title={t("title", { ns: "interference" })}
             description={t("description", { ns: "interference" })}
           />
-          <div className="grid gap-3 lg:grid-cols-2 2xl:grid-cols-4">
-            {channels.map((channel) => (
-              <ChannelCard key={channel.id} channel={channel} t={t} onToggle={onToggleChannel} />
-            ))}
+          <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
+            {channels.length === 0
+              ? Array.from({ length: 8 }, (_, index) => (
+                  <div key={index} className="rounded-2xl border border-base-300 bg-base-100/45 p-2.5">
+                    <SkeletonBlock className="h-5 w-28" />
+                    <SkeletonBlock className="mt-3 h-6 w-full" />
+                    <div className="mt-3 grid grid-cols-2 gap-1.5">
+                      <SkeletonBlock className="h-10" />
+                      <SkeletonBlock className="h-10" />
+                    </div>
+                    <SkeletonBlock className="mt-3 h-8 w-full" />
+                  </div>
+                ))
+              : channels.map((channel) => (
+                  <ChannelCard
+                    key={channel.id}
+                    channel={channel}
+                    busy={busyChannelId === channel.id}
+                    disabled={busy}
+                    t={t}
+                    onToggle={onToggleChannel}
+                  />
+                ))}
           </div>
         </PanelBody>
       </Panel>

@@ -2,6 +2,8 @@
 package app
 
 import (
+	"context"
+
 	"dr600ab-api/internal/config"
 	"dr600ab-api/internal/detection"
 	"dr600ab-api/internal/developer"
@@ -51,10 +53,11 @@ func New(cfg config.Config) (*App, error) {
 		ReconnectInitialDelay: cfg.ReconnectInitialDelay,
 		ReconnectMaxDelay:     cfg.ReconnectMaxDelay,
 	})
-	networkSvc := network.NewService(nil)
+	networkSvc := network.NewService(nil, settingsStore)
 
 	detectionSvc.RestoreSavedSettings(cfg.DefaultLocale)
 	gpsSvc.RestoreSavedSettings(cfg.DefaultLocale)
+	_ = networkSvc.RestoreSavedSettings(context.Background())
 
 	return &App{
 		server: httpapi.New(cfg, translator, detectionSvc, interferenceSvc, developerSvc, gpsSvc, networkSvc),

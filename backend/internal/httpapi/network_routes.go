@@ -14,6 +14,8 @@ import (
 func (s *Server) registerNetworkRoutes(api fiber.Router) {
 	api.Get("/network/interfaces", s.handleNetworkInterfaces)
 	api.Put("/network/interfaces/:name", s.handleUpdateNetworkInterface)
+	api.Put("/network/interfaces/:name/priority", s.handleUpdateNetworkInterfacePriority)
+	api.Put("/network/priorities", s.handleUpdateNetworkInterfacePriorities)
 	api.Get("/network/wifi", s.handleWiFiNetworks)
 	api.Post("/network/wifi/connect", s.handleConnectWiFi)
 }
@@ -46,6 +48,64 @@ func (s *Server) handleNetworkInterfaces(c *fiber.Ctx) error {
 		Backend:    "networkmanager",
 		Available:  true,
 		ReadOnly:   false,
+	})
+}
+
+// handleUpdateNetworkInterfacePriority 更新指定网口的路由优先级。
+func (s *Server) handleUpdateNetworkInterfacePriority(c *fiber.Ctx) error {
+	locale := s.resolveLocale(c)
+	if err := s.requireDeveloper(c, locale); err != nil {
+		return err
+	}
+
+	var req model.NetworkPriorityRequest
+	if err := c.BodyParser(&req); err != nil {
+		return s.respondError(
+			c,
+			fiber.StatusBadRequest,
+			"invalid_request",
+			s.translator.T(locale, "errors", "invalid_request"),
+			err.Error(),
+		)
+	}
+
+	item, err := s.network.UpdateInterfacePriority(c.Context(), c.Params("name"), req)
+	if err != nil {
+		return s.respondNetworkError(c, locale, err)
+	}
+
+	return c.JSON(model.NetworkInterfaceUpdateResponse{
+		Interface: item,
+		Message:   s.translator.T(locale, "common", "network.priority_updated"),
+	})
+}
+
+// handleUpdateNetworkInterfacePriorities 批量更新网口路由优先级。
+func (s *Server) handleUpdateNetworkInterfacePriorities(c *fiber.Ctx) error {
+	locale := s.resolveLocale(c)
+	if err := s.requireDeveloper(c, locale); err != nil {
+		return err
+	}
+
+	var req model.NetworkPriorityBatchRequest
+	if err := c.BodyParser(&req); err != nil {
+		return s.respondError(
+			c,
+			fiber.StatusBadRequest,
+			"invalid_request",
+			s.translator.T(locale, "errors", "invalid_request"),
+			err.Error(),
+		)
+	}
+
+	items, err := s.network.UpdateInterfacePriorities(c.Context(), req)
+	if err != nil {
+		return s.respondNetworkError(c, locale, err)
+	}
+
+	return c.JSON(model.NetworkPriorityBatchResponse{
+		Interfaces: items,
+		Message:    s.translator.T(locale, "common", "network.priority_updated"),
 	})
 }
 

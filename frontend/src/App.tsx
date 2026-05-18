@@ -6,6 +6,7 @@ import {
   deleteDeveloperSessionRequest,
   getChannels,
   getDetectionSettings,
+  getGPSRecords,
   getGPSSession,
   getGPSSettings,
   getLocales,
@@ -20,11 +21,13 @@ import {
 import { MESSAGE_PAGE_ORDER } from "./app/message-pages";
 import { isDebugPage } from "./app/navigation";
 import type { Banner } from "./app/types";
+import { LoadingOverlay, PageLoading } from "./components/LoadingState";
 import { Sidebar } from "./components/Sidebar";
 import { VirtualKeyboard } from "./components/VirtualKeyboard";
 import { getStoredLocale, persistLocale, supportedLocales } from "./i18n";
 import { useHashPage } from "./hooks/useHashPage";
 import { InterferencePage } from "./pages/InterferencePage";
+import { GPSRecordsPage } from "./pages/GPSRecordsPage";
 import { MessagePage } from "./pages/MessagePage";
 import { NetworkSettingsPage } from "./pages/NetworkSettingsPage";
 import { ScreenPage } from "./pages/ScreenPage";
@@ -35,6 +38,7 @@ import { FIXED_SERIAL_PROFILE } from "./serial-profile";
 import type {
   DetectionSessionResponse,
   GpioChannel,
+  GPSRecord,
   GPSSessionResponse,
   LocaleMeta,
   ParsedMessage,
@@ -53,8 +57,10 @@ import {
   normalizeVisibleLocales,
   persistVisibleLocales,
 } from "./utils/locales";
+import { normalizeGpioChannels } from "./utils/gpioChannels";
 import {
   dedupeById,
+  dedupeGPSRecords,
   dedupeParsed,
   extractErrorMessage,
   gpsSessionBannerKind,
@@ -69,6 +75,7 @@ import {
 function App() {
   const { t, i18n } = useTranslation();
   const [page, navigate] = useHashPage();
+  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const [locale, setLocale] = useState(() => getStoredLocale());
   const [storedSettings, setStoredSettings] = useState(() => getStoredSettings());
   const [meta, setMeta] = useState<LocaleMeta | null>(null);
@@ -78,6 +85,7 @@ function App() {
   const [session, setSession] = useState<DetectionSessionResponse | null>(null);
   const [gpsSession, setGPSSession] = useState<GPSSessionResponse | null>(null);
   const [messages, setMessages] = useState<ParsedMessage[]>([]);
+  const [gpsRecords, setGPSRecords] = useState<GPSRecord[]>([]);
   const [channels, setChannels] = useState<GpioChannel[]>([]);
   const [selectedReceivePort, setSelectedReceivePort] = useState("");
   const [selectedSendPort, setSelectedSendPort] = useState("");
@@ -86,6 +94,10 @@ function App() {
   const [messageSearch, setMessageSearch] = useState("");
   const [banner, setBanner] = useState<Banner>({ kind: "idle", message: "" });
   const [gpsBanner, setGPSBanner] = useState<Banner>({ kind: "idle", message: "" });
+  const [gpsRecordsBanner, setGPSRecordsBanner] = useState<Banner>({ kind: "idle", message: "" });
+  const [runtimeLoading, setRuntimeLoading] = useState(false);
+  const [gpsRecordsLoading, setGPSRecordsLoading] = useState(false);
+  const [channelBusyId, setChannelBusyId] = useState("");
   const lastAppliedSerialRef = useRef("");
   const lastAppliedGPSRef = useRef("");
   const developerActive = Boolean(developerSession);
@@ -110,6 +122,7 @@ function App() {
   }, []);
 
   const bootstrap = useCallback(async () => {
+    setRuntimeLoading(true);
     setBanner({ kind: "loading", message: t("loading", { ns: "common" }) });
     try {
       const parsedPromise = developerActive
@@ -134,7 +147,7 @@ function App() {
       setSession(sessionRes);
       setGPSSession(gpsSessionRes);
       setMessages(parsedRes.items);
-      setChannels(channelsRes.channels);
+      setChannels(normalizeGpioChannels(channelsRes.channels));
 
       const { receivePort, sendPort } = resolveInitialPorts(sessionRes, settingsRes, portsRes.ports);
       syncSerialSelection(receivePort, sendPort);
@@ -150,8 +163,37 @@ function App() {
       });
     } catch (error) {
       setBanner({ kind: "error", message: extractErrorMessage(error) });
+    } finally {
+      setRuntimeLoading(false);
     }
   }, [developerActive, developerToken, locale, syncGPSSelection, syncSerialSelection, t]);
+
+  const loadGPSRecords = useCallback(async () => {
+    if (!developerActive) {
+      setGPSRecords([]);
+      return;
+    }
+    setGPSRecordsLoading(true);
+    setGPSRecordsBanner({ kind: "loading", message: t("loading", { ns: "common" }) });
+    try {
+      const response = await getGPSRecords(locale, developerToken, 200);
+      setGPSRecords(response.items);
+      setGPSRecordsBanner({ kind: "idle", message: "" });
+    } catch (error) {
+      setGPSRecordsBanner({ kind: "error", message: extractErrorMessage(error) });
+    } finally {
+      setGPSRecordsLoading(false);
+    }
+  }, [developerActive, developerToken, locale, t]);
+
+  const refreshChannels = useCallback(async () => {
+    if (!developerActive) {
+      setChannels([]);
+      return;
+    }
+    const response = await getChannels(locale, developerToken);
+    setChannels(normalizeGpioChannels(response.channels));
+  }, [developerActive, developerToken, locale]);
 
   useEffect(() => {
     void i18n.changeLanguage(locale);
@@ -174,6 +216,40 @@ function App() {
       cancelled = true;
     };
   }, [bootstrap, needsRuntimeData]);
+
+  useEffect(() => {
+    if (page !== "gps-records" || !developerActive) {
+      return;
+    }
+    void loadGPSRecords();
+  }, [developerActive, loadGPSRecords, page]);
+
+  useEffect(() => {
+    if (page !== "interference" || !developerActive) {
+      return;
+    }
+
+    let syncing = false;
+    const sync = async () => {
+      if (syncing) {
+        return;
+      }
+      syncing = true;
+      try {
+        await refreshChannels();
+      } catch {
+        // 保持当前显示，下一次轮询或页面刷新会再次同步。
+      } finally {
+        syncing = false;
+      }
+    };
+
+    void sync();
+    const timer = window.setInterval(() => {
+      void sync();
+    }, 1_000);
+    return () => window.clearInterval(timer);
+  }, [developerActive, page, refreshChannels]);
 
   useEffect(() => {
     if (!needsRuntimeData) {
@@ -372,6 +448,9 @@ function App() {
             lastFix: event.payload!.fix ?? current.lastFix,
             lastRecord: event.payload!,
           } : current);
+          if (developerActive) {
+            setGPSRecords((items) => dedupeGPSRecords(items, event.payload!, 200));
+          }
         }
       },
       onParsed: (event) => {
@@ -381,7 +460,7 @@ function App() {
       },
       onChannelUpdated: (event) => {
         if (developerActive && event.payload) {
-          setChannels((items) => dedupeById(items, event.payload!, 16));
+          setChannels((items) => normalizeGpioChannels(dedupeById(items, event.payload!, 16)));
         }
       },
       onError: (error) => {
@@ -410,6 +489,16 @@ function App() {
   const localeOptions = normalizeVisibleLocales(allLocaleOptions, visibleLocales, locale);
   const developerExpiresAt = developerSession?.expiresAt ?? 0;
   const isMessagePage = developerActive && MESSAGE_PAGE_ORDER.includes(page as ParsedMessageType);
+  const loadingLabel = t("loading", { ns: "common" });
+  const hasRuntimeData = Boolean(meta || ports.length > 0 || session || gpsSession);
+  const showRuntimeFallback = needsRuntimeData && runtimeLoading && !hasRuntimeData;
+  const operationInFlight = needsRuntimeData && (
+    runtimeLoading ||
+    gpsRecordsLoading ||
+    Boolean(channelBusyId) ||
+    banner.kind === "loading" ||
+    gpsBanner.kind === "loading"
+  );
 
   useEffect(() => {
     document.title = appTitle;
@@ -438,13 +527,21 @@ function App() {
     }
   }, [debugAccessBlocked, navigate]);
 
+  useEffect(() => {
+    setMobileSidebarOpen(false);
+  }, [page]);
+
   const handleToggleChannel = async (channel: GpioChannel) => {
+    setChannelBusyId(channel.id);
+    setBanner({ kind: "loading", message: t("loading", { ns: "common" }) });
     try {
       const response = await setChannelState(channel.id, { enabled: !channel.enabled }, locale, developerToken);
-      setChannels((items) => dedupeById(items, response.channel, 16));
+      setChannels((items) => normalizeGpioChannels(dedupeById(items, response.channel, 16)));
       setBanner({ kind: "success", message: response.message });
     } catch (error) {
       setBanner({ kind: "error", message: extractErrorMessage(error) });
+    } finally {
+      setChannelBusyId("");
     }
   };
 
@@ -493,8 +590,9 @@ function App() {
   }
 
   return (
-    <div className="h-dvh overflow-hidden bg-base-100 text-base-content">
-      <div className="grid h-full min-h-0 grid-cols-1 gap-0 overflow-hidden p-0 xl:grid-cols-[244px_minmax(0,1fr)] xl:gap-3 xl:p-3">
+    <div className="admin-shell h-dvh overflow-hidden bg-base-100 text-base-content">
+      <div className={cx("app-top-progress", operationInFlight && "app-top-progress--active")} aria-hidden="true" />
+      <div className="grid h-full min-h-0 grid-cols-1 grid-rows-[auto_minmax(0,1fr)] gap-0 overflow-hidden p-0 md:gap-2 md:p-2 xl:grid-cols-[244px_minmax(0,1fr)] xl:grid-rows-[minmax(0,1fr)] xl:gap-3 xl:p-3">
         <Sidebar
           appTitle={appTitle}
           page={page}
@@ -502,9 +600,12 @@ function App() {
           localeOptions={localeOptions}
           developerActive={developerActive}
           developerExpiresAt={developerExpiresAt}
+          mobileOpen={mobileSidebarOpen}
           t={t}
           onLocaleChange={setLocale}
           onNavigate={navigate}
+          onMobileClose={() => setMobileSidebarOpen(false)}
+          onMobileOpen={() => setMobileSidebarOpen(true)}
           onDeveloperLogin={handleDeveloperLogin}
           onDeveloperLogout={() => void handleDeveloperLogout()}
         />
@@ -512,79 +613,99 @@ function App() {
         <div className="flex min-h-0 min-w-0 flex-col overflow-hidden">
           <main
             className={cx(
-              "flex min-h-0 min-w-0 flex-1 flex-col gap-3 overflow-x-hidden",
+              "app-page-shell flex min-h-0 min-w-0 flex-1 flex-col gap-3 overflow-x-hidden",
+              "p-2 md:p-0",
               isMessagePage ? "overflow-hidden" : "overflow-y-auto",
             )}
           >
-            {isMessagePage ? (
-              <MessagePage
-                page={page as ParsedMessageType}
-                records={messages.filter((item) => item.type === page)}
-                locale={locale}
-                query={messageSearch}
-                onQueryChange={setMessageSearch}
-                t={t}
-              />
-            ) : null}
+            {showRuntimeFallback ? (
+              <PageLoading label={loadingLabel} />
+            ) : (
+              <>
+                {isMessagePage ? (
+                  <MessagePage
+                    page={page as ParsedMessageType}
+                    records={messages.filter((item) => item.type === page)}
+                    locale={locale}
+                    query={messageSearch}
+                    onQueryChange={setMessageSearch}
+                    t={t}
+                  />
+                ) : null}
 
-            {page === "interference" ? (
-              developerActive ? (
-                <InterferencePage
-                  channels={channels}
-                  t={t}
-                  onToggleChannel={(channel) => void handleToggleChannel(channel)}
-                />
-              ) : null
-            ) : null}
+                {page === "interference" ? (
+                  developerActive ? (
+                    <InterferencePage
+                      channels={channels}
+                      busyChannelId={channelBusyId}
+                      t={t}
+                      onToggleChannel={(channel) => void handleToggleChannel(channel)}
+                    />
+                  ) : null
+                ) : null}
 
-            {page === "settings" ? (
-              <UserSettingsPage
-                appTitle={appTitle}
-                defaultAppTitle={defaultAppTitle}
-                t={t}
-                onAppTitleChange={handleAppTitleChange}
-              />
-            ) : null}
+                {page === "gps-records" && developerActive ? (
+                  <GPSRecordsPage
+                    records={gpsRecords}
+                    banner={gpsRecordsBanner}
+                    loading={gpsRecordsLoading}
+                    locale={locale}
+                    t={t}
+                    onRefresh={() => void loadGPSRecords()}
+                  />
+                ) : null}
 
-            {page === "developer-settings" && developerActive ? (
-              <SettingsPage
-                banner={banner}
-                ports={ports}
-                selectedReceivePort={selectedReceivePort}
-                selectedSendPort={selectedSendPort}
-                selectedGPSDataPort={selectedGPSDataPort}
-                selectedGPSControlPort={selectedGPSControlPort}
-                sessionStateLabel={sessionStateLabel}
-                currentReceivePort={currentReceivePort}
-                currentSendPort={currentSendPort}
-                gpsBanner={gpsBanner}
-                gpsSession={gpsSession}
-                gpsSessionStateLabel={gpsSessionStateLabel}
-                currentGPSDataPort={currentGPSDataPort}
-                currentGPSControlPort={currentGPSControlPort}
-                allLocaleOptions={allLocaleOptions}
-                visibleLocales={localeOptions}
-                currentLocale={locale}
-                t={t}
-                onRefresh={() => void bootstrap()}
-                onReceivePortChange={setSelectedReceivePort}
-                onSendPortChange={setSelectedSendPort}
-                onGPSDataPortChange={setSelectedGPSDataPort}
-                onGPSControlPortChange={setSelectedGPSControlPort}
-                onVisibleLocalesChange={handleVisibleLocalesChange}
-              />
-            ) : null}
+                {page === "settings" ? (
+                  <UserSettingsPage
+                    appTitle={appTitle}
+                    defaultAppTitle={defaultAppTitle}
+                    t={t}
+                    onAppTitleChange={handleAppTitleChange}
+                  />
+                ) : null}
 
-            {page === "network-settings" && developerActive ? (
-              <NetworkSettingsPage
-                locale={locale}
-                developerToken={developerToken}
-                t={t}
-              />
-            ) : null}
+                {page === "developer-settings" && developerActive ? (
+                  <SettingsPage
+                    banner={banner}
+                    ports={ports}
+                    selectedReceivePort={selectedReceivePort}
+                    selectedSendPort={selectedSendPort}
+                    selectedGPSDataPort={selectedGPSDataPort}
+                    selectedGPSControlPort={selectedGPSControlPort}
+                    sessionStateLabel={sessionStateLabel}
+                    currentReceivePort={currentReceivePort}
+                    currentSendPort={currentSendPort}
+                    gpsBanner={gpsBanner}
+                    gpsSession={gpsSession}
+                    gpsSessionStateLabel={gpsSessionStateLabel}
+                    currentGPSDataPort={currentGPSDataPort}
+                    currentGPSControlPort={currentGPSControlPort}
+                    allLocaleOptions={allLocaleOptions}
+                    visibleLocales={localeOptions}
+                    currentLocale={locale}
+                    t={t}
+                    onRefresh={() => void bootstrap()}
+                    onReceivePortChange={setSelectedReceivePort}
+                    onSendPortChange={setSelectedSendPort}
+                    onGPSDataPortChange={setSelectedGPSDataPort}
+                    onGPSControlPortChange={setSelectedGPSControlPort}
+                    onVisibleLocalesChange={handleVisibleLocalesChange}
+                  />
+                ) : null}
+
+                {page === "network-settings" && developerActive ? (
+                  <NetworkSettingsPage
+                    locale={locale}
+                    developerToken={developerToken}
+                    t={t}
+                  />
+                ) : null}
+              </>
+            )}
           </main>
         </div>
       </div>
+      <LoadingOverlay active={operationInFlight && !showRuntimeFallback} label={loadingLabel} />
       <VirtualKeyboard locale={locale} localeOptions={localeOptions} />
     </div>
   );

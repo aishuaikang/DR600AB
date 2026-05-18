@@ -40,6 +40,12 @@ type CommandRunner interface {
 	Run(ctx context.Context, name string, args ...string) ([]byte, error)
 }
 
+// SettingsStore 持久化需要在重启后重新应用的网络偏好。
+type SettingsStore interface {
+	LoadNetwork() (model.NetworkSettings, bool, error)
+	SaveNetwork(model.NetworkSettings) error
+}
+
 // ExecRunner 使用 os/exec 运行命令。
 type ExecRunner struct{}
 
@@ -51,15 +57,19 @@ func (ExecRunner) Run(ctx context.Context, name string, args ...string) ([]byte,
 
 // Service 管理系统网口配置。
 type Service struct {
-	runner CommandRunner
+	runner   CommandRunner
+	settings SettingsStore
 }
 
 // NewService 创建网口配置服务。
-func NewService(runner CommandRunner) *Service {
+func NewService(runner CommandRunner, settingsStore SettingsStore) *Service {
 	if runner == nil {
 		runner = ExecRunner{}
 	}
-	return &Service{runner: runner}
+	return &Service{
+		runner:   runner,
+		settings: settingsStore,
+	}
 }
 
 // ListInterfaces 返回 NetworkManager 管理到的设备和当前地址信息。
@@ -98,6 +108,9 @@ func (s *Service) ListInterfaces(ctx context.Context) ([]model.NetworkInterface,
 		if item.ConnectionName != "" && item.ConnectionName != "--" {
 			if method, err := s.connectionIPv4Method(ctx, item.ConnectionName); err == nil {
 				item.IPv4Method = method
+			}
+			if routeMetric, err := s.connectionRouteMetric(ctx, item.ConnectionName); err == nil {
+				item.RouteMetric = routeMetric
 			}
 		}
 		if item.IPv4Method == "" {
@@ -149,7 +162,15 @@ func (s *Service) UpdateInterface(
 	}
 
 	if req.Mode == "dhcp" {
-		if _, err := s.nmcli(ctx, "connection", "modify", target.ConnectionName, "ipv4.method", "auto", "ipv4.addresses", "", "ipv4.gateway", "", "ipv4.dns", ""); err != nil {
+		args := []string{
+			"connection", "modify", target.ConnectionName,
+			"ipv4.method", "auto",
+			"ipv4.addresses", "",
+			"ipv4.gateway", "",
+			"ipv4.dns", "",
+		}
+		args = appendRouteMetricArgs(args, req.RouteMetric)
+		if _, err := s.nmcli(ctx, args...); err != nil {
 			return model.NetworkInterface{}, err
 		}
 	} else {
@@ -161,12 +182,66 @@ func (s *Service) UpdateInterface(
 			"ipv4.gateway", strings.TrimSpace(req.Gateway4),
 			"ipv4.dns", strings.Join(trimStrings(req.DNS4), ","),
 		}
+		args = appendRouteMetricArgs(args, req.RouteMetric)
 		if _, err := s.nmcli(ctx, args...); err != nil {
 			return model.NetworkInterface{}, err
 		}
 	}
 
 	if _, err := s.nmcli(ctx, "connection", "up", target.ConnectionName); err != nil {
+		return model.NetworkInterface{}, err
+	}
+	if req.RouteMetric != nil {
+		if err := s.saveNetworkPriority(target, *req.RouteMetric); err != nil {
+			return model.NetworkInterface{}, err
+		}
+	}
+
+	updated, err := s.ListInterfaces(ctx)
+	if err != nil {
+		return model.NetworkInterface{}, err
+	}
+	for _, item := range updated {
+		if item.Name == name {
+			return item, nil
+		}
+	}
+	return model.NetworkInterface{}, ErrInterfaceNotFound
+}
+
+// UpdateInterfacePriority 更新指定网口连接的 IPv4 路由优先级，并在已连接时重新应用。
+func (s *Service) UpdateInterfacePriority(
+	ctx context.Context,
+	name string,
+	req model.NetworkPriorityRequest,
+) (model.NetworkInterface, error) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return model.NetworkInterface{}, fmt.Errorf("%w: interface name is required", ErrInvalidConfig)
+	}
+	if err := s.checkBackend(ctx); err != nil {
+		return model.NetworkInterface{}, err
+	}
+	if err := validateInterfaceName(name); err != nil {
+		return model.NetworkInterface{}, err
+	}
+	if err := validateRouteMetric(&req.RouteMetric, ErrInvalidConfig); err != nil {
+		return model.NetworkInterface{}, err
+	}
+
+	target, err := s.findManagedInterface(ctx, name)
+	if err != nil {
+		return model.NetworkInterface{}, err
+	}
+
+	args := append([]string{"connection", "modify", target.ConnectionName}, persistentRouteMetricArgs(req.RouteMetric)...)
+	if _, err := s.nmcli(ctx, args...); err != nil {
+		return model.NetworkInterface{}, err
+	}
+	if err := s.saveNetworkPriority(target, req.RouteMetric); err != nil {
+		return model.NetworkInterface{}, err
+	}
+	if err := s.reapplyConnectedConnection(ctx, target); err != nil {
 		return model.NetworkInterface{}, err
 	}
 
@@ -180,6 +255,95 @@ func (s *Service) UpdateInterface(
 		}
 	}
 	return model.NetworkInterface{}, ErrInterfaceNotFound
+}
+
+// UpdateInterfacePriorities 批量更新网口连接的 IPv4 路由优先级。
+func (s *Service) UpdateInterfacePriorities(
+	ctx context.Context,
+	req model.NetworkPriorityBatchRequest,
+) ([]model.NetworkInterface, error) {
+	if err := s.checkBackend(ctx); err != nil {
+		return nil, err
+	}
+	if len(req.Priorities) == 0 {
+		return nil, fmt.Errorf("%w: priorities are required", ErrInvalidConfig)
+	}
+
+	items, err := s.ListInterfaces(ctx)
+	if err != nil {
+		return nil, err
+	}
+	targets, err := resolvePriorityTargets(items, req.Priorities)
+	if err != nil {
+		return nil, err
+	}
+
+	settings := model.NetworkSettings{
+		Priorities: make([]model.NetworkPrioritySetting, 0, len(targets)),
+	}
+	for _, target := range targets {
+		args := append([]string{"connection", "modify", target.item.ConnectionName}, persistentRouteMetricArgs(target.routeMetric)...)
+		if _, err := s.nmcli(ctx, args...); err != nil {
+			return nil, err
+		}
+		settings.Priorities = append(settings.Priorities, model.NetworkPrioritySetting{
+			InterfaceName:  target.item.Name,
+			ConnectionName: target.item.ConnectionName,
+			RouteMetric:    target.routeMetric,
+		})
+	}
+
+	if s.settings != nil {
+		if err := s.settings.SaveNetwork(settings); err != nil {
+			return nil, err
+		}
+	}
+	for _, target := range targets {
+		if err := s.reapplyConnectedConnection(ctx, target.item); err != nil {
+			return nil, err
+		}
+	}
+
+	return s.ListInterfaces(ctx)
+}
+
+// RestoreSavedSettings 将已保存的网络优先级偏好重新写入 NetworkManager。
+func (s *Service) RestoreSavedSettings(ctx context.Context) error {
+	if s.settings == nil {
+		return nil
+	}
+
+	settings, ok, err := s.settings.LoadNetwork()
+	if err != nil || !ok {
+		return err
+	}
+	if len(settings.Priorities) == 0 {
+		return nil
+	}
+
+	items, err := s.ListInterfaces(ctx)
+	if err != nil {
+		return err
+	}
+	index := networkPriorityIndex(items)
+
+	for _, priority := range settings.Priorities {
+		if err := validateRouteMetric(&priority.RouteMetric, ErrInvalidConfig); err != nil {
+			continue
+		}
+		target, ok := index.lookup(priority)
+		if !ok || target.ConnectionName == "" || target.ConnectionName == "--" {
+			continue
+		}
+		args := append([]string{"connection", "modify", target.ConnectionName}, persistentRouteMetricArgs(priority.RouteMetric)...)
+		if _, err := s.nmcli(ctx, args...); err != nil {
+			return err
+		}
+		if err := s.reapplyConnectedConnection(ctx, target); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // ScanWiFi 扫描附近无线网络。
@@ -224,8 +388,10 @@ func (s *Service) ConnectWiFi(ctx context.Context, req model.WiFiConnectRequest)
 		args = append(args, "ifname", strings.TrimSpace(req.Device))
 	}
 
-	_, err := s.nmcli(ctx, args...)
-	return err
+	if _, err := s.nmcli(ctx, args...); err != nil {
+		return err
+	}
+	return nil
 }
 
 func (s *Service) checkBackend(ctx context.Context) error {
@@ -261,17 +427,74 @@ func (s *Service) connectionIPv4Method(ctx context.Context, connectionName strin
 	return strings.TrimSpace(output), nil
 }
 
+func (s *Service) findManagedInterface(ctx context.Context, name string) (model.NetworkInterface, error) {
+	items, err := s.ListInterfaces(ctx)
+	if err != nil {
+		return model.NetworkInterface{}, err
+	}
+	for _, item := range items {
+		if item.Name != name {
+			continue
+		}
+		if !item.Managed || item.ConnectionName == "" || item.ConnectionName == "--" {
+			return model.NetworkInterface{}, ErrInterfaceUnmanaged
+		}
+		return item, nil
+	}
+	return model.NetworkInterface{}, ErrInterfaceNotFound
+}
+
+func (s *Service) connectionRouteMetric(ctx context.Context, connectionName string) (*int, error) {
+	output, err := s.nmcli(ctx, "-g", "ipv4.route-metric", "connection", "show", connectionName)
+	if err != nil {
+		return nil, err
+	}
+	value := strings.TrimSpace(output)
+	if value == "" || value == "-1" {
+		return nil, nil
+	}
+	metric, err := strconv.Atoi(value)
+	if err != nil {
+		return nil, err
+	}
+	return &metric, nil
+}
+
+func (s *Service) saveNetworkPriority(target model.NetworkInterface, routeMetric int) error {
+	if s.settings == nil {
+		return nil
+	}
+
+	settings, _, err := s.settings.LoadNetwork()
+	if err != nil {
+		return err
+	}
+	settings = upsertNetworkPriority(settings, model.NetworkPrioritySetting{
+		InterfaceName:  target.Name,
+		ConnectionName: target.ConnectionName,
+		RouteMetric:    routeMetric,
+	})
+	return s.settings.SaveNetwork(settings)
+}
+
+func (s *Service) reapplyConnectedConnection(ctx context.Context, target model.NetworkInterface) error {
+	if !shouldReactivateConnection(target) {
+		return nil
+	}
+	if _, err := s.nmcli(ctx, "device", "reapply", target.Name); err == nil {
+		return nil
+	}
+	_, err := s.nmcli(ctx, "connection", "up", target.ConnectionName)
+	return err
+}
+
 func (s *Service) nmcli(ctx context.Context, args ...string) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, commandTimeout)
 	defer cancel()
 
 	output, err := s.runner.Run(ctx, "nmcli", args...)
 	if err != nil {
-		detail := strings.TrimSpace(string(output))
-		if detail == "" {
-			detail = err.Error()
-		}
-		return "", fmt.Errorf("%s: %w", detail, err)
+		return "", commandError("nmcli", args, output, err)
 	}
 	return strings.TrimSpace(string(output)), nil
 }
@@ -343,6 +566,83 @@ func parseWiFiList(output string) []model.WiFiNetwork {
 	return result
 }
 
+type priorityIndex struct {
+	byInterface  map[string]model.NetworkInterface
+	byConnection map[string]model.NetworkInterface
+}
+
+type priorityTarget struct {
+	item        model.NetworkInterface
+	routeMetric int
+}
+
+func networkPriorityIndex(items []model.NetworkInterface) priorityIndex {
+	index := priorityIndex{
+		byInterface:  map[string]model.NetworkInterface{},
+		byConnection: map[string]model.NetworkInterface{},
+	}
+	for _, item := range items {
+		if item.Name != "" {
+			index.byInterface[item.Name] = item
+		}
+		if item.ConnectionName != "" && item.ConnectionName != "--" {
+			index.byConnection[item.ConnectionName] = item
+		}
+	}
+	return index
+}
+
+func (i priorityIndex) lookup(priority model.NetworkPrioritySetting) (model.NetworkInterface, bool) {
+	if priority.InterfaceName != "" {
+		if item, ok := i.byInterface[priority.InterfaceName]; ok {
+			return item, true
+		}
+	}
+	if priority.ConnectionName != "" {
+		if item, ok := i.byConnection[priority.ConnectionName]; ok {
+			return item, true
+		}
+	}
+	return model.NetworkInterface{}, false
+}
+
+func resolvePriorityTargets(items []model.NetworkInterface, priorities []model.NetworkPriorityBatchItem) ([]priorityTarget, error) {
+	index := networkPriorityIndex(items)
+	targets := make([]priorityTarget, 0, len(priorities))
+	seen := map[string]struct{}{}
+
+	for _, priority := range priorities {
+		name := strings.TrimSpace(priority.InterfaceName)
+		if name == "" {
+			return nil, fmt.Errorf("%w: interface name is required", ErrInvalidConfig)
+		}
+		if err := validateInterfaceName(name); err != nil {
+			return nil, err
+		}
+		if err := validateRouteMetric(&priority.RouteMetric, ErrInvalidConfig); err != nil {
+			return nil, err
+		}
+		if _, ok := seen[name]; ok {
+			return nil, fmt.Errorf("%w: duplicate interface name", ErrInvalidConfig)
+		}
+		seen[name] = struct{}{}
+
+		item, ok := index.byInterface[name]
+		if !ok {
+			return nil, ErrInterfaceNotFound
+		}
+		if !item.Managed || item.ConnectionName == "" || item.ConnectionName == "--" {
+			return nil, ErrInterfaceUnmanaged
+		}
+		targets = append(targets, priorityTarget{
+			item:        item,
+			routeMetric: priority.RouteMetric,
+		})
+	}
+
+	return targets, nil
+}
+
 func applyDeviceDetails(interfaces map[string]model.NetworkInterface, output string) {
 	currentName := ""
 	for _, line := range strings.Split(output, "\n") {
@@ -363,7 +663,7 @@ func applyDeviceDetails(interfaces map[string]model.NetworkInterface, output str
 		if !ok {
 			continue
 		}
-		switch key {
+		switch normalizeDeviceDetailKey(key) {
 		case "GENERAL.HWADDR":
 			item.HardwareAddress = value
 		case "GENERAL.MTU":
@@ -385,6 +685,13 @@ func applyDeviceDetails(interfaces map[string]model.NetworkInterface, output str
 		}
 		interfaces[currentName] = item
 	}
+}
+
+func normalizeDeviceDetailKey(key string) string {
+	if base, _, ok := strings.Cut(key, "["); ok {
+		return base
+	}
+	return key
 }
 
 func parseNetworkAddress(value string) model.NetworkAddress {
@@ -413,6 +720,9 @@ func validateInterfaceName(name string) error {
 }
 
 func validateUpdateRequest(req model.NetworkInterfaceUpdateRequest) error {
+	if err := validateRouteMetric(req.RouteMetric, ErrInvalidConfig); err != nil {
+		return err
+	}
 	switch req.Mode {
 	case "dhcp":
 		return nil
@@ -451,6 +761,80 @@ func validateWiFiRequest(req model.WiFiConnectRequest) error {
 		return fmt.Errorf("%w: invalid password", ErrInvalidWiFiConfig)
 	}
 	return nil
+}
+
+func validateRouteMetric(value *int, wrap error) error {
+	if value == nil {
+		return nil
+	}
+	if *value < -1 || *value > 9999 {
+		return fmt.Errorf("%w: invalid route metric", wrap)
+	}
+	return nil
+}
+
+func appendRouteMetricArgs(args []string, routeMetric *int) []string {
+	if routeMetric == nil {
+		return args
+	}
+	return append(args, persistentRouteMetricArgs(*routeMetric)...)
+}
+
+func persistentRouteMetricArgs(routeMetric int) []string {
+	return []string{
+		"ipv4.route-metric", strconv.Itoa(routeMetric),
+		"connection.autoconnect", "yes",
+		"connection.autoconnect-priority", strconv.Itoa(autoconnectPriorityForRouteMetric(routeMetric)),
+	}
+}
+
+func autoconnectPriorityForRouteMetric(routeMetric int) int {
+	if routeMetric < 0 {
+		return 0
+	}
+
+	priority := 999 - routeMetric
+	if priority > 999 {
+		return 999
+	}
+	if priority < -999 {
+		return -999
+	}
+	return priority
+}
+
+func shouldReactivateConnection(target model.NetworkInterface) bool {
+	connectionName := strings.TrimSpace(target.ConnectionName)
+	return connectionName != "" &&
+		connectionName != "--" &&
+		strings.TrimSpace(target.State) == "connected"
+}
+
+func commandError(command string, args []string, output []byte, err error) error {
+	detail := strings.TrimSpace(string(output))
+	commandLine := strings.TrimSpace(command + " " + strings.Join(args, " "))
+	if detail == "" || detail == err.Error() {
+		return fmt.Errorf("%s: %w", commandLine, err)
+	}
+	return fmt.Errorf("%s: %s: %w", commandLine, detail, err)
+}
+
+func upsertNetworkPriority(settings model.NetworkSettings, priority model.NetworkPrioritySetting) model.NetworkSettings {
+	priorities := make([]model.NetworkPrioritySetting, 0, len(settings.Priorities)+1)
+	replaced := false
+	for _, item := range settings.Priorities {
+		if item.InterfaceName == priority.InterfaceName {
+			priorities = append(priorities, priority)
+			replaced = true
+			continue
+		}
+		priorities = append(priorities, item)
+	}
+	if !replaced {
+		priorities = append(priorities, priority)
+	}
+	settings.Priorities = priorities
+	return settings
 }
 
 func unescapeNMCLI(value string) string {

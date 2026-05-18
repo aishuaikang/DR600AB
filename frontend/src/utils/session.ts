@@ -2,6 +2,7 @@ import type { Banner } from "../app/types";
 import type {
   DetectionSessionResponse,
   DetectionSettings,
+  GPSRecord,
   GPSSessionResponse,
   GPSSettings,
   ParsedMessage,
@@ -98,6 +99,11 @@ export function dedupeById<T extends { id: string }>(items: T[], item: T, limit:
 export function dedupeParsed(items: ParsedMessage[], item: ParsedMessage, limit: number) {
   const key = `${item.type}|${item.time}|${item.raw}`;
   return [item, ...items.filter((entry) => `${entry.type}|${entry.time}|${entry.raw}` !== key)].slice(0, limit);
+}
+
+export function dedupeGPSRecords(items: GPSRecord[], item: GPSRecord, limit: number) {
+  const key = `${item.sessionId}|${item.receivedAt}|${item.raw}`;
+  return [item, ...items.filter((entry) => `${entry.sessionId}|${entry.receivedAt}|${entry.raw}` !== key)].slice(0, limit);
 }
 
 export function extractErrorMessage(error: unknown) {

@@ -206,6 +206,7 @@ type NetworkInterface struct {
 	DNS4            []string         `json:"dns4"`
 	DNS6            []string         `json:"dns6"`
 	IPv4Method      string           `json:"ipv4Method"`
+	RouteMetric     *int             `json:"routeMetric,omitempty"`
 	Managed         bool             `json:"managed"`
 }
 
@@ -226,12 +227,47 @@ type NetworkInterfaceUpdateRequest struct {
 	Prefix      int      `json:"prefix,omitempty"`
 	Gateway4    string   `json:"gateway4,omitempty"`
 	DNS4        []string `json:"dns4,omitempty"`
+	RouteMetric *int     `json:"routeMetric,omitempty"`
 }
 
 // NetworkInterfaceUpdateResponse 返回更新后的网口状态和提示。
 type NetworkInterfaceUpdateResponse struct {
 	Interface NetworkInterface `json:"interface"`
 	Message   string           `json:"message"`
+}
+
+// NetworkPriorityRequest 更新网口路由优先级。
+type NetworkPriorityRequest struct {
+	RouteMetric int `json:"routeMetric"`
+}
+
+// NetworkPriorityBatchItem 更新单个网口的路由优先级。
+type NetworkPriorityBatchItem struct {
+	InterfaceName string `json:"interfaceName"`
+	RouteMetric   int    `json:"routeMetric"`
+}
+
+// NetworkPriorityBatchRequest 批量更新网口路由优先级。
+type NetworkPriorityBatchRequest struct {
+	Priorities []NetworkPriorityBatchItem `json:"priorities"`
+}
+
+// NetworkPriorityBatchResponse 返回批量更新后的网口状态。
+type NetworkPriorityBatchResponse struct {
+	Interfaces []NetworkInterface `json:"interfaces"`
+	Message    string             `json:"message"`
+}
+
+// NetworkPrioritySetting 保存单个网口的路由优先级偏好。
+type NetworkPrioritySetting struct {
+	InterfaceName  string `json:"interfaceName"`
+	ConnectionName string `json:"connectionName,omitempty"`
+	RouteMetric    int    `json:"routeMetric"`
+}
+
+// NetworkSettings 保存需要在后端重启后重新应用的网络偏好。
+type NetworkSettings struct {
+	Priorities []NetworkPrioritySetting `json:"priorities"`
 }
 
 // WiFiNetwork 描述扫描到的无线网络。

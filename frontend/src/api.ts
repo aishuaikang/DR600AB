@@ -12,12 +12,16 @@ import type {
   GpioChannel,
   GpioChannelStateRequest,
   GpioChannelStateResponse,
+  GPSRecord,
   GPSSessionRequest,
   GPSSessionResponse,
   GPSSettings,
   ListResponse,
   LocaleMeta,
   NetworkInterfacesResponse,
+  NetworkPriorityBatchRequest,
+  NetworkPriorityBatchResponse,
+  NetworkPriorityRequest,
   NetworkInterfaceUpdateRequest,
   NetworkInterfaceUpdateResponse,
   ParsedMessage,
@@ -188,6 +192,12 @@ export function getFpv(locale: string, developerToken: string, limit = 100): Pro
   }, locale);
 }
 
+export function getGPSRecords(locale: string, developerToken: string, limit = 200): Promise<ListResponse<GPSRecord>> {
+  return requestJson<ListResponse<GPSRecord>>(`/gps/records?limit=${limit}`, {
+    headers: developerHeaders(developerToken),
+  }, locale);
+}
+
 export function getChannels(locale: string, developerToken: string): Promise<ChannelsResponse> {
   return requestJson<ChannelsResponse>("/interference/channels", {
     headers: developerHeaders(developerToken),
@@ -220,6 +230,31 @@ export function updateNetworkInterface(
   developerToken: string,
 ): Promise<NetworkInterfaceUpdateResponse> {
   return requestJson<NetworkInterfaceUpdateResponse>(`/network/interfaces/${encodeURIComponent(name)}`, {
+    method: "PUT",
+    headers: developerHeaders(developerToken),
+    body: JSON.stringify(payload),
+  }, locale);
+}
+
+export function updateNetworkInterfacePriority(
+  name: string,
+  payload: NetworkPriorityRequest,
+  locale: string,
+  developerToken: string,
+): Promise<NetworkInterfaceUpdateResponse> {
+  return requestJson<NetworkInterfaceUpdateResponse>(`/network/interfaces/${encodeURIComponent(name)}/priority`, {
+    method: "PUT",
+    headers: developerHeaders(developerToken),
+    body: JSON.stringify(payload),
+  }, locale);
+}
+
+export function updateNetworkInterfacePriorities(
+  payload: NetworkPriorityBatchRequest,
+  locale: string,
+  developerToken: string,
+): Promise<NetworkPriorityBatchResponse> {
+  return requestJson<NetworkPriorityBatchResponse>("/network/priorities", {
     method: "PUT",
     headers: developerHeaders(developerToken),
     body: JSON.stringify(payload),

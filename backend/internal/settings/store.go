@@ -20,6 +20,7 @@ type Store struct {
 type savedSettings struct {
 	Detection model.DetectionSessionRequest `json:"detection"`
 	GPS       model.GPSSessionRequest       `json:"gps"`
+	Network   model.NetworkSettings         `json:"network"`
 }
 
 // NewStore 创建使用指定路径的设置存储。
@@ -93,6 +94,39 @@ func (s *Store) SaveGPS(req model.GPSSessionRequest) error {
 	return s.save(settings)
 }
 
+// LoadNetwork 在文件存在时读取已持久化的网络设置。
+func (s *Store) LoadNetwork() (model.NetworkSettings, bool, error) {
+	if s == nil || s.path == "" {
+		return model.NetworkSettings{}, false, nil
+	}
+
+	settings, ok, err := s.load()
+	if err != nil || !ok {
+		return model.NetworkSettings{}, false, err
+	}
+	if isEmptyNetworkSettings(settings.Network) {
+		return model.NetworkSettings{}, false, nil
+	}
+	return settings.Network, true, nil
+}
+
+// SaveNetwork 以原子方式将网络设置写入磁盘。
+func (s *Store) SaveNetwork(req model.NetworkSettings) error {
+	if s == nil || s.path == "" {
+		return nil
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	settings, _, err := s.load()
+	if err != nil {
+		return err
+	}
+	settings.Network = req
+	return s.save(settings)
+}
+
 func (s *Store) load() (savedSettings, bool, error) {
 	data, err := os.ReadFile(s.path)
 	if err != nil {
@@ -104,7 +138,9 @@ func (s *Store) load() (savedSettings, bool, error) {
 
 	var settings savedSettings
 	if err := json.Unmarshal(data, &settings); err == nil {
-		if !isEmptyDetectionSettings(settings.Detection) || !isEmptyGPSSettings(settings.GPS) {
+		if !isEmptyDetectionSettings(settings.Detection) ||
+			!isEmptyGPSSettings(settings.GPS) ||
+			!isEmptyNetworkSettings(settings.Network) {
 			return settings, true, nil
 		}
 	}
@@ -121,6 +157,7 @@ func (s *Store) save(settings savedSettings) error {
 		return err
 	}
 
+	settings = normalizeSavedSettings(settings)
 	data, err := json.MarshalIndent(settings, "", "  ")
 	if err != nil {
 		return err
@@ -159,4 +196,15 @@ func isEmptyGPSSettings(req model.GPSSessionRequest) bool {
 		req.Parity == "" &&
 		req.ReadTimeoutMs == 0 &&
 		!req.AutoConnect
+}
+
+func isEmptyNetworkSettings(req model.NetworkSettings) bool {
+	return len(req.Priorities) == 0
+}
+
+func normalizeSavedSettings(settings savedSettings) savedSettings {
+	if settings.Network.Priorities == nil {
+		settings.Network.Priorities = []model.NetworkPrioritySetting{}
+	}
+	return settings
 }

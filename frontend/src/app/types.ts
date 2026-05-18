@@ -3,7 +3,14 @@ import type { LucideIcon } from "lucide-react";
 
 import type { ParsedMessage, ParsedMessageType } from "../types";
 
-export type Page = ParsedMessageType | "developer-settings" | "interference" | "network-settings" | "settings" | "screen";
+export type Page =
+  | ParsedMessageType
+  | "developer-settings"
+  | "gps-records"
+  | "interference"
+  | "network-settings"
+  | "settings"
+  | "screen";
 
 export type Tone = "neutral" | "success" | "warning" | "error" | "info";
 

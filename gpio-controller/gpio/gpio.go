@@ -57,10 +57,13 @@ func NewPin(number int) *Pin {
 // Export 导出引脚，使其可通过 sysfs 访问
 func (p *Pin) Export() error {
 	if p.IsExported() {
-		return p.busyError()
+		return p.waitForAttribute("value", exportReadyRetries, exportReadyDelay)
 	}
 	if err := writeControlFile("export", p.Number); err != nil {
 		if isBusyError(err) {
+			if p.IsExported() {
+				return p.waitForAttribute("value", exportReadyRetries, exportReadyDelay)
+			}
 			return p.busyError()
 		}
 		return fmt.Errorf("导出 GPIO%d 失败: %w", p.Number, err)

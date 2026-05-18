@@ -1,7 +1,6 @@
 package gpio
 
 import (
-	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -62,17 +61,62 @@ func TestExportReturnsTimeoutWhenValueNeverAppears(t *testing.T) {
 	}
 }
 
-func TestExportReturnsBusyErrorWhenPinDirectoryAlreadyExists(t *testing.T) {
+func TestSetupReusesPinDirectoryWhenAlreadyExported(t *testing.T) {
 	root := configureTestSysfs(t)
 	pin := NewPin(25)
 
-	if err := os.MkdirAll(filepath.Join(root, "gpio25"), 0o755); err != nil {
+	pinDir := filepath.Join(root, "gpio25")
+	if err := os.MkdirAll(pinDir, 0o755); err != nil {
 		t.Fatalf("creating gpio25 dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(pinDir, "direction"), []byte("in"), 0o644); err != nil {
+		t.Fatalf("writing direction: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(pinDir, "value"), []byte("0"), 0o644); err != nil {
+		t.Fatalf("writing value: %v", err)
 	}
 
 	oldWriteFile := writeFile
 	writeFile = func(path string, data []byte, perm os.FileMode) error {
 		if filepath.Base(path) == "export" {
+			t.Fatalf("Export should not write export when gpio directory already exists")
+		}
+		return oldWriteFile(path, data, perm)
+	}
+	t.Cleanup(func() {
+		writeFile = oldWriteFile
+	})
+
+	if err := pin.Setup(); err != nil {
+		t.Fatalf("Setup() error = %v", err)
+	}
+
+	directionData, err := os.ReadFile(filepath.Join(pinDir, "direction"))
+	if err != nil {
+		t.Fatalf("reading direction file: %v", err)
+	}
+	if got := strings.TrimSpace(string(directionData)); got != directionOut {
+		t.Fatalf("direction = %q, want %q", got, directionOut)
+	}
+}
+
+func TestExportReusesPinDirectoryCreatedByConcurrentExport(t *testing.T) {
+	root := configureTestSysfs(t)
+	pin := NewPin(26)
+
+	oldWriteFile := writeFile
+	writeFile = func(path string, data []byte, perm os.FileMode) error {
+		if filepath.Base(path) == "export" {
+			pinDir := filepath.Join(root, "gpio26")
+			if err := os.MkdirAll(pinDir, 0o755); err != nil {
+				t.Fatalf("creating gpio26 dir: %v", err)
+			}
+			if err := os.WriteFile(filepath.Join(pinDir, "direction"), []byte("in"), 0o644); err != nil {
+				t.Fatalf("writing direction: %v", err)
+			}
+			if err := os.WriteFile(filepath.Join(pinDir, "value"), []byte("0"), 0o644); err != nil {
+				t.Fatalf("writing value: %v", err)
+			}
 			return syscall.EBUSY
 		}
 		return oldWriteFile(path, data, perm)
@@ -81,25 +125,18 @@ func TestExportReturnsBusyErrorWhenPinDirectoryAlreadyExists(t *testing.T) {
 		writeFile = oldWriteFile
 	})
 
-	err := pin.Export()
-	if err == nil {
-		t.Fatal("Export() error = nil, want busy error")
-	}
-	if !errors.Is(err, syscall.EBUSY) && !strings.Contains(err.Error(), "已被其他进程导出或被内核占用") {
-		t.Fatalf("Export() error = %q, want busy message", err)
+	if err := pin.Export(); err != nil {
+		t.Fatalf("Export() error = %v", err)
 	}
 }
 
-func TestExportReturnsBusyErrorWhenConcurrentExportCreatesPinDirectory(t *testing.T) {
-	root := configureTestSysfs(t)
-	pin := NewPin(26)
+func TestExportReturnsBusyErrorWhenKernelDoesNotExposePinDirectory(t *testing.T) {
+	_ = configureTestSysfs(t)
+	pin := NewPin(27)
 
 	oldWriteFile := writeFile
 	writeFile = func(path string, data []byte, perm os.FileMode) error {
 		if filepath.Base(path) == "export" {
-			if err := os.MkdirAll(filepath.Join(root, "gpio26"), 0o755); err != nil {
-				t.Fatalf("creating gpio26 dir: %v", err)
-			}
 			return syscall.EBUSY
 		}
 		return oldWriteFile(path, data, perm)
