@@ -1073,7 +1073,7 @@ body.virtual-keyboard-open .app-loading-overlay {
   --screen-panel-shadow: 0 1em 2em rgba(0, 0, 0, 0.24);
   --screen-panel-shadow-soft: 0 0.5em 1.25em rgba(0, 0, 0, 0.18);
   --screen-content-top: 5.4em;
-  --screen-left-edge: 10px;
+  --screen-left-edge: 1%;
   --screen-right-edge: 1%;
   --screen-header-title-top: 9px;
   --screen-header-title-size: 38px;
@@ -1102,12 +1102,12 @@ body.virtual-keyboard-open .app-loading-overlay {
 
 .screen-map .leaflet-left {
   top: var(--screen-content-top);
-  left: 0;
+  left: var(--screen-left-edge);
 }
 
 .screen-map .leaflet-left > .leaflet-control {
   margin-top: 0 !important;
-  margin-left: var(--screen-left-edge);
+  margin-left: 0;
 }
 
 .screen-map .leaflet-left > .leaflet-control + .leaflet-control {
@@ -1612,28 +1612,94 @@ body.virtual-keyboard-open .app-loading-overlay {
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
   gap: 0.56em;
-  min-height: 2.76em;
-  padding: 0.52em 0.6em 0.42em;
+  min-height: 3.1em;
+  padding: 0.48em 0.58em 0.46em;
   border-bottom: 1px solid var(--screen-line);
-  background: linear-gradient(
-    180deg,
-    rgba(255, 255, 255, 0.06),
-    rgba(255, 255, 255, 0.022)
-  );
+  background:
+    radial-gradient(circle at 1.4em 50%, rgba(38, 201, 255, 0.18), transparent 2.8em),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.07), rgba(255, 255, 255, 0.018));
 }
 
-.screen-strike-panel__header span {
+.screen-panel-title {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 0.52em;
+}
+
+.screen-panel-title__icon {
+  position: relative;
+  display: grid;
+  width: 2.05em;
+  height: 2.05em;
+  flex: none;
+  place-items: center;
+  border: 1px solid rgba(38, 201, 255, 0.42);
+  border-radius: 999px;
+  color: #b7f2ff;
+  background:
+    linear-gradient(135deg, rgba(38, 201, 255, 0.22), rgba(38, 201, 255, 0.05)),
+    rgba(3, 14, 24, 0.74);
+  box-shadow:
+    0 0 1.2em rgba(38, 201, 255, 0.16),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.055);
+}
+
+.screen-panel-title__icon::after {
+  position: absolute;
+  right: 0.22em;
+  bottom: 0.22em;
+  width: 0.28em;
+  height: 0.28em;
+  border-radius: 999px;
+  content: "";
+  background: #48e7ff;
+  box-shadow: 0 0 0.48em rgba(72, 231, 255, 0.9);
+}
+
+.screen-panel-title__icon--strike {
+  border-color: rgba(103, 232, 249, 0.48);
+  color: #a5f3fc;
+  background:
+    radial-gradient(circle at 50% 45%, rgba(103, 232, 249, 0.24), transparent 68%),
+    rgba(3, 14, 24, 0.74);
+}
+
+.screen-panel-title__icon--strike::after {
+  right: 0.2em;
+  bottom: 0.28em;
+}
+
+.screen-panel-title__icon--target {
+  border-color: rgba(125, 211, 252, 0.44);
+  border-radius: 999px;
+  color: #bae6fd;
+}
+
+.screen-panel-title__text {
   display: grid;
   min-width: 0;
-  gap: 0.08em;
+  gap: 0.14em;
 }
 
-.screen-strike-panel__header em {
-  color: rgba(206, 224, 230, 0.82);
+.screen-panel-title__text em {
+  color: rgba(180, 214, 224, 0.78);
   font-size: 0.56em;
   font-style: normal;
   font-weight: 700;
   line-height: 1;
+  text-transform: uppercase;
+}
+
+.screen-panel-title__text strong {
+  min-width: 0;
+  overflow: hidden;
+  color: #f8fbfc;
+  font-size: 0.9em;
+  font-weight: 850;
+  line-height: 1.05;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .screen-strike-panel__status,
@@ -2094,39 +2160,12 @@ body.virtual-keyboard-open .app-loading-overlay {
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
   gap: 0.56em;
-  min-height: 2.78em;
-  padding: 0.52em 0.6em 0.42em;
+  min-height: 3.1em;
+  padding: 0.48em 0.58em 0.46em;
   border-bottom: 1px solid var(--screen-line);
-  background: linear-gradient(
-    180deg,
-    rgba(255, 255, 255, 0.06),
-    rgba(255, 255, 255, 0.022)
-  );
-}
-
-.screen-info-list__header span {
-  display: grid;
-  min-width: 0;
-  gap: 0.08em;
-}
-
-.screen-info-list__header em {
-  color: rgba(206, 224, 230, 0.82);
-  font-size: 0.56em;
-  font-style: normal;
-  font-weight: 700;
-  line-height: 1;
-}
-
-.screen-info-list__header span > strong {
-  min-width: 0;
-  overflow: hidden;
-  color: #f8fbfc;
-  font-size: 0.88em;
-  font-weight: 800;
-  line-height: 1.1;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  background:
+    radial-gradient(circle at 1.4em 50%, rgba(38, 201, 255, 0.18), transparent 2.8em),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.07), rgba(255, 255, 255, 0.018));
 }
 
 .screen-tabs {
@@ -3799,11 +3838,17 @@ body.virtual-keyboard-open .app-loading-overlay {
   }
 
   .screen-info-list__header {
-    min-height: 2.72em;
-    padding: 0.46em 0.62em 0.38em;
+    min-height: 2.9em;
+    padding: 0.42em 0.58em 0.38em;
   }
 
-  .screen-info-list__header span > strong {
+  .screen-panel-title__icon {
+    width: 1.86em;
+    height: 1.86em;
+    border-radius: 999px;
+  }
+
+  .screen-panel-title__text strong {
     font-size: 0.8em;
   }
 

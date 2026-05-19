@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { TFunction } from "i18next";
 import type L from "leaflet";
-import { ChevronDown, ChevronLeft, ChevronRight, Globe2, Inbox, Loader2, MapPin, QrCode, Radar, Radio, RadioTower, SatelliteDish, Settings2, Square, X, Zap } from "lucide-react";
+import { ChevronDown, ChevronLeft, ChevronRight, Globe2, Inbox, Loader2, MapPin, QrCode, Radar, Radio, RadioTower, SatelliteDish, ScanSearch, Settings2, Shield, Square, X, Zap } from "lucide-react";
 import * as QRCode from "qrcode";
 
 import {
@@ -1035,10 +1035,15 @@ function ScreenStrikePanel({
 
       <div className="screen-strike-panel__inner">
         <div className="screen-strike-panel__header">
-          <span>
-            <em>{t("operationPanel", { ns: "screen" })}</em>
-            <strong>{operationTitle}</strong>
-          </span>
+          <div className="screen-panel-title">
+            <span className="screen-panel-title__icon screen-panel-title__icon--strike">
+              <Shield size={15} aria-hidden="true" />
+            </span>
+            <span className="screen-panel-title__text">
+              <em>{t("operationPanel", { ns: "screen" })}</em>
+              <strong>{operationTitle}</strong>
+            </span>
+          </div>
           <strong className={cx("screen-strike-panel__status", statusActive && "screen-strike-panel__status--active")}>
             {statusValue}
           </strong>
@@ -1199,10 +1204,15 @@ function RightList({
 
       <div className="screen-info-list">
         <div className="screen-info-list__header">
-          <span>
-            <em>{t("targetList", { ns: "screen" })}</em>
-            <strong>{activeLabel}</strong>
-          </span>
+          <div className="screen-panel-title">
+            <span className="screen-panel-title__icon screen-panel-title__icon--target">
+              <ScanSearch size={15} aria-hidden="true" />
+            </span>
+            <span className="screen-panel-title__text">
+              <em>{t("targetList", { ns: "screen" })}</em>
+              <strong>{activeLabel}</strong>
+            </span>
+          </div>
           <strong className="screen-info-list__count">{activeCount}</strong>
         </div>
 
