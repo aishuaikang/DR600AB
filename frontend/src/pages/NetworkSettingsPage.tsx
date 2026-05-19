@@ -729,7 +729,7 @@ function WiFiPanel({
                 </button>
               ))}
               {networks.length === 0 ? (
-                <div className="grid min-h-24 place-items-center rounded-2xl border border-base-300 bg-base-100/35 text-sm text-base-content/55">
+                <div className="admin-empty-state admin-empty-state--compact">
                   {t("wifiEmpty", { ns: "settings" })}
                 </div>
               ) : null}
@@ -834,7 +834,7 @@ export function NetworkSettingsPage({
         setBanner({ kind: "idle", message: "" });
       }
     } catch (error) {
-      setBanner({ kind: "error", message: extractErrorMessage(error) });
+      setBanner({ kind: "error", message: extractErrorMessage(error, t("unexpectedError", { ns: "common" })) });
     } finally {
       setLoading(false);
     }
@@ -857,7 +857,7 @@ export function NetworkSettingsPage({
         }
       }
     } catch (error) {
-      setWifiState({ available: false, readOnly: true, message: extractErrorMessage(error) });
+      setWifiState({ available: false, readOnly: true, message: extractErrorMessage(error, t("unexpectedError", { ns: "common" })) });
     } finally {
       setWifiBusy(false);
     }
@@ -902,7 +902,7 @@ export function NetworkSettingsPage({
       setBanner({ kind: "success", message: response.message || t("networkPriorityUpdated", { ns: "settings" }) });
       await load({ silent: true });
     } catch (error) {
-      setBanner({ kind: "error", message: extractErrorMessage(error) });
+      setBanner({ kind: "error", message: extractErrorMessage(error, t("unexpectedError", { ns: "common" })) });
     } finally {
       setPrioritySaving(false);
     }
@@ -934,7 +934,7 @@ export function NetworkSettingsPage({
       setBanner({ kind: "success", message: response.message || t("networkPriorityUpdated", { ns: "settings" }) });
       await load({ silent: true });
     } catch (error) {
-      setBanner({ kind: "error", message: extractErrorMessage(error) });
+      setBanner({ kind: "error", message: extractErrorMessage(error, t("unexpectedError", { ns: "common" })) });
     } finally {
       setPrioritySaving(false);
     }
@@ -1004,7 +1004,7 @@ export function NetworkSettingsPage({
               await scanWiFi();
               await load({ silent: true });
             } catch (error) {
-              setBanner({ kind: "error", message: extractErrorMessage(error) });
+              setBanner({ kind: "error", message: extractErrorMessage(error, t("unexpectedError", { ns: "common" })) });
             } finally {
               setWifiBusy(false);
             }
@@ -1073,7 +1073,7 @@ export function NetworkSettingsPage({
                       setDrafts((items) => ({ ...items, [selectedInterface.name]: toDraft(response.interface) }));
                       setBanner({ kind: "success", message: response.message });
                     } catch (error) {
-                      setBanner({ kind: "error", message: extractErrorMessage(error) });
+                      setBanner({ kind: "error", message: extractErrorMessage(error, t("unexpectedError", { ns: "common" })) });
                     } finally {
                       setSaving("");
                     }
@@ -1088,7 +1088,7 @@ export function NetworkSettingsPage({
       {!loading && interfaces.length === 0 && !banner.message && backendState.available ? (
         <Panel>
           <PanelBody>
-            <div className="grid min-h-32 place-items-center text-sm text-base-content/55">{t("networkEmpty", { ns: "settings" })}</div>
+            <div className="admin-empty-state admin-empty-state--compact">{t("networkEmpty", { ns: "settings" })}</div>
           </PanelBody>
         </Panel>
       ) : null}

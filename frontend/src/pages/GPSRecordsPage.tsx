@@ -90,8 +90,10 @@ export function GPSRecordsPage({
               <tbody>
                 {records.length === 0 ? (
                   <tr>
-                    <td colSpan={9} className="py-8 text-center text-sm text-base-content/55">
-                      {loading ? t("loading", { ns: "common" }) : t("empty", { ns: "common" })}
+                    <td colSpan={9} className="p-3">
+                      <div className="admin-empty-state admin-empty-state--table">
+                        {loading ? t("loading", { ns: "common" }) : t("empty", { ns: "common" })}
+                      </div>
                     </td>
                   </tr>
                 ) : (

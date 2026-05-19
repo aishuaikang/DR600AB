@@ -88,6 +88,7 @@ export function UserSettingsPage({
     setLocationMessage({ kind: "idle", text: "" });
     try {
       await onUserSettingsChange({
+        ...userSettings,
         manualDeviceLocation: {
           latitude,
           longitude,
@@ -95,7 +96,7 @@ export function UserSettingsPage({
       });
       setLocationMessage({ kind: "success", text: t("manualDeviceLocationSaved", { ns: "settings" }) });
     } catch (error) {
-      setLocationMessage({ kind: "error", text: extractErrorMessage(error) });
+      setLocationMessage({ kind: "error", text: extractErrorMessage(error, t("unexpectedError", { ns: "common" })) });
     } finally {
       setLocationSaving(false);
     }
@@ -105,10 +106,13 @@ export function UserSettingsPage({
     setLocationSaving(true);
     setLocationMessage({ kind: "idle", text: "" });
     try {
-      await onUserSettingsChange({});
+      await onUserSettingsChange({
+        ...userSettings,
+        manualDeviceLocation: undefined,
+      });
       setLocationMessage({ kind: "success", text: t("manualDeviceLocationCleared", { ns: "settings" }) });
     } catch (error) {
-      setLocationMessage({ kind: "error", text: extractErrorMessage(error) });
+      setLocationMessage({ kind: "error", text: extractErrorMessage(error, t("unexpectedError", { ns: "common" })) });
     } finally {
       setLocationSaving(false);
     }

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import {
@@ -17,6 +17,7 @@ import {
   getUserSettings,
   openDetectionStream,
   setChannelState,
+  setUnauthorizedHandler,
   updateDetectionSettings,
   updateGPSSettings,
   updateUserSettings,
@@ -38,6 +39,7 @@ import { SettingsPage } from "./pages/SettingsPage";
 import { UserSettingsPage } from "./pages/UserSettingsPage";
 import { getStoredSettings, persistSettings } from "./preferences";
 import { FIXED_SERIAL_PROFILE } from "./serial-profile";
+import { referenceMapLayers } from "./pages/screenData";
 import type {
   DetectionSessionResponse,
   DetectionRecord,
@@ -62,6 +64,11 @@ import {
   normalizeVisibleLocales,
   persistVisibleLocales,
 } from "./utils/locales";
+import {
+  getStoredVisibleMapLayers,
+  normalizeVisibleMapLayers,
+  persistVisibleMapLayers,
+} from "./utils/mapLayers";
 import { normalizeGpioChannels } from "./utils/gpioChannels";
 import {
   dedupeById,
@@ -86,6 +93,7 @@ function App() {
   const [storedSettings, setStoredSettings] = useState(() => getStoredSettings());
   const [meta, setMeta] = useState<LocaleMeta | null>(null);
   const [visibleLocales, setVisibleLocales] = useState<string[]>(() => getStoredVisibleLocales());
+  const [visibleMapLayers, setVisibleMapLayers] = useState<string[]>(() => getStoredVisibleMapLayers());
   const [developerSession, setDeveloperSession] = useState<DeveloperSession | null>(() => readDeveloperSession());
   const [ports, setPorts] = useState<PortInfo[]>([]);
   const [session, setSession] = useState<DetectionSessionResponse | null>(null);
@@ -128,6 +136,28 @@ function App() {
     setSelectedGPSDataPort(nextDataPort);
     setSelectedGPSControlPort(nextControlPort);
   }, []);
+
+  const handleUnauthorized = useCallback((error: Error) => {
+    clearDeveloperSession();
+    setDeveloperSession(null);
+    setSession(null);
+    setGPSSession(null);
+    setDetections([]);
+    setMessages([]);
+    setGPSRecords([]);
+    setChannels([]);
+    setChannelBusyId("");
+    setRuntimeLoading(false);
+    setGPSRecordsLoading(false);
+    setBanner({ kind: "error", message: error.message || t("developerSessionExpired", { ns: "common" }) });
+    setGPSBanner({ kind: "idle", message: "" });
+    setGPSRecordsBanner({ kind: "idle", message: "" });
+    if (isDebugPage(page)) {
+      navigate("screen");
+    }
+  }, [navigate, page, t]);
+
+  useEffect(() => setUnauthorizedHandler(handleUnauthorized), [handleUnauthorized]);
 
   const bootstrap = useCallback(async () => {
     setRuntimeLoading(true);
@@ -175,7 +205,7 @@ function App() {
         message: gpsSessionBannerText(gpsSessionRes, gpsSessionRes.active ? t("active", { ns: "common" }) : t("idle", { ns: "common" })),
       });
     } catch (error) {
-      setBanner({ kind: "error", message: extractErrorMessage(error) });
+      setBanner({ kind: "error", message: extractErrorMessage(error, t("unexpectedError", { ns: "common" })) });
     } finally {
       setRuntimeLoading(false);
     }
@@ -193,7 +223,7 @@ function App() {
       setGPSRecords(response.items);
       setGPSRecordsBanner({ kind: "idle", message: "" });
     } catch (error) {
-      setGPSRecordsBanner({ kind: "error", message: extractErrorMessage(error) });
+      setGPSRecordsBanner({ kind: "error", message: extractErrorMessage(error, t("unexpectedError", { ns: "common" })) });
     } finally {
       setGPSRecordsLoading(false);
     }
@@ -319,7 +349,7 @@ function App() {
           });
           await bootstrap();
         } catch (error) {
-          setBanner({ kind: "error", message: extractErrorMessage(error) });
+          setBanner({ kind: "error", message: extractErrorMessage(error, t("unexpectedError", { ns: "common" })) });
         }
       })();
     }, 350);
@@ -369,7 +399,7 @@ function App() {
           });
           await bootstrap();
         } catch (error) {
-          setGPSBanner({ kind: "error", message: extractErrorMessage(error) });
+          setGPSBanner({ kind: "error", message: extractErrorMessage(error, t("unexpectedError", { ns: "common" })) });
         }
       })();
     }, 350);
@@ -518,6 +548,11 @@ function App() {
   const appTitle = storedSettings.appTitle.trim() || defaultAppTitle;
   const allLocaleOptions = meta?.supportedLocales.length ? meta.supportedLocales : supportedLocales;
   const localeOptions = normalizeVisibleLocales(allLocaleOptions, visibleLocales, locale);
+  const allMapLayerOptions = referenceMapLayers;
+  const mapLayerOptions = useMemo(
+    () => normalizeVisibleMapLayers(allMapLayerOptions, visibleMapLayers),
+    [allMapLayerOptions, visibleMapLayers],
+  );
   const developerExpiresAt = developerSession?.expiresAt ?? 0;
   const isMessagePage = developerActive && MESSAGE_PAGE_ORDER.includes(page as DebugRecordPage);
   const loadingLabel = t("loading", { ns: "common" });
@@ -542,6 +577,14 @@ function App() {
       persistVisibleLocales(normalized);
     }
   }, [allLocaleOptions, locale, visibleLocales]);
+
+  useEffect(() => {
+    const normalized = normalizeVisibleMapLayers(allMapLayerOptions, visibleMapLayers);
+    if (normalized.join("|") !== visibleMapLayers.join("|")) {
+      setVisibleMapLayers(normalized);
+      persistVisibleMapLayers(normalized);
+    }
+  }, [allMapLayerOptions, visibleMapLayers]);
 
   useEffect(() => {
     const sync = () => {
@@ -570,7 +613,7 @@ function App() {
       setChannels((items) => normalizeGpioChannels(dedupeById(items, response.channel, 16)));
       setBanner({ kind: "success", message: response.message });
     } catch (error) {
-      setBanner({ kind: "error", message: extractErrorMessage(error) });
+      setBanner({ kind: "error", message: extractErrorMessage(error, t("unexpectedError", { ns: "common" })) });
     } finally {
       setChannelBusyId("");
     }
@@ -580,6 +623,12 @@ function App() {
     const normalized = normalizeVisibleLocales(allLocaleOptions, nextLocales, locale);
     setVisibleLocales(normalized);
     persistVisibleLocales(normalized);
+  };
+
+  const handleVisibleMapLayersChange = (nextLayers: string[]) => {
+    const normalized = normalizeVisibleMapLayers(allMapLayerOptions, nextLayers);
+    setVisibleMapLayers(normalized);
+    persistVisibleMapLayers(normalized);
   };
 
   const handleAppTitleChange = (value: string) => {
@@ -623,7 +672,17 @@ function App() {
   };
 
   if (page === "screen") {
-    return <ScreenPage appTitle={appTitle} t={t} locale={locale} localeOptions={localeOptions} onLocaleChange={setLocale} />;
+    return (
+      <ScreenPage
+        appTitle={appTitle}
+        t={t}
+        locale={locale}
+        localeOptions={localeOptions}
+        visibleMapLayers={mapLayerOptions}
+        userSettings={userSettings}
+        onLocaleChange={setLocale}
+      />
+    );
   }
 
   return (
@@ -722,13 +781,18 @@ function App() {
                     allLocaleOptions={allLocaleOptions}
                     visibleLocales={localeOptions}
                     currentLocale={locale}
+                    allMapLayerOptions={allMapLayerOptions}
+                    visibleMapLayers={mapLayerOptions}
+                    userSettings={userSettings}
                     t={t}
                     onRefresh={() => void bootstrap()}
                     onReceivePortChange={setSelectedReceivePort}
                     onSendPortChange={setSelectedSendPort}
                     onGPSDataPortChange={setSelectedGPSDataPort}
                     onGPSControlPortChange={setSelectedGPSControlPort}
+                    onUserSettingsChange={handleUserSettingsChange}
                     onVisibleLocalesChange={handleVisibleLocalesChange}
+                    onVisibleMapLayersChange={handleVisibleMapLayersChange}
                   />
                 ) : null}
 

@@ -91,6 +91,7 @@ export interface GeoPoint {
 
 export interface UserSettings {
   manualDeviceLocation?: GeoPoint;
+  screenStrikeChannelLabels?: string[];
 }
 
 export interface ScreenDeviceLocationResponse {
@@ -98,6 +99,40 @@ export interface ScreenDeviceLocationResponse {
   point?: GeoPoint;
   updatedAt?: string;
   valid: boolean;
+}
+
+export interface ScreenStrikeChannel {
+  id: string;
+  label: string;
+  pin: number;
+  bands: string[] | null;
+  reserved: boolean;
+  enabled: boolean;
+  actualLevel: string;
+  desiredLevel: string;
+  status: string;
+  lastError?: string;
+}
+
+export interface ScreenStrikeState {
+  active: boolean;
+  channelIds: string[];
+  durationSeconds: number;
+  remainingSeconds: number;
+  startedAt?: string;
+  endsAt?: string;
+  channels: ScreenStrikeChannel[];
+}
+
+export interface ScreenStrikeResponse {
+  state: ScreenStrikeState;
+  message: string;
+}
+
+export interface ScreenStrikeRequest {
+  enabled: boolean;
+  channelIds: string[];
+  durationSeconds: number;
 }
 
 export interface GPSSessionResponse {
@@ -134,7 +169,7 @@ export interface DetectionRecord {
   portName: string;
   kind: string;
   receivedAt: string;
-  device?: string;
+  device: string;
   model?: string;
   frequency?: number;
   rssi?: number;
@@ -146,7 +181,7 @@ export interface ScreenDetectionLastRecord {
   id: string;
   kind: string;
   receivedAt: string;
-  device?: string;
+  device: string;
   model?: string;
   frequency?: number;
   rssi?: number;
@@ -158,7 +193,7 @@ export interface ScreenDetectionTarget {
   model: string;
   frequency: number;
   rssi: number;
-  devices: string[];
+  device?: string;
   firstSeen: string;
   lastSeen: string;
   hitCount: number;
@@ -183,12 +218,13 @@ export interface ScreenPositionLastRecord {
 
 export interface ScreenPositionTarget {
   id: string;
+  correlationId?: string;
   serial: string;
   model: string;
   source: string;
   frequency?: number;
   rssi?: number;
-  devices: string[];
+  device?: string;
   drone?: ScreenPositionPoint;
   pilot?: ScreenPositionPoint;
   home?: ScreenPositionPoint;
@@ -370,5 +406,6 @@ export interface StreamHandlers {
 export interface ScreenStreamHandlers {
   onDetectionUpdated?: (event: EventMessage<ScreenDetectionTarget>) => void;
   onPositionUpdated?: (event: EventMessage<ScreenPositionTarget>) => void;
+  onStrikeUpdated?: (event: EventMessage<ScreenStrikeState>) => void;
   onError?: (error: Error) => void;
 }

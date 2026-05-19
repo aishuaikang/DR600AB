@@ -13,5 +13,19 @@
   "clear": "Clear",
   "close": "Close",
   "notConfigured": "Not configured",
-  "empty": "No data"
+  "empty": "No data",
+  "unexpectedError": "Unexpected error",
+  "requestFailed": "Request failed",
+  "developerSessionExpired": "Developer login expired. Please sign in again.",
+  "stream.detectionDisconnected": "Live stream disconnected",
+  "stream.screenDisconnected": "Screen live stream disconnected",
+  "keyboard.virtualKeyboard": "Virtual keyboard",
+  "keyboard.chineseCandidates": "Chinese candidates",
+  "keyboard.clear": "Clear",
+  "keyboard.enter": "Enter",
+  "keyboard.close": "Close",
+  "keyboard.space": "Space",
+  "keyboard.pinyinInput": "Pinyin input",
+  "keyboard.dictionaryLoading": "Loading Rime dictionary",
+  "keyboard.pinyinHint": "Enter pinyin to choose candidates"
 }

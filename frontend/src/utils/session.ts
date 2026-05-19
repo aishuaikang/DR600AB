@@ -111,9 +111,9 @@ export function dedupeGPSRecords(items: GPSRecord[], item: GPSRecord, limit: num
   return [item, ...items.filter((entry) => `${entry.sessionId}|${entry.receivedAt}|${entry.raw}` !== key)].slice(0, limit);
 }
 
-export function extractErrorMessage(error: unknown) {
+export function extractErrorMessage(error: unknown, fallback: string) {
   if (error instanceof Error) {
     return error.message;
   }
-  return "Unexpected error";
+  return fallback;
 }

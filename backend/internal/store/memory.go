@@ -215,7 +215,7 @@ func (s *MemoryStore) addScreenDetectionLocked(
 			Model:      record.Model,
 			Frequency:  record.Frequency,
 			RSSI:       record.RSSI,
-			Devices:    uniqueStrings([]string{record.Device}),
+			Device:     stringsTrim(record.Device),
 			FirstSeen:  now,
 			LastSeen:   now,
 			HitCount:   1,
@@ -228,7 +228,9 @@ func (s *MemoryStore) addScreenDetectionLocked(
 
 	merged := s.screen[matches[0]]
 	for _, matchIndex := range matches[1:] {
-		merged.Devices = mergeStrings(merged.Devices, s.screen[matchIndex].Devices)
+		if merged.Device == "" {
+			merged.Device = s.screen[matchIndex].Device
+		}
 		if s.screen[matchIndex].FirstSeen.Before(merged.FirstSeen) {
 			merged.FirstSeen = s.screen[matchIndex].FirstSeen
 		}
@@ -237,7 +239,9 @@ func (s *MemoryStore) addScreenDetectionLocked(
 	merged.Model = record.Model
 	merged.Frequency = record.Frequency
 	merged.RSSI = record.RSSI
-	merged.Devices = mergeStrings(merged.Devices, []string{record.Device})
+	if device := stringsTrim(record.Device); device != "" {
+		merged.Device = device
+	}
 	merged.LastSeen = now
 	merged.HitCount++
 	merged.LastRecord = screenDetectionLastRecord(record)
@@ -269,31 +273,32 @@ func (s *MemoryStore) pruneExpiredScreenDetectionsLocked(now time.Time) {
 }
 
 func (s *MemoryStore) addScreenPositionLocked(target model.ScreenPositionTarget) (model.ScreenPositionTarget, bool) {
+	target.CorrelationID = stringsTrim(target.CorrelationID)
 	target.Serial = stringsTrim(target.Serial)
-	target.Model = stringsTrim(target.Model)
+	target.Model = normalizeScreenPositionModel(target.Model)
 	if target.Serial == "" || target.Model == "" {
 		return model.ScreenPositionTarget{}, false
 	}
+	target.LastRecord.Model = normalizeScreenPositionModel(target.LastRecord.Model)
 	if target.LastSeen.IsZero() {
 		target.LastSeen = time.Now()
 	}
 	if target.FirstSeen.IsZero() {
 		target.FirstSeen = target.LastSeen
 	}
-	target.Devices = uniqueStrings(target.Devices)
+	target.Device = stringsTrim(target.Device)
 
 	now := target.LastSeen
 	s.pruneExpiredScreenPositionsLocked(now)
 
-	matchIndex := -1
+	matches := make([]int, 0, 1)
 	for index := range s.positions {
 		if screenPositionTargetMatches(s.positions[index], target) {
-			matchIndex = index
-			break
+			matches = append(matches, index)
 		}
 	}
 
-	if matchIndex < 0 {
+	if len(matches) == 0 {
 		s.positionSeq++
 		target.ID = fmt.Sprintf("screen-position-%d-%d", target.LastSeen.UnixNano(), s.positionSeq)
 		target.HitCount = 1
@@ -301,28 +306,62 @@ func (s *MemoryStore) addScreenPositionLocked(target model.ScreenPositionTarget)
 		return cloneScreenPositionTarget(target), true
 	}
 
-	merged := s.positions[matchIndex]
-	merged.Serial = target.Serial
-	merged.Model = target.Model
-	merged.Source = target.Source
+	baseIndex := screenPositionMergeBaseIndex(s.positions, matches, target)
+	merged := s.positions[baseIndex]
+	for _, matchIndex := range matches {
+		if matchIndex == baseIndex {
+			continue
+		}
+		if merged.Device == "" {
+			merged.Device = s.positions[matchIndex].Device
+		}
+		if merged.CorrelationID == "" {
+			merged.CorrelationID = s.positions[matchIndex].CorrelationID
+		}
+		if s.positions[matchIndex].FirstSeen.Before(merged.FirstSeen) {
+			merged.FirstSeen = s.positions[matchIndex].FirstSeen
+		}
+		merged.HitCount += s.positions[matchIndex].HitCount
+	}
+	if target.CorrelationID != "" {
+		merged.CorrelationID = target.CorrelationID
+	}
+	keepDecodedFields := shouldKeepDecodedScreenPositionFields(merged, target)
+	if !keepDecodedFields {
+		merged.Serial = target.Serial
+		merged.Model = target.Model
+		merged.Source = target.Source
+	}
 	merged.Frequency = target.Frequency
 	merged.RSSI = target.RSSI
-	merged.Devices = mergeStrings(merged.Devices, target.Devices)
-	merged.Drone = cloneScreenPositionPoint(target.Drone)
-	merged.Pilot = cloneScreenPositionPoint(target.Pilot)
-	merged.Home = cloneScreenPositionPoint(target.Home)
-	merged.Height = cloneFloat64Ptr(target.Height)
-	merged.Altitude = cloneFloat64Ptr(target.Altitude)
-	merged.Speed = cloneFloat64Ptr(target.Speed)
-	merged.Cracked = target.Cracked
+	if target.Device != "" {
+		merged.Device = target.Device
+	}
+	if !keepDecodedFields {
+		merged.Drone = cloneScreenPositionPoint(target.Drone)
+		merged.Pilot = cloneScreenPositionPoint(target.Pilot)
+		merged.Home = cloneScreenPositionPoint(target.Home)
+		merged.Height = cloneFloat64Ptr(target.Height)
+		merged.Altitude = cloneFloat64Ptr(target.Altitude)
+		merged.Speed = cloneFloat64Ptr(target.Speed)
+		merged.Cracked = target.Cracked
+		merged.LastRecord = target.LastRecord
+	}
 	merged.LastSeen = target.LastSeen
 	merged.HitCount++
-	merged.LastRecord = target.LastRecord
 	if target.FirstSeen.Before(merged.FirstSeen) {
 		merged.FirstSeen = target.FirstSeen
 	}
 
-	s.positions[matchIndex] = merged
+	next := make([]model.ScreenPositionTarget, 0, len(s.positions)-len(matches)+1)
+	for index, existing := range s.positions {
+		if slices.Contains(matches, index) {
+			continue
+		}
+		next = append(next, existing)
+	}
+	next = append(next, merged)
+	s.positions = next
 	return cloneScreenPositionTarget(merged), true
 }
 
@@ -341,7 +380,104 @@ func (s *MemoryStore) pruneExpiredScreenPositionsLocked(now time.Time) {
 }
 
 func screenPositionTargetMatches(existing, incoming model.ScreenPositionTarget) bool {
-	return existing.Serial != "" && incoming.Serial != "" && existing.Serial == incoming.Serial
+	if screenPositionSerialMatches(existing.Serial, incoming.Serial) {
+		return true
+	}
+	return screenPositionPendingEncryptedTargetMatches(existing, incoming)
+}
+
+func normalizeScreenPositionModel(modelName string) string {
+	modelName = stringsTrim(modelName)
+	prefix, suffix, ok := strings.Cut(modelName, "-")
+	if !ok || stringsTrim(suffix) == "" || !isDecimalString(stringsTrim(prefix)) {
+		return modelName
+	}
+	return stringsTrim(suffix)
+}
+
+func isDecimalString(value string) bool {
+	if value == "" {
+		return false
+	}
+	for _, r := range value {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
+}
+
+func screenPositionPendingEncryptedTargetMatches(existing, incoming model.ScreenPositionTarget) bool {
+	existingCorrelationID := stringsTrim(existing.CorrelationID)
+	incomingCorrelationID := stringsTrim(incoming.CorrelationID)
+	return existingCorrelationID != "" &&
+		incomingCorrelationID != "" &&
+		existingCorrelationID == incomingCorrelationID &&
+		(screenPositionIsPendingEncrypted(existing) || screenPositionIsPendingEncrypted(incoming))
+}
+
+func screenPositionIsPendingEncrypted(target model.ScreenPositionTarget) bool {
+	if target.Cracked || stringsTrim(target.CorrelationID) == "" {
+		return false
+	}
+	return strings.TrimPrefix(stringsTrim(target.CorrelationID), "did_encrypted:") == strings.ToLower(stringsTrim(target.Serial))
+}
+
+func screenPositionSerialMatches(existing, incoming string) bool {
+	existing = strings.ToUpper(stringsTrim(existing))
+	incoming = strings.ToUpper(stringsTrim(incoming))
+	if existing == "" || incoming == "" {
+		return false
+	}
+	if existing == incoming {
+		return true
+	}
+
+	const ridSerialPrefix = "1581"
+	if screenPositionTrimRIDSerialPrefix(existing) == incoming {
+		return true
+	}
+	if screenPositionTrimRIDSerialPrefix(incoming) == existing {
+		return true
+	}
+	return false
+}
+
+func screenPositionTrimRIDSerialPrefix(serial string) string {
+	const ridSerialPrefix = "1581"
+	if len(serial) <= len(ridSerialPrefix) || !strings.HasPrefix(serial, ridSerialPrefix) {
+		return serial
+	}
+	return strings.TrimPrefix(serial, ridSerialPrefix)
+}
+
+func screenPositionMergeBaseIndex(
+	positions []model.ScreenPositionTarget,
+	matches []int,
+	incoming model.ScreenPositionTarget,
+) int {
+	baseIndex := matches[0]
+	if incoming.Cracked {
+		return baseIndex
+	}
+	for _, matchIndex := range matches {
+		if positions[matchIndex].Cracked {
+			return matchIndex
+		}
+	}
+	return baseIndex
+}
+
+func shouldKeepDecodedScreenPositionFields(existing, incoming model.ScreenPositionTarget) bool {
+	if !existing.Cracked || incoming.Cracked {
+		return false
+	}
+	existingCorrelationID := stringsTrim(existing.CorrelationID)
+	incomingCorrelationID := stringsTrim(incoming.CorrelationID)
+	if existingCorrelationID != "" && incomingCorrelationID != "" && existingCorrelationID == incomingCorrelationID {
+		return true
+	}
+	return screenPositionSerialMatches(existing.Serial, incoming.Serial)
 }
 
 func screenDetectionTargetMatches(target model.ScreenDetectionTarget, record model.DetectionRecord) bool {
@@ -417,7 +553,6 @@ func cmpStringDescending(a, b string) int {
 }
 
 func cloneScreenDetectionTarget(target model.ScreenDetectionTarget) model.ScreenDetectionTarget {
-	target.Devices = append([]string(nil), target.Devices...)
 	return target
 }
 
@@ -439,7 +574,6 @@ func latestScreenPositions(items []model.ScreenPositionTarget, limit int) []mode
 }
 
 func cloneScreenPositionTarget(target model.ScreenPositionTarget) model.ScreenPositionTarget {
-	target.Devices = append([]string(nil), target.Devices...)
 	target.Drone = cloneScreenPositionPoint(target.Drone)
 	target.Pilot = cloneScreenPositionPoint(target.Pilot)
 	target.Home = cloneScreenPositionPoint(target.Home)
@@ -480,34 +614,4 @@ func screenDetectionLastRecord(record model.DetectionRecord) model.ScreenDetecti
 
 func stringsTrim(value string) string {
 	return strings.TrimSpace(value)
-}
-
-func uniqueStrings(values []string) []string {
-	return mergeStrings(nil, values)
-}
-
-func mergeStrings(existing, incoming []string) []string {
-	seen := make(map[string]struct{}, len(existing)+len(incoming))
-	merged := make([]string, 0, len(existing)+len(incoming))
-	for _, value := range existing {
-		if value == "" {
-			continue
-		}
-		if _, ok := seen[value]; ok {
-			continue
-		}
-		seen[value] = struct{}{}
-		merged = append(merged, value)
-	}
-	for _, value := range incoming {
-		if value == "" {
-			continue
-		}
-		if _, ok := seen[value]; ok {
-			continue
-		}
-		seen[value] = struct{}{}
-		merged = append(merged, value)
-	}
-	return merged
 }

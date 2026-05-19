@@ -94,7 +94,8 @@ type GeoPoint struct {
 
 // UserSettings 保存公开用户设置。
 type UserSettings struct {
-	ManualDeviceLocation *GeoPoint `json:"manualDeviceLocation,omitempty"`
+	ManualDeviceLocation      *GeoPoint `json:"manualDeviceLocation,omitempty"`
+	ScreenStrikeChannelLabels []string  `json:"screenStrikeChannelLabels,omitempty"`
 }
 
 // ScreenDeviceLocationResponse 返回大屏地图使用的设备位置。
@@ -168,7 +169,7 @@ type ScreenDetectionTarget struct {
 	Model      string                    `json:"model"`
 	Frequency  float64                   `json:"frequency"`
 	RSSI       float64                   `json:"rssi"`
-	Devices    []string                  `json:"devices"`
+	Device     string                    `json:"device"`
 	FirstSeen  time.Time                 `json:"firstSeen"`
 	LastSeen   time.Time                 `json:"lastSeen"`
 	HitCount   int                       `json:"hitCount"`
@@ -195,24 +196,25 @@ type ScreenPositionLastRecord struct {
 
 // ScreenPositionTarget 是大屏定位列表使用的合并目标。
 type ScreenPositionTarget struct {
-	ID         string                   `json:"id"`
-	Serial     string                   `json:"serial"`
-	Model      string                   `json:"model"`
-	Source     string                   `json:"source"`
-	Frequency  float64                  `json:"frequency,omitempty"`
-	RSSI       float64                  `json:"rssi,omitempty"`
-	Devices    []string                 `json:"devices"`
-	Drone      *ScreenPositionPoint     `json:"drone,omitempty"`
-	Pilot      *ScreenPositionPoint     `json:"pilot,omitempty"`
-	Home       *ScreenPositionPoint     `json:"home,omitempty"`
-	Height     *float64                 `json:"height,omitempty"`
-	Altitude   *float64                 `json:"altitude,omitempty"`
-	Speed      *float64                 `json:"speed,omitempty"`
-	Cracked    bool                     `json:"cracked,omitempty"`
-	FirstSeen  time.Time                `json:"firstSeen"`
-	LastSeen   time.Time                `json:"lastSeen"`
-	HitCount   int                      `json:"hitCount"`
-	LastRecord ScreenPositionLastRecord `json:"lastRecord"`
+	ID            string                   `json:"id"`
+	CorrelationID string                   `json:"correlationId,omitempty"`
+	Serial        string                   `json:"serial"`
+	Model         string                   `json:"model"`
+	Source        string                   `json:"source"`
+	Frequency     float64                  `json:"frequency,omitempty"`
+	RSSI          float64                  `json:"rssi,omitempty"`
+	Device        string                   `json:"device"`
+	Drone         *ScreenPositionPoint     `json:"drone,omitempty"`
+	Pilot         *ScreenPositionPoint     `json:"pilot,omitempty"`
+	Home          *ScreenPositionPoint     `json:"home,omitempty"`
+	Height        *float64                 `json:"height,omitempty"`
+	Altitude      *float64                 `json:"altitude,omitempty"`
+	Speed         *float64                 `json:"speed,omitempty"`
+	Cracked       bool                     `json:"cracked,omitempty"`
+	FirstSeen     time.Time                `json:"firstSeen"`
+	LastSeen      time.Time                `json:"lastSeen"`
+	HitCount      int                      `json:"hitCount"`
+	LastRecord    ScreenPositionLastRecord `json:"lastRecord"`
 }
 
 // GpioChannel 描述一个 GPIO 控制通道及其运行状态。
@@ -238,6 +240,30 @@ type GpioChannelStateRequest struct {
 type GpioChannelStateResponse struct {
 	Channel GpioChannel `json:"channel"`
 	Message string      `json:"message"`
+}
+
+// ScreenStrikeRequest 控制大屏干扰面板绑定的 GPIO 通道。
+type ScreenStrikeRequest struct {
+	Enabled         bool     `json:"enabled"`
+	ChannelIDs      []string `json:"channelIds"`
+	DurationSeconds int      `json:"durationSeconds"`
+}
+
+// ScreenStrikeState 描述大屏干扰控制当前状态。
+type ScreenStrikeState struct {
+	Active           bool          `json:"active"`
+	ChannelIDs       []string      `json:"channelIds"`
+	DurationSeconds  int           `json:"durationSeconds"`
+	RemainingSeconds int           `json:"remainingSeconds"`
+	StartedAt        *time.Time    `json:"startedAt,omitempty"`
+	EndsAt           *time.Time    `json:"endsAt,omitempty"`
+	Channels         []GpioChannel `json:"channels"`
+}
+
+// ScreenStrikeResponse 返回大屏干扰控制状态和用户提示。
+type ScreenStrikeResponse struct {
+	State   ScreenStrikeState `json:"state"`
+	Message string            `json:"message"`
 }
 
 // DeveloperLoginRequest 使用动态码换取短时开发者会话。

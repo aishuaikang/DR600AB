@@ -380,28 +380,29 @@ func (d *mqttO3PlusO4Decoder) positionFromDecryptResult(
 	}
 	modelName := strings.TrimSpace(result.Model)
 	if modelName == "" {
-		modelName = "DJI-Drone"
+		modelName = didEncryptedFallbackModel
 	}
 	if receivedAt.IsZero() {
 		receivedAt = time.Now()
 	}
 
 	target := model.ScreenPositionTarget{
-		Serial:    serial,
-		Model:     modelName,
-		Source:    string(parser.TypeDIDEncrypted),
-		Frequency: packet.Freq,
-		RSSI:      packet.RSSI,
-		Devices:   uniqueNonEmpty(packet.Device),
-		Drone:     pointFromLatLng(result.Lat, result.Lon),
-		Pilot:     pointFromLatLng(result.PilotLat, result.PilotLon),
-		Home:      pointFromLatLng(result.HomeLat, result.HomeLon),
-		Height:    nonZeroFloatPtr(result.Height),
-		Altitude:  nonZeroFloatPtr(result.Alt),
-		Speed:     nonZeroFloatPtr(calculateFlightSpeed(result.X, result.Y, result.Z)),
-		Cracked:   true,
-		FirstSeen: receivedAt,
-		LastSeen:  receivedAt,
+		CorrelationID: didEncryptedCorrelationID(&packet),
+		Serial:        serial,
+		Model:         modelName,
+		Source:        string(parser.TypeDIDEncrypted),
+		Frequency:     packet.Freq,
+		RSSI:          packet.RSSI,
+		Device:        strings.TrimSpace(packet.Device),
+		Drone:         pointFromLatLng(result.Lat, result.Lon),
+		Pilot:         pointFromLatLng(result.PilotLat, result.PilotLon),
+		Home:          pointFromLatLng(result.HomeLat, result.HomeLon),
+		Height:        nonZeroFloatPtr(result.Height),
+		Altitude:      nonZeroFloatPtr(result.Alt),
+		Speed:         nonZeroFloatPtr(calculateFlightSpeed(result.X, result.Y, result.Z)),
+		Cracked:       true,
+		FirstSeen:     receivedAt,
+		LastSeen:      receivedAt,
 		LastRecord: model.ScreenPositionLastRecord{
 			Type:       string(parser.TypeDIDEncrypted),
 			ReceivedAt: receivedAt,

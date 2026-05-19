@@ -126,6 +126,37 @@ func TestIngestLineStoresScreenPositionFromDIDPlain(t *testing.T) {
 	}
 }
 
+func TestIngestLineStoresFallbackScreenPositionFromDIDEncryptedWithoutDecoder(t *testing.T) {
+	tr, err := i18n.New("zh-CN")
+	if err != nil {
+		t.Fatalf("i18n.New() error = %v", err)
+	}
+	st := store.NewMemoryStore(10, 10)
+	svc := NewService(st, tr, settings.NewStore(filepath.Join(t.TempDir(), "settings.json")), Options{})
+
+	svc.IngestLine("session-1", "/dev/ttyUSB0", "#=632/3/1, device=10125, Encypted Mavic_O4_ID=875bb45f, freq=2429.5, rssi=-64, byte,15,1b,9b,58,f0,d9")
+
+	items := svc.ScreenPositions(10)
+	if len(items) != 1 {
+		t.Fatalf("screen positions count = %d, want 1", len(items))
+	}
+	if items[0].Serial != "875bb45f" {
+		t.Fatalf("serial = %q, want encrypted id", items[0].Serial)
+	}
+	if items[0].Model != "DJI-Drone" {
+		t.Fatalf("model = %q, want DJI-Drone", items[0].Model)
+	}
+	if items[0].CorrelationID != "did_encrypted:875bb45f" {
+		t.Fatalf("correlation id = %q, want did_encrypted:875bb45f", items[0].CorrelationID)
+	}
+	if items[0].Cracked {
+		t.Fatalf("fallback target should not be marked cracked")
+	}
+	if items[0].Drone != nil || items[0].Pilot != nil || items[0].Home != nil {
+		t.Fatalf("fallback target should not invent coordinates, got drone=%#v pilot=%#v home=%#v", items[0].Drone, items[0].Pilot, items[0].Home)
+	}
+}
+
 func TestIngestLineStoresScreenPositionFromDIDEncryptedDecoder(t *testing.T) {
 	tr, err := i18n.New("zh-CN")
 	if err != nil {
@@ -140,10 +171,22 @@ func TestIngestLineStoresScreenPositionFromDIDEncryptedDecoder(t *testing.T) {
 	var items []model.ScreenPositionTarget
 	waitUntil(t, time.Second, func() bool {
 		items = svc.ScreenPositions(10)
-		return len(items) == 1
+		return len(items) == 1 && items[0].Serial == "o3-sn"
 	})
 	if items[0].Serial != "o3-sn" {
 		t.Fatalf("serial = %q, want o3-sn", items[0].Serial)
+	}
+	if items[0].Model != "DJI O4" {
+		t.Fatalf("model = %q, want DJI O4", items[0].Model)
+	}
+	if items[0].CorrelationID != "did_encrypted:875bb45f" {
+		t.Fatalf("correlation id = %q, want did_encrypted:875bb45f", items[0].CorrelationID)
+	}
+	if !items[0].Cracked {
+		t.Fatalf("expected decoded target to be marked cracked")
+	}
+	if items[0].HitCount != 2 {
+		t.Fatalf("hit count = %d, want fallback plus decoded updates", items[0].HitCount)
 	}
 	if items[0].LastRecord.Device != "10125" {
 		t.Fatalf("last record device = %q, want 10125", items[0].LastRecord.Device)
@@ -205,7 +248,7 @@ func (fakeO3Decoder) ParseO3PlusO4PacketMQTT(_ context.Context, packet parser.DI
 		Source:    string(parser.TypeDIDEncrypted),
 		Frequency: packet.Freq,
 		RSSI:      packet.RSSI,
-		Devices:   []string{packet.Device},
+		Device:    packet.Device,
 		Drone:     &model.ScreenPositionPoint{Latitude: 31.2, Longitude: 121.4},
 		Cracked:   true,
 		FirstSeen: receivedAt,

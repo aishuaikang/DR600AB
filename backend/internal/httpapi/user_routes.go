@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"math"
+	"strings"
 
 	"github.com/gofiber/fiber/v2"
 
@@ -59,6 +60,7 @@ func (s *Server) handleUpdateUserSettings(c *fiber.Ctx) error {
 			nil,
 		)
 	}
+	req.ScreenStrikeChannelLabels = normalizeScreenStrikeChannelLabels(req.ScreenStrikeChannelLabels)
 	if s.userSettings == nil {
 		return c.JSON(req)
 	}
@@ -86,4 +88,31 @@ func validGeoPoint(point *model.GeoPoint) bool {
 		point.Latitude <= 90 &&
 		point.Longitude >= -180 &&
 		point.Longitude <= 180
+}
+
+func normalizeScreenStrikeChannelLabels(labels []string) []string {
+	if len(labels) == 0 {
+		return nil
+	}
+
+	const maxLabels = 3
+	const maxLabelLength = 24
+	normalized := make([]string, 0, maxLabels)
+	for _, label := range labels {
+		if len(normalized) == maxLabels {
+			break
+		}
+		value := strings.TrimSpace(label)
+		if len([]rune(value)) > maxLabelLength {
+			value = string([]rune(value)[:maxLabelLength])
+		}
+		normalized = append(normalized, value)
+	}
+	for len(normalized) > 0 && normalized[len(normalized)-1] == "" {
+		normalized = normalized[:len(normalized)-1]
+	}
+	if len(normalized) == 0 {
+		return nil
+	}
+	return normalized
 }

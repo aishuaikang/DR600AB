@@ -73,7 +73,7 @@ func (s *Server) handleScreenStream(c *fiber.Ctx) error {
 				if !ok {
 					return
 				}
-				if evt.Type != "screen.detection.updated" && evt.Type != "screen.position.updated" {
+				if evt.Type != "screen.detection.updated" && evt.Type != "screen.position.updated" && evt.Type != "screen.strike.updated" {
 					continue
 				}
 				if err := writeEvent(w, evt); err != nil {

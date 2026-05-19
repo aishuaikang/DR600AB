@@ -27,8 +27,9 @@ func TestMemoryStoreScreenDetectionsMergeSameModelWithinThreshold(t *testing.T) 
 	if items[0].HitCount != 2 {
 		t.Fatalf("hit count = %d, want 2", items[0].HitCount)
 	}
-	wantDevices := []string{"device-a", "device-b"}
-	assertStrings(t, items[0].Devices, wantDevices)
+	if items[0].Device != "device-b" {
+		t.Fatalf("device = %q, want latest device-b", items[0].Device)
+	}
 }
 
 func TestMemoryStoreScreenDetectionsCreatesStableUniqueIDs(t *testing.T) {
@@ -76,7 +77,9 @@ func TestMemoryStoreScreenDetectionsAutelThreshold(t *testing.T) {
 	if autel == nil {
 		t.Fatalf("autel target not found: %#v", items)
 	}
-	assertStrings(t, autel.Devices, []string{"device-a", "device-b"})
+	if autel.Device != "device-b" {
+		t.Fatalf("device = %q, want latest device-b", autel.Device)
+	}
 }
 
 func TestMemoryStoreScreenDetectionsKeepStableOrderAfterUpdate(t *testing.T) {
@@ -127,7 +130,7 @@ func TestMemoryStoreScreenDetectionsCollapsesExistingDuplicates(t *testing.T) {
 		Model:     "DJI_OC123_10M",
 		Frequency: 5730,
 		RSSI:      -58,
-		Devices:   []string{"device-legacy"},
+		Device:    "device-legacy",
 		FirstSeen: base.Add(-time.Minute),
 		LastSeen:  base.Add(-time.Second),
 		HitCount:  1,
@@ -144,7 +147,9 @@ func TestMemoryStoreScreenDetectionsCollapsesExistingDuplicates(t *testing.T) {
 	if merged == nil {
 		t.Fatalf("merged target not found: %#v", items)
 	}
-	assertStrings(t, merged.Devices, []string{"device-a", "device-legacy", "device-c"})
+	if merged.Device != "device-c" {
+		t.Fatalf("device = %q, want latest device-c", merged.Device)
+	}
 }
 
 func TestMemoryStoreScreenDetectionsLastRecordOmitsParsedPayload(t *testing.T) {
@@ -177,7 +182,9 @@ func TestMemoryStoreScreenDetectionsPrunesExpiredTargets(t *testing.T) {
 	if len(items) != 1 {
 		t.Fatalf("screen detections count = %d, want 1", len(items))
 	}
-	assertStrings(t, items[0].Devices, []string{"device-b"})
+	if items[0].Device != "device-b" {
+		t.Fatalf("device = %q, want device-b", items[0].Device)
+	}
 }
 
 func TestMemoryStoreScreenDetectionsIgnoreNonDetect(t *testing.T) {
@@ -210,9 +217,244 @@ func TestMemoryStoreScreenPositionsMergeBySerial(t *testing.T) {
 	if items[0].HitCount != 2 {
 		t.Fatalf("hit count = %d, want 2", items[0].HitCount)
 	}
-	assertStrings(t, items[0].Devices, []string{"device-a", "device-b"})
+	if items[0].Device != "device-b" {
+		t.Fatalf("device = %q, want latest device-b", items[0].Device)
+	}
 	if items[0].Drone == nil || items[0].Drone.Latitude != 31.2 {
 		t.Fatalf("unexpected drone point: %#v", items[0].Drone)
+	}
+}
+
+func TestMemoryStoreScreenPositionsNormalizesNumericModelPrefix(t *testing.T) {
+	st := NewMemoryStore(10, 10)
+	base := time.Now()
+
+	st.AddScreenPosition(screenPositionTarget("sn-1", "device-a", "66-Air 2S", base))
+
+	items := st.ListScreenPositions(10)
+	if len(items) != 1 {
+		t.Fatalf("screen positions count = %d, want 1", len(items))
+	}
+	if items[0].Model != "Air 2S" {
+		t.Fatalf("model = %q, want Air 2S", items[0].Model)
+	}
+	if items[0].LastRecord.Model != "Air 2S" {
+		t.Fatalf("last record model = %q, want Air 2S", items[0].LastRecord.Model)
+	}
+}
+
+func TestMemoryStoreScreenPositionsKeepsNonNumericHyphenModel(t *testing.T) {
+	st := NewMemoryStore(10, 10)
+	base := time.Now()
+
+	st.AddScreenPosition(screenPositionTarget("sn-1", "device-a", "DJI-Drone", base))
+
+	items := st.ListScreenPositions(10)
+	if len(items) != 1 {
+		t.Fatalf("screen positions count = %d, want 1", len(items))
+	}
+	if items[0].Model != "DJI-Drone" {
+		t.Fatalf("model = %q, want DJI-Drone", items[0].Model)
+	}
+	if items[0].LastRecord.Model != "DJI-Drone" {
+		t.Fatalf("last record model = %q, want DJI-Drone", items[0].LastRecord.Model)
+	}
+}
+
+func TestMemoryStoreScreenPositionsMergeRIDSerialPrefixDifference(t *testing.T) {
+	st := NewMemoryStore(10, 10)
+	base := time.Now()
+
+	rid := screenPositionTarget("1581F67QC238Q014Z681", "RID-1581F67QC238Q014Z681", "DJI Mavic 3", base)
+	rid.Source = "rid"
+	rid.Frequency = 2437
+	rid.RSSI = -80
+	rid.Drone = &model.ScreenPositionPoint{Latitude: 0, Longitude: 0}
+	rid.LastRecord.Type = "rid"
+	rid.LastRecord.Device = "RID-1581F67QC238Q014Z681"
+	rid.LastRecord.Model = "DJI Mavic 3"
+	rid.LastRecord.Frequency = 2437
+	rid.LastRecord.RSSI = -80
+
+	decoded := screenPositionTarget("F67QC238Q014Z681", "10134", "Mavic 3 Pro", base.Add(time.Second))
+	decoded.Source = "did_encrypted"
+	decoded.Cracked = true
+	decoded.Frequency = 5816.5
+	decoded.RSSI = -59
+	decoded.Pilot = &model.ScreenPositionPoint{Latitude: 28.170931, Longitude: 116.994057}
+	decoded.LastRecord.Type = "did_encrypted"
+	decoded.LastRecord.Device = "10134"
+	decoded.LastRecord.Model = "Mavic 3 Pro"
+	decoded.LastRecord.Frequency = 5816.5
+	decoded.LastRecord.RSSI = -59
+	decoded.LastRecord.Cracked = true
+
+	st.AddScreenPosition(rid)
+	st.AddScreenPosition(decoded)
+
+	items := st.ListScreenPositions(10)
+	if len(items) != 1 {
+		t.Fatalf("screen positions count = %d, want 1", len(items))
+	}
+	if items[0].Serial != "F67QC238Q014Z681" {
+		t.Fatalf("serial = %q, want decrypted serial", items[0].Serial)
+	}
+	if items[0].Model != "Mavic 3 Pro" {
+		t.Fatalf("model = %q, want decrypted model", items[0].Model)
+	}
+	if items[0].Source != "did_encrypted" {
+		t.Fatalf("source = %q, want did_encrypted", items[0].Source)
+	}
+	if items[0].Device != "10134" {
+		t.Fatalf("device = %q, want latest device", items[0].Device)
+	}
+	if items[0].HitCount != 2 {
+		t.Fatalf("hit count = %d, want 2", items[0].HitCount)
+	}
+
+	laterRID := screenPositionTarget("1581F67QC238Q014Z681", "RID-1581F67QC238Q014Z681", "DJI Mavic 3", base.Add(2*time.Second))
+	laterRID.Source = "rid"
+	laterRID.Frequency = 2437
+	laterRID.RSSI = -82
+	laterRID.LastRecord.Type = "rid"
+	laterRID.LastRecord.Device = "RID-1581F67QC238Q014Z681"
+	laterRID.LastRecord.Model = "DJI Mavic 3"
+	laterRID.LastRecord.Frequency = 2437
+	laterRID.LastRecord.RSSI = -82
+
+	st.AddScreenPosition(laterRID)
+
+	items = st.ListScreenPositions(10)
+	if len(items) != 1 {
+		t.Fatalf("screen positions count after later RID = %d, want 1", len(items))
+	}
+	if items[0].Model != "Mavic 3 Pro" || items[0].Source != "did_encrypted" || !items[0].Cracked {
+		t.Fatalf("expected decoded target to be preserved after later RID, got model=%q source=%q cracked=%v", items[0].Model, items[0].Source, items[0].Cracked)
+	}
+	if items[0].HitCount != 3 {
+		t.Fatalf("hit count after later RID = %d, want 3", items[0].HitCount)
+	}
+}
+
+func TestMemoryStoreScreenPositionsMergeByCorrelationID(t *testing.T) {
+	st := NewMemoryStore(10, 10)
+	base := time.Now()
+
+	fallback := screenPositionTarget("86ca8046", "device-a", "DJI-Drone", base)
+	fallback.CorrelationID = "did_encrypted:86ca8046"
+	fallback.Source = "did_encrypted"
+	decoded := screenPositionTarget("o3-sn", "device-b", "DJI O4", base.Add(time.Second))
+	decoded.CorrelationID = "did_encrypted:86ca8046"
+	decoded.Source = "did_encrypted"
+	decoded.Cracked = true
+	decoded.LastRecord = model.ScreenPositionLastRecord{
+		Type:       "did_encrypted",
+		ReceivedAt: decoded.LastSeen,
+		Device:     "device-b",
+		Serial:     "o3-sn",
+		Model:      "DJI O4",
+		Frequency:  decoded.Frequency,
+		RSSI:       decoded.RSSI,
+		Cracked:    true,
+	}
+
+	st.AddScreenPosition(fallback)
+	st.AddScreenPosition(decoded)
+
+	items := st.ListScreenPositions(10)
+	if len(items) != 1 {
+		t.Fatalf("screen positions count = %d, want 1", len(items))
+	}
+	if items[0].Serial != "o3-sn" {
+		t.Fatalf("serial = %q, want decrypted serial", items[0].Serial)
+	}
+	if items[0].Model != "DJI O4" {
+		t.Fatalf("model = %q, want decrypted model", items[0].Model)
+	}
+	if items[0].CorrelationID != "did_encrypted:86ca8046" {
+		t.Fatalf("correlation id = %q, want did_encrypted:86ca8046", items[0].CorrelationID)
+	}
+	if !items[0].Cracked {
+		t.Fatalf("expected cracked target after merge")
+	}
+	if items[0].HitCount != 2 {
+		t.Fatalf("hit count = %d, want 2", items[0].HitCount)
+	}
+	if items[0].Device != "device-b" {
+		t.Fatalf("device = %q, want latest device-b", items[0].Device)
+	}
+}
+
+func TestMemoryStoreScreenPositionsDoesNotDowngradeCrackedTarget(t *testing.T) {
+	st := NewMemoryStore(10, 10)
+	base := time.Now()
+
+	fallback := screenPositionTarget("86ca8046", "device-a", "DJI-Drone", base)
+	fallback.CorrelationID = "did_encrypted:86ca8046"
+	fallback.Source = "did_encrypted"
+	fallback.Drone = nil
+	decoded := screenPositionTarget("o3-sn", "device-b", "DJI O4", base.Add(time.Second))
+	decoded.CorrelationID = "did_encrypted:86ca8046"
+	decoded.Source = "did_encrypted"
+	decoded.Cracked = true
+	decoded.LastRecord = model.ScreenPositionLastRecord{
+		Type:       "did_encrypted",
+		ReceivedAt: decoded.LastSeen,
+		Device:     "device-b",
+		Serial:     "o3-sn",
+		Model:      "DJI O4",
+		Frequency:  decoded.Frequency,
+		RSSI:       decoded.RSSI,
+		Cracked:    true,
+	}
+	secondFallback := screenPositionTarget("86ca8046", "device-c", "DJI-Drone", base.Add(2*time.Second))
+	secondFallback.CorrelationID = "did_encrypted:86ca8046"
+	secondFallback.Source = "did_encrypted"
+	secondFallback.Frequency = 5776.5
+	secondFallback.RSSI = -76
+	secondFallback.Drone = nil
+	secondFallback.LastRecord = model.ScreenPositionLastRecord{
+		Type:       "did_encrypted",
+		ReceivedAt: secondFallback.LastSeen,
+		Device:     "device-c",
+		Serial:     "86ca8046",
+		Model:      "DJI-Drone",
+		Frequency:  5776.5,
+		RSSI:       -76,
+		Cracked:    false,
+	}
+
+	st.AddScreenPosition(fallback)
+	st.AddScreenPosition(decoded)
+	st.AddScreenPosition(secondFallback)
+
+	items := st.ListScreenPositions(10)
+	if len(items) != 1 {
+		t.Fatalf("screen positions count = %d, want 1", len(items))
+	}
+	if items[0].Serial != "o3-sn" {
+		t.Fatalf("serial = %q, want decrypted serial", items[0].Serial)
+	}
+	if items[0].Model != "DJI O4" {
+		t.Fatalf("model = %q, want decrypted model", items[0].Model)
+	}
+	if !items[0].Cracked {
+		t.Fatalf("expected target to stay cracked")
+	}
+	if items[0].Drone == nil || items[0].Drone.Latitude != 31.2 {
+		t.Fatalf("expected decrypted coordinates to be preserved, got %#v", items[0].Drone)
+	}
+	if !items[0].LastSeen.Equal(secondFallback.LastSeen) {
+		t.Fatalf("last seen = %s, want %s", items[0].LastSeen, secondFallback.LastSeen)
+	}
+	if items[0].Frequency != 5776.5 || items[0].RSSI != -76 {
+		t.Fatalf("expected latest signal fields, got freq=%v rssi=%v", items[0].Frequency, items[0].RSSI)
+	}
+	if items[0].LastRecord.Model != "DJI O4" || !items[0].LastRecord.Cracked {
+		t.Fatalf("expected decrypted last record to be preserved, got %#v", items[0].LastRecord)
+	}
+	if items[0].Device != "device-c" {
+		t.Fatalf("device = %q, want latest device-c", items[0].Device)
 	}
 }
 
@@ -294,7 +536,7 @@ func screenPositionTarget(serial string, device string, modelName string, seenAt
 		Source:    "rid",
 		Frequency: 2437,
 		RSSI:      -68,
-		Devices:   []string{device},
+		Device:    device,
 		Drone:     &model.ScreenPositionPoint{Latitude: 31.2, Longitude: 121.4},
 		FirstSeen: seenAt,
 		LastSeen:  seenAt,
@@ -307,18 +549,6 @@ func screenPositionTarget(serial string, device string, modelName string, seenAt
 			Frequency:  2437,
 			RSSI:       -68,
 		},
-	}
-}
-
-func assertStrings(t *testing.T, got []string, want []string) {
-	t.Helper()
-	if len(got) != len(want) {
-		t.Fatalf("strings len = %d, want %d: got %#v", len(got), len(want), got)
-	}
-	for index := range want {
-		if got[index] != want[index] {
-			t.Fatalf("strings[%d] = %q, want %q: got %#v", index, got[index], want[index], got)
-		}
 	}
 }
 

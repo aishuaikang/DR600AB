@@ -51,7 +51,10 @@ type O3PlusO4Decoder interface {
 	ParseO3PlusO4PacketMQTT(ctx context.Context, packet parser.DIDEncrypted, deviceSN string, receivedAt time.Time) (model.ScreenPositionTarget, bool)
 }
 
-const startDetectionCommand = "start -freq 1"
+const (
+	startDetectionCommand     = "start -freq 1"
+	didEncryptedFallbackModel = "DJI-Drone"
+)
 
 // SettingsStore 持久化最近一次侦测会话请求。
 type SettingsStore interface {
@@ -216,7 +219,7 @@ func (s *Service) Start(req model.DetectionSessionRequest, locale string) (model
 		}
 	}
 
-	client, err := s.connectOnce(&sess.config, sess.txPortName)
+	client, err := s.connectOnce(&sess.config, sess.txPortName, locale)
 	if err == nil {
 		if !s.assignConnectedClient(seq, sess, client) {
 			client.Close()
@@ -358,7 +361,7 @@ func (s *Service) manageSession(seq uint64, sess *session, connected bool) {
 		}
 
 		if !connected {
-			client, err := s.connectOnce(&sess.config, sess.txPortName)
+			client, err := s.connectOnce(&sess.config, sess.txPortName, sess.locale)
 			if err != nil {
 				state := sess.state
 				if state == "" {
@@ -488,7 +491,7 @@ func (s *Service) responseForSession(sess *session, locale, message string) mode
 }
 
 // connectOnce 打开接收和发送串口，并发送侦测启动命令。
-func (s *Service) connectOnce(cfg *serialport.Config, txPortName string) (*client.SerialClient, error) {
+func (s *Service) connectOnce(cfg *serialport.Config, txPortName string, locale string) (*client.SerialClient, error) {
 	s.mu.RLock()
 	openPort := s.openPort
 	s.mu.RUnlock()
@@ -514,7 +517,7 @@ func (s *Service) connectOnce(cfg *serialport.Config, txPortName string) (*clien
 
 	if err := serialClient.Send(startDetectionCommand); err != nil {
 		serialClient.Close()
-		return nil, fmt.Errorf("发送启动命令失败: %w", err)
+		return nil, fmt.Errorf("%s: %w", s.translator.T(locale, "errors", "detection_start_command_failed"), err)
 	}
 	return serialClient, nil
 }
@@ -709,6 +712,10 @@ func (s *Service) ingestScreenPosition(parsed model.ParsedMessage, msg *parser.M
 		}
 	case *parser.DIDEncrypted:
 		did := *data
+		if target, ok := screenPositionFromDIDEncryptedFallback(parsed, &did); ok {
+			s.store.AddScreenPosition(target)
+		}
+
 		s.mu.RLock()
 		decoder := s.o3Decoder
 		s.mu.RUnlock()
@@ -716,15 +723,23 @@ func (s *Service) ingestScreenPosition(parsed model.ParsedMessage, msg *parser.M
 			return
 		}
 		deviceSN := did.Device
+		correlationID := didEncryptedCorrelationID(&did)
 		go func() {
 			target, ok := decoder.ParseO3PlusO4PacketMQTT(context.Background(), did, deviceSN, parsed.Time)
 			if !ok {
 				return
 			}
+			target.CorrelationID = correlationID
 			target.LastRecord.Type = parsed.Type
 			target.LastRecord.ReceivedAt = parsed.Time
 			if target.LastRecord.Device == "" {
 				target.LastRecord.Device = did.Device
+			}
+			if target.LastRecord.Serial == "" {
+				target.LastRecord.Serial = target.Serial
+			}
+			if target.LastRecord.Model == "" {
+				target.LastRecord.Model = target.Model
 			}
 			if target.LastRecord.Frequency == 0 {
 				target.LastRecord.Frequency = did.Freq
@@ -737,6 +752,59 @@ func (s *Service) ingestScreenPosition(parsed model.ParsedMessage, msg *parser.M
 	}
 }
 
+func screenPositionFromDIDEncryptedFallback(
+	parsed model.ParsedMessage,
+	data *parser.DIDEncrypted,
+) (model.ScreenPositionTarget, bool) {
+	if data == nil {
+		return model.ScreenPositionTarget{}, false
+	}
+	encryptedID := strings.TrimSpace(data.EncryptedID)
+	device := strings.TrimSpace(data.Device)
+	serial := encryptedID
+	if serial == "" {
+		serial = device
+	}
+	if serial == "" {
+		return model.ScreenPositionTarget{}, false
+	}
+
+	target := model.ScreenPositionTarget{
+		CorrelationID: didEncryptedCorrelationID(data),
+		Serial:        serial,
+		Model:         didEncryptedFallbackModel,
+		Source:        string(parser.TypeDIDEncrypted),
+		Frequency:     data.Freq,
+		RSSI:          data.RSSI,
+		Device:        device,
+		Cracked:       false,
+		FirstSeen:     parsed.Time,
+		LastSeen:      parsed.Time,
+		LastRecord: model.ScreenPositionLastRecord{
+			Type:       parsed.Type,
+			ReceivedAt: parsed.Time,
+			Device:     device,
+			Serial:     serial,
+			Model:      didEncryptedFallbackModel,
+			Frequency:  data.Freq,
+			RSSI:       data.RSSI,
+			Cracked:    false,
+		},
+	}
+	return target, true
+}
+
+func didEncryptedCorrelationID(data *parser.DIDEncrypted) string {
+	if data == nil {
+		return ""
+	}
+	encryptedID := strings.ToLower(strings.TrimSpace(data.EncryptedID))
+	if encryptedID == "" {
+		return ""
+	}
+	return "did_encrypted:" + encryptedID
+}
+
 func screenPositionFromRID(parsed model.ParsedMessage, data *parser.RID) (model.ScreenPositionTarget, bool) {
 	if data == nil || strings.TrimSpace(data.Serial) == "" {
 		return model.ScreenPositionTarget{}, false
@@ -747,7 +815,7 @@ func screenPositionFromRID(parsed model.ParsedMessage, data *parser.RID) (model.
 		Source:    string(parser.TypeRID),
 		Frequency: data.Freq,
 		RSSI:      data.RSSI,
-		Devices:   uniqueNonEmpty(data.SSID),
+		Device:    strings.TrimSpace(data.SSID),
 		Drone:     screenPointFromGPS(data.DroneGPS),
 		Pilot:     screenPointFromGPS(data.PilotGPS),
 		Speed:     nonZeroFloatPtr(data.Speed),
@@ -778,7 +846,7 @@ func screenPositionFromDIDPlain(parsed model.ParsedMessage, data *parser.DIDPlai
 		Source:    string(parser.TypeDIDPlain),
 		Frequency: data.Freq,
 		RSSI:      data.RSSI,
-		Devices:   uniqueNonEmpty(data.Device),
+		Device:    strings.TrimSpace(data.Device),
 		Drone:     screenPointFromGPS(data.DroneGPS),
 		Pilot:     screenPointFromGPS(data.PilotGPS),
 		Home:      screenPointFromGPS(data.HomeGPS),
@@ -823,23 +891,6 @@ func nonZeroFloatPtr(value float64) *float64 {
 		return nil
 	}
 	return &value
-}
-
-func uniqueNonEmpty(values ...string) []string {
-	seen := make(map[string]struct{}, len(values))
-	out := make([]string, 0, len(values))
-	for _, value := range values {
-		value = strings.TrimSpace(value)
-		if value == "" {
-			continue
-		}
-		if _, ok := seen[value]; ok {
-			continue
-		}
-		seen[value] = struct{}{}
-		out = append(out, value)
-	}
-	return out
 }
 
 func calculateFlightSpeed(east, north, up float64) float64 {

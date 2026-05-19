@@ -3,8 +3,10 @@ package interference
 import (
 	"reflect"
 	"testing"
+	"time"
 
 	"dr600ab-api/internal/i18n"
+	"dr600ab-api/internal/model"
 	"dr600ab-api/internal/store"
 )
 
@@ -190,4 +192,263 @@ func TestListChannelsReturnsEmptyBandsForReservedChannel(t *testing.T) {
 	if len(channels[0].Bands) != 0 {
 		t.Fatalf("bands count = %d, want 0", len(channels[0].Bands))
 	}
+}
+
+func TestSetScreenStrikeStartsSelectedChannelsAndStopsUnselected(t *testing.T) {
+	svc, pins := newStrikeTestService(t)
+	defer svc.Shutdown()
+
+	state, err := svc.SetScreenStrike(model.ScreenStrikeRequest{
+		Enabled:         true,
+		ChannelIDs:      []string{"io1", "io3"},
+		DurationSeconds: 60,
+	}, "zh-CN")
+	if err != nil {
+		t.Fatalf("SetScreenStrike() error = %v", err)
+	}
+
+	if !state.Active || state.RemainingSeconds <= 0 {
+		t.Fatalf("state = %+v, want active countdown", state)
+	}
+	if !reflect.DeepEqual(state.ChannelIDs, []string{"io1", "io3"}) {
+		t.Fatalf("channel IDs = %+v, want io1/io3", state.ChannelIDs)
+	}
+	if pins["io1"].value != 1 || pins["io3"].value != 1 {
+		t.Fatalf("selected pins values = io1:%d io3:%d, want high", pins["io1"].value, pins["io3"].value)
+	}
+	if pins["io2"].value != 0 {
+		t.Fatalf("unselected io2 value = %d, want low", pins["io2"].value)
+	}
+}
+
+func TestSetScreenStrikeStopTurnsOffAllStrikeChannels(t *testing.T) {
+	svc, pins := newStrikeTestService(t)
+	defer svc.Shutdown()
+
+	if _, err := svc.SetScreenStrike(model.ScreenStrikeRequest{
+		Enabled:         true,
+		ChannelIDs:      []string{"io1", "io2", "io3"},
+		DurationSeconds: 60,
+	}, "zh-CN"); err != nil {
+		t.Fatalf("SetScreenStrike(start) error = %v", err)
+	}
+
+	state, err := svc.SetScreenStrike(model.ScreenStrikeRequest{Enabled: false}, "zh-CN")
+	if err != nil {
+		t.Fatalf("SetScreenStrike(stop) error = %v", err)
+	}
+	if state.Active || state.RemainingSeconds != 0 || len(state.ChannelIDs) != 0 {
+		t.Fatalf("state after stop = %+v, want inactive", state)
+	}
+	for id, pin := range pins {
+		if id == "io4" {
+			continue
+		}
+		if pin.value != 0 {
+			t.Fatalf("%s value = %d, want low", id, pin.value)
+		}
+	}
+}
+
+func TestSetScreenStrikeRejectsStartWhenAnyStrikeChannelIsHigh(t *testing.T) {
+	svc, pins := newStrikeTestService(t)
+	defer svc.Shutdown()
+
+	if _, err := svc.SetScreenStrike(model.ScreenStrikeRequest{
+		Enabled:         true,
+		ChannelIDs:      []string{"io1"},
+		DurationSeconds: 60,
+	}, "zh-CN"); err != nil {
+		t.Fatalf("SetScreenStrike(first) error = %v", err)
+	}
+	first := svc.ScreenStrikeState()
+
+	state, err := svc.SetScreenStrike(model.ScreenStrikeRequest{
+		Enabled:         true,
+		ChannelIDs:      []string{"io2"},
+		DurationSeconds: 30,
+	}, "zh-CN")
+	if err == nil {
+		t.Fatal("SetScreenStrike(second) error = nil, want strike_already_active")
+	}
+	if code := ErrorCode(err); code != "strike_already_active" {
+		t.Fatalf("ErrorCode() = %q, want strike_already_active (err=%v)", code, err)
+	}
+
+	if !state.Active || !reflect.DeepEqual(state.ChannelIDs, []string{"io1"}) {
+		t.Fatalf("state after rejected replace = %+v, want original io1 active", state)
+	}
+	if first.StartedAt == nil || state.StartedAt == nil || !state.StartedAt.Equal(*first.StartedAt) {
+		t.Fatalf("startedAt after rejected replace = %v, first = %v", state.StartedAt, first.StartedAt)
+	}
+	if pins["io1"].value != 1 || pins["io2"].value != 0 || pins["io3"].value != 0 {
+		t.Fatalf("pin values = io1:%d io2:%d io3:%d, want original io1 high", pins["io1"].value, pins["io2"].value, pins["io3"].value)
+	}
+}
+
+func TestSetScreenStrikeInvalidRequestKeepsActiveTimeout(t *testing.T) {
+	svc, pins := newStrikeTestService(t)
+	defer svc.Shutdown()
+
+	if _, err := svc.applyScreenStrike(true, []string{"io1"}, 40*time.Millisecond, 10, "zh-CN"); err != nil {
+		t.Fatalf("applyScreenStrike(start) error = %v", err)
+	}
+
+	if _, err := svc.SetScreenStrike(model.ScreenStrikeRequest{
+		Enabled:         true,
+		ChannelIDs:      []string{"io1"},
+		DurationSeconds: 9,
+	}, "zh-CN"); err == nil {
+		t.Fatal("SetScreenStrike(invalid) error = nil, want error")
+	}
+
+	deadline := time.Now().Add(500 * time.Millisecond)
+	for {
+		state := svc.ScreenStrikeState()
+		if !state.Active && pins["io1"].value == 0 {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("strike did not time out after invalid request, state=%+v io1=%d", state, pins["io1"].value)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+func TestScreenStrikeTimeoutStopsChannels(t *testing.T) {
+	svc, pins := newStrikeTestService(t)
+	defer svc.Shutdown()
+
+	if _, err := svc.applyScreenStrike(true, []string{"io1", "io3"}, 20*time.Millisecond, 10, "zh-CN"); err != nil {
+		t.Fatalf("applyScreenStrike() error = %v", err)
+	}
+
+	deadline := time.Now().Add(500 * time.Millisecond)
+	for {
+		state := svc.ScreenStrikeState()
+		if !state.Active && pins["io1"].value == 0 && pins["io3"].value == 0 {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("strike did not time out, state=%+v io1=%d io3=%d", state, pins["io1"].value, pins["io3"].value)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+func TestScreenStrikeStateUsesActualHighLevel(t *testing.T) {
+	svc, pins := newStrikeTestService(t)
+	defer svc.Shutdown()
+
+	pins["io2"].value = 1
+
+	state := svc.ScreenStrikeState()
+	if !state.Active {
+		t.Fatalf("state active = false, want true: %+v", state)
+	}
+	if !reflect.DeepEqual(state.ChannelIDs, []string{"io2"}) {
+		t.Fatalf("channel IDs = %+v, want io2", state.ChannelIDs)
+	}
+	if state.RemainingSeconds != 0 || state.StartedAt != nil || state.EndsAt != nil {
+		t.Fatalf("manual high state should not invent countdown fields: %+v", state)
+	}
+}
+
+func TestSetScreenStrikeRejectsInvalidInput(t *testing.T) {
+	svc, _ := newStrikeTestService(t)
+	defer svc.Shutdown()
+
+	tests := []struct {
+		name string
+		req  model.ScreenStrikeRequest
+		code string
+	}{
+		{
+			name: "empty channels",
+			req: model.ScreenStrikeRequest{
+				Enabled:         true,
+				ChannelIDs:      nil,
+				DurationSeconds: 60,
+			},
+			code: "strike_channels_required",
+		},
+		{
+			name: "reserved channel",
+			req: model.ScreenStrikeRequest{
+				Enabled:         true,
+				ChannelIDs:      []string{"io4"},
+				DurationSeconds: 60,
+			},
+			code: "strike_invalid_channels",
+		},
+		{
+			name: "zero duration",
+			req: model.ScreenStrikeRequest{
+				Enabled:         true,
+				ChannelIDs:      []string{"io1"},
+				DurationSeconds: 0,
+			},
+			code: "strike_invalid_duration",
+		},
+		{
+			name: "below minimum duration",
+			req: model.ScreenStrikeRequest{
+				Enabled:         true,
+				ChannelIDs:      []string{"io1"},
+				DurationSeconds: 9,
+			},
+			code: "strike_invalid_duration",
+		},
+		{
+			name: "too long duration",
+			req: model.ScreenStrikeRequest{
+				Enabled:         true,
+				ChannelIDs:      []string{"io1"},
+				DurationSeconds: 61,
+			},
+			code: "strike_invalid_duration",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if _, err := svc.SetScreenStrike(tt.req, "zh-CN"); err == nil {
+				t.Fatal("SetScreenStrike() error = nil, want error")
+			} else if code := ErrorCode(err); code != tt.code {
+				t.Fatalf("ErrorCode() = %q, want %q (err=%v)", code, tt.code, err)
+			}
+		})
+	}
+}
+
+func newStrikeTestService(t *testing.T) (*Service, map[string]*fakePin) {
+	t.Helper()
+
+	tr, err := i18n.New("zh-CN")
+	if err != nil {
+		t.Fatalf("i18n.New() error = %v", err)
+	}
+
+	definitions := []ChannelDefinition{
+		{ID: "io1", Label: "IO1", Pin: 1, Bands: []string{"433"}},
+		{ID: "io2", Label: "IO2", Pin: 2, Bands: []string{"1.2"}},
+		{ID: "io3", Label: "IO3", Pin: 3, Bands: []string{"2.4"}},
+		{ID: "io4", Label: "IO4", Pin: 4, Reserved: true},
+	}
+	pins := map[string]*fakePin{
+		"io1": {},
+		"io2": {},
+		"io3": {},
+		"io4": {},
+	}
+	pinsByNumber := map[int]*fakePin{
+		1: pins["io1"],
+		2: pins["io2"],
+		3: pins["io3"],
+		4: pins["io4"],
+	}
+	svc := NewService(store.NewMemoryStore(10, 10), tr, definitions, func(number int) GPIOPin {
+		return pinsByNumber[number]
+	})
+	return svc, pins
 }

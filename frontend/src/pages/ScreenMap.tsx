@@ -35,7 +35,11 @@ function getOfflineTileBase() {
   if (typeof window === "undefined") {
     return "";
   }
-  return import.meta.env.DEV ? import.meta.env.VITE_BASE_PATH || "" : `http://${window.location.hostname}:8099`;
+  const configuredBase = import.meta.env.VITE_BASE_PATH?.trim();
+  if (configuredBase) {
+    return configuredBase.replace(/\/+$/, "");
+  }
+  return import.meta.env.DEV ? "http://localhost:8099" : `http://${window.location.hostname}:8099`;
 }
 
 function getStoredMapLayer(): ReferenceMapLayer {
@@ -69,13 +73,10 @@ function persistMapLayer(layer: ReferenceMapLayer) {
   }
 }
 
-function getAvailableMapLayers() {
-  if (i18n.language.startsWith("zh")) {
-    return referenceMapLayers;
-  }
-  return referenceMapLayers.filter((key) =>
-    ["leaflet.map.googleMap", "leaflet.map.googleSatellite", "leaflet.map.offlineMap"].includes(key),
-  );
+function getAvailableMapLayers(visibleMapLayers: ReferenceMapLayer[]) {
+  const visibleSet = new Set(visibleMapLayers);
+  const layers = referenceMapLayers.filter((key) => visibleSet.has(key));
+  return layers.length ? layers : referenceMapLayers;
 }
 
 function buildBaseLayers(): Record<ReferenceMapLayer, L.TileLayer> {
@@ -92,6 +93,7 @@ function buildBaseLayers(): Record<ReferenceMapLayer, L.TileLayer> {
       maxZoom: 16,
     }),
     "leaflet.map.googleMap": L.tileLayer("https://mt1.google.com/vt/lyrs=m&x={x}&y={y}&z={z}", {
+      coordFunction: "gps84ToGcj02",
       maxZoom: 22,
     }),
     "leaflet.map.googleSatellite": L.tileLayer("https://mt1.google.com/vt/lyrs=s&x={x}&y={y}&z={z}", {
@@ -326,6 +328,7 @@ export function ScreenMap({
   selectedId,
   positions,
   deviceLocation,
+  visibleMapLayers,
   onSelectPosition,
   onMapReady,
 }: {
@@ -333,6 +336,7 @@ export function ScreenMap({
   selectedId: string;
   positions: ScreenPositionTarget[];
   deviceLocation: ScreenDeviceLocationResponse | null;
+  visibleMapLayers: ReferenceMapLayer[];
   onSelectPosition: (target: ScreenPositionTarget) => void;
   onMapReady: (map: L.Map | null) => void;
 }) {
@@ -344,6 +348,7 @@ export function ScreenMap({
   const selectedIdRef = useRef(selectedId);
   const realDataRef = useRef<RealMapData>({ deviceLocation, positions });
   const hasFitRealBoundsRef = useRef(false);
+  const visibleMapLayersKey = visibleMapLayers.join("|");
 
   useEffect(() => {
     onSelectPositionRef.current = onSelectPosition;
@@ -390,10 +395,10 @@ export function ScreenMap({
       selectedPaneElement.style.zIndex = "660";
     }
 
-    const availableMapLayers = getAvailableMapLayers();
+    const availableMapLayers = getAvailableMapLayers(visibleMapLayers);
     const baseLayers = buildBaseLayers();
     const storedLayer = getStoredMapLayer();
-    const activeLayer = availableMapLayers.includes(storedLayer) ? storedLayer : "leaflet.map.googleSatellite";
+    const activeLayer = availableMapLayers.includes(storedLayer) ? storedLayer : availableMapLayers[0] ?? REFERENCE_DEFAULT_MAP_LAYER;
     baseLayers[activeLayer].addTo(map);
 
     const customButtons = createDrawControlButtonGroup([
@@ -473,7 +478,7 @@ export function ScreenMap({
       hasFitRealBoundsRef.current = false;
       onMapReady(null);
     };
-  }, [onMapReady, t]);
+  }, [onMapReady, t, visibleMapLayersKey]);
 
   useEffect(() => {
     const map = mapRef.current;

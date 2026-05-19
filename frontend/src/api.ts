@@ -27,6 +27,9 @@ import type {
   ScreenDetectionTarget,
   ScreenDeviceLocationResponse,
   ScreenPositionTarget,
+  ScreenStrikeRequest,
+  ScreenStrikeResponse,
+  ScreenStrikeState,
   ScreenStreamHandlers,
   StreamHandlers,
   UserSettings,
@@ -34,8 +37,23 @@ import type {
   WiFiConnectResponse,
   WiFiNetworksResponse,
 } from "./types";
+import i18n from "./i18n";
 
 const API_PREFIX = "/api/v1";
+
+type UnauthorizedHandler = (error: ApiRequestError) => void;
+
+let unauthorizedHandler: UnauthorizedHandler | null = null;
+
+export function setUnauthorizedHandler(handler: UnauthorizedHandler | null) {
+  unauthorizedHandler = handler;
+
+  return () => {
+    if (unauthorizedHandler === handler) {
+      unauthorizedHandler = null;
+    }
+  };
+}
 
 function developerHeaders(developerToken: string) {
   return developerToken ? { "X-Developer-Token": developerToken } : undefined;
@@ -78,12 +96,19 @@ async function requestJson<T>(path: string, init: RequestInit = {}, locale?: str
     } catch {
       payload = null;
     }
-    throw new ApiRequestError(
-      payload?.message || response.statusText || "Request failed",
+    const fallbackMessage = locale
+      ? i18n.getFixedT(locale, "common")("requestFailed")
+      : i18n.t("requestFailed", { ns: "common" });
+    const error = new ApiRequestError(
+      payload?.message || fallbackMessage,
       response.status,
       payload?.code,
       payload?.details,
     );
+    if (response.status === 401 && headers.has("X-Developer-Token")) {
+      unauthorizedHandler?.(error);
+    }
+    throw error;
   }
 
   if (response.status === 204) {
@@ -194,6 +219,22 @@ export function getScreenPositions(limit = 100): Promise<ListResponse<ScreenPosi
 
 export function getScreenDeviceLocation(): Promise<ScreenDeviceLocationResponse> {
   return requestJson<ScreenDeviceLocationResponse>("/screen/device-location");
+}
+
+export function getScreenStrike(locale?: string): Promise<ScreenStrikeState> {
+  return requestJson<ScreenStrikeState>("/screen/strike", {}, locale);
+}
+
+export function updateScreenStrike(
+  payload: ScreenStrikeRequest,
+  locale: string,
+  developerToken: string,
+): Promise<ScreenStrikeResponse> {
+  return requestJson<ScreenStrikeResponse>("/screen/strike", {
+    method: "POST",
+    headers: developerHeaders(developerToken),
+    body: JSON.stringify(payload),
+  }, locale);
 }
 
 export function getChannels(locale: string, developerToken: string): Promise<ChannelsResponse> {
@@ -323,7 +364,8 @@ export function openDetectionStream(locale: string, developerToken: string, hand
 
   source.onerror = () => {
     if (source.readyState === EventSource.CLOSED) {
-      handlers.onError?.(new Error("实时流连接已断开"));
+      const t = i18n.getFixedT(locale, "common");
+      handlers.onError?.(new Error(t("stream.detectionDisconnected")));
     }
   };
 
@@ -347,9 +389,16 @@ export function openScreenStream(handlers: ScreenStreamHandlers): () => void {
     }
   });
 
+  source.addEventListener("screen.strike.updated", (message) => {
+    const event = parseStreamEvent<ScreenStrikeState>((message as MessageEvent<string>).data);
+    if (event) {
+      handlers.onStrikeUpdated?.(event);
+    }
+  });
+
   source.onerror = () => {
     if (source.readyState === EventSource.CLOSED) {
-      handlers.onError?.(new Error("大屏实时流连接已断开"));
+      handlers.onError?.(new Error(i18n.t("stream.screenDisconnected", { ns: "common" })));
     }
   };
 

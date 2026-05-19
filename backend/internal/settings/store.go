@@ -238,12 +238,16 @@ func isEmptyNetworkSettings(req model.NetworkSettings) bool {
 }
 
 func isEmptyUserSettings(req model.UserSettings) bool {
-	return req.ManualDeviceLocation == nil
+	return req.ManualDeviceLocation == nil &&
+		len(req.ScreenStrikeChannelLabels) == 0
 }
 
 func normalizeSavedSettings(settings savedSettings) savedSettings {
 	if settings.Network.Priorities == nil {
 		settings.Network.Priorities = []model.NetworkPrioritySetting{}
+	}
+	if settings.User.ScreenStrikeChannelLabels == nil {
+		settings.User.ScreenStrikeChannelLabels = []string{}
 	}
 	return settings
 }

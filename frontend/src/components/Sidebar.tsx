@@ -112,7 +112,7 @@ export function Sidebar({
           href="#/screen"
           aria-label={t("screen", { ns: "nav" })}
           title={t("screen", { ns: "nav" })}
-          className="grid h-9 w-9 shrink-0 place-items-center rounded-2xl border border-primary/30 bg-primary/10 text-primary hover:border-primary/45 hover:bg-primary/15"
+          className="grid h-9 w-9 shrink-0 place-items-center rounded-[1.4rem] border border-primary/30 bg-primary/10 text-primary hover:border-primary/45 hover:bg-primary/15"
           onClick={() => handleNavigate("screen")}
         >
           <Monitor size={18} />
@@ -127,7 +127,7 @@ export function Sidebar({
           ) : null}
         </div>
         <button
-          className="btn btn-ghost btn-sm h-9 min-h-9 w-9 shrink-0 rounded-2xl px-0"
+          className="btn btn-ghost btn-sm h-9 min-h-9 w-9 shrink-0 rounded-[1.4rem] px-0"
           type="button"
           aria-label={t("openMenu", { ns: "nav" })}
           aria-expanded={mobileOpen}
@@ -148,7 +148,7 @@ export function Sidebar({
 
       <aside
         className={cx(
-          "admin-sidebar hidden min-h-0 overflow-hidden border-b border-base-300 bg-base-200/95 xl:block xl:rounded-2xl xl:border xl:border-base-300/80 xl:bg-base-200/85 xl:shadow-xl xl:shadow-black/20",
+          "admin-sidebar hidden min-h-0 overflow-hidden border-b border-base-300 bg-base-200/95 xl:block xl:rounded-[1.5rem] xl:border xl:border-base-300/80 xl:bg-base-200/85 xl:shadow-xl xl:shadow-black/20",
           mobileOpen && "admin-sidebar--open",
         )}
       >
@@ -158,7 +158,7 @@ export function Sidebar({
             href="#/screen"
             aria-label={t("screen", { ns: "nav" })}
             title={t("screen", { ns: "nav" })}
-            className="grid h-9 w-9 shrink-0 place-items-center rounded-2xl border border-primary/30 bg-primary/10 text-primary hover:border-primary/45 hover:bg-primary/15"
+            className="grid h-9 w-9 shrink-0 place-items-center rounded-[1.4rem] border border-primary/30 bg-primary/10 text-primary hover:border-primary/45 hover:bg-primary/15"
             onClick={() => handleNavigate("screen")}
           >
             <Monitor size={18} />
@@ -173,7 +173,7 @@ export function Sidebar({
             ) : null}
           </div>
           <button
-            className="admin-sidebar__menu-button btn btn-ghost btn-sm h-9 min-h-9 w-9 shrink-0 rounded-2xl px-0 xl:hidden"
+            className="admin-sidebar__menu-button btn btn-ghost btn-sm h-9 min-h-9 w-9 shrink-0 rounded-[1.4rem] px-0 xl:hidden"
             type="button"
             aria-label={mobileOpen ? t("close", { ns: "common" }) : t("openMenu", { ns: "nav" })}
             aria-expanded={mobileOpen}
@@ -188,7 +188,7 @@ export function Sidebar({
             href="#/settings"
             aria-current={page === "settings" ? "page" : undefined}
             className={cx(
-              "flex h-9 min-w-max items-center gap-2 rounded-2xl border border-base-300/80 px-2.5 text-[13px] font-medium xl:w-full",
+              "flex h-9 min-w-max items-center gap-2 rounded-[1.35rem] border border-base-300/80 px-2.5 text-[13px] font-medium xl:w-full",
               page === "settings"
                 ? "bg-primary text-primary-content"
                 : "bg-base-100/35 text-base-content/72 hover:bg-base-300/70 hover:text-base-content",
@@ -201,13 +201,13 @@ export function Sidebar({
 
           {developerActive ? (
             <details
-              className="group min-w-max rounded-2xl border border-base-300/80 bg-base-100/35 p-1 xl:min-w-0"
+              className="group min-w-max rounded-[1.45rem] border border-base-300/80 bg-base-100/35 p-1 xl:min-w-0"
               open={debugGroupOpen}
               onToggle={(event) => setDebugOpen(event.currentTarget.open)}
             >
               <summary
                 className={cx(
-                  "flex h-9 cursor-pointer list-none items-center gap-2 rounded-xl px-2.5 text-[13px] font-medium",
+                  "flex h-9 cursor-pointer list-none items-center gap-2 rounded-[1.2rem] px-2.5 text-[13px] font-medium",
                   debugNavActive
                     ? "bg-primary/10 text-primary shadow-[inset_0_0_0_1px_color-mix(in_oklab,var(--color-primary)_34%,transparent)]"
                     : "text-base-content/72 hover:bg-base-300/70 hover:text-base-content",
@@ -228,7 +228,7 @@ export function Sidebar({
                       href={`#/${item.id}`}
                       aria-current={active ? "page" : undefined}
                       className={cx(
-                        "flex h-8 min-w-max items-center gap-2 rounded-xl px-2.5 text-[13px] xl:min-w-0",
+                        "flex h-8 min-w-max items-center gap-2 rounded-[1.1rem] px-2.5 text-[13px] xl:min-w-0",
                         active
                           ? "bg-primary/10 text-primary shadow-[inset_0_0_0_1px_color-mix(in_oklab,var(--color-primary)_34%,transparent)]"
                           : "text-base-content/64 hover:bg-base-300/70 hover:text-base-content",
@@ -246,7 +246,7 @@ export function Sidebar({
         </nav>
 
         <div className="admin-sidebar__footer mt-auto grid gap-2">
-          <div className="flex items-center gap-2 rounded-2xl border border-base-300 bg-base-100/55 p-1.5">
+          <div className="flex items-center gap-2 rounded-[1.6rem] border border-base-300 bg-base-100/55 p-1.5">
             <div
               className="relative min-w-0 flex-1"
               onBlur={(event) => {
@@ -262,7 +262,7 @@ export function Sidebar({
               }}
             >
               <button
-                className="flex h-8 w-full items-center justify-center gap-2 rounded-xl border border-primary/20 bg-primary/10 px-2 text-[12px] font-semibold text-primary hover:border-primary/40 hover:bg-primary/15"
+                className="flex h-8 w-full items-center justify-center gap-2 rounded-[1.15rem] border border-primary/20 bg-primary/10 px-2 text-[12px] font-semibold text-primary hover:border-primary/40 hover:bg-primary/15"
                 type="button"
                 aria-label={t("language", { ns: "settings" })}
                 aria-haspopup="listbox"
@@ -276,7 +276,7 @@ export function Sidebar({
 
               {languageOpen ? (
                 <div
-                  className="absolute bottom-[calc(100%+0.4rem)] left-0 z-40 grid w-full min-w-[9rem] gap-1 rounded-2xl border border-primary/25 bg-base-100/95 p-1.5 shadow-2xl shadow-black/35"
+                  className="absolute bottom-[calc(100%+0.4rem)] left-0 z-40 grid w-full min-w-36 gap-1 rounded-[1.35rem] border border-primary/25 bg-base-100/95 p-1.5 shadow-2xl shadow-black/35"
                   role="listbox"
                   aria-label={t("language", { ns: "settings" })}
                 >
@@ -284,7 +284,7 @@ export function Sidebar({
                     <button
                       key={option}
                       className={cx(
-                        "flex h-8 items-center justify-between gap-2 rounded-xl px-2.5 text-left text-[12px] font-semibold",
+                        "flex h-8 items-center justify-between gap-2 rounded-[1.1rem] px-2.5 text-left text-[12px] font-semibold",
                         option === locale
                           ? "bg-primary/15 text-primary"
                           : "text-base-content/72 hover:bg-base-300/70 hover:text-base-content",
@@ -307,7 +307,7 @@ export function Sidebar({
 
             {developerActive ? (
               <button
-                className="btn btn-ghost btn-xs h-8 min-h-8 w-8 rounded-xl px-0 text-success"
+                className="btn btn-ghost btn-xs h-8 min-h-8 w-8 rounded-[1.15rem] px-0 text-success"
                 type="button"
                 aria-label={t("developerLogout", { ns: "nav" })}
                 title={t("developerLogout", { ns: "nav" })}
@@ -317,7 +317,7 @@ export function Sidebar({
               </button>
             ) : (
               <button
-                className="btn btn-ghost btn-xs h-8 min-h-8 w-8 rounded-xl px-0 text-base-content/55"
+                className="btn btn-ghost btn-xs h-8 min-h-8 w-8 rounded-[1.15rem] px-0 text-base-content/55"
                 type="button"
                 aria-label={t("developerLogin", { ns: "nav" })}
                 title={t("developerLogin", { ns: "nav" })}
@@ -332,13 +332,13 @@ export function Sidebar({
 
       {developerOpen ? (
         <div className="app-modal-backdrop fixed inset-0 z-50 grid place-items-center bg-black/55 p-4" role="dialog" aria-modal="true">
-          <form className="app-modal-card grid w-full max-w-sm gap-3 rounded-2xl border border-base-300 bg-base-100 p-4 shadow-2xl shadow-black/40" onSubmit={handleDeveloperSubmit}>
+          <form className="app-modal-card grid w-full max-w-sm gap-3 rounded-[1.5rem] border border-base-300 bg-base-100 p-4 shadow-2xl shadow-black/40" onSubmit={handleDeveloperSubmit}>
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
                 <h2 className="text-sm font-semibold text-base-content">{t("developerLogin", { ns: "nav" })}</h2>
               </div>
               <button
-                className="btn btn-ghost btn-xs h-7 min-h-7 w-7 rounded-xl px-0"
+                className="btn btn-ghost btn-xs h-7 min-h-7 w-7 rounded-[1.15rem] px-0"
                 type="button"
                 aria-label={t("close", { ns: "common" })}
                 onClick={() => setDeveloperOpen(false)}
@@ -360,7 +360,7 @@ export function Sidebar({
               />
             </label>
 
-            {developerError ? <p className="rounded-xl bg-error/10 px-3 py-2 text-xs text-error">{developerError}</p> : null}
+            {developerError ? <p className="rounded-[1.1rem] bg-error/10 px-3 py-2 text-xs text-error">{developerError}</p> : null}
 
             <div className="flex items-center justify-end gap-2">
               <button className={cx("btn btn-primary btn-sm", developerBusy && "app-busy-button")} type="submit" disabled={developerBusy || developerCode.trim().length !== 6}>

@@ -50,20 +50,20 @@ export interface ScreenAlert {
 export const REFERENCE_MAP_CENTER: [number, number] = [39.909181, 116.397472];
 export const REFERENCE_MAP_ZOOM = 13;
 export const REFERENCE_MAP_LAYER_STORAGE_KEY = "mapLayer";
-export const REFERENCE_DEFAULT_MAP_LAYER: ReferenceMapLayer = "leaflet.map.gaodeSatellite";
+export const REFERENCE_DEFAULT_MAP_LAYER: ReferenceMapLayer = "leaflet.map.googleMap";
 
 export const referenceMapLayers: ReferenceMapLayer[] = [
-  "leaflet.map.gaodeMap",
-  "leaflet.map.gaodeSatellite",
   "leaflet.map.googleMap",
   "leaflet.map.googleSatellite",
+  "leaflet.map.gaodeMap",
+  "leaflet.map.gaodeSatellite",
   "leaflet.map.offlineMap",
 ];
 
 export const screenDevices: ScreenDevice[] = [
   {
     id: "dev-north",
-    nameKey: "devices.northDetector",
+    nameKey: "deviceNames.northDetector",
     sn: "DR600-N-01",
     type: "detector",
     lat: 39.9262,
@@ -72,7 +72,7 @@ export const screenDevices: ScreenDevice[] = [
   },
   {
     id: "dev-east",
-    nameKey: "devices.eastJammer",
+    nameKey: "deviceNames.eastJammer",
     sn: "DR600-E-02",
     type: "jammer",
     lat: 39.9138,
@@ -81,7 +81,7 @@ export const screenDevices: ScreenDevice[] = [
   },
   {
     id: "dev-south",
-    nameKey: "devices.southDetector",
+    nameKey: "deviceNames.southDetector",
     sn: "DR600-S-03",
     type: "detector",
     lat: 39.8858,

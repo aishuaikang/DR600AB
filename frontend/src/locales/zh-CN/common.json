@@ -13,5 +13,19 @@
   "clear": "清空",
   "close": "关闭",
   "notConfigured": "未配置",
-  "empty": "暂无数据"
+  "empty": "暂无数据",
+  "unexpectedError": "发生未知错误",
+  "requestFailed": "请求失败",
+  "developerSessionExpired": "登录状态已失效，请重新登录",
+  "stream.detectionDisconnected": "实时流连接已断开",
+  "stream.screenDisconnected": "大屏实时流连接已断开",
+  "keyboard.virtualKeyboard": "虚拟键盘",
+  "keyboard.chineseCandidates": "中文候选词",
+  "keyboard.clear": "清空",
+  "keyboard.enter": "确认",
+  "keyboard.close": "关闭",
+  "keyboard.space": "空格",
+  "keyboard.pinyinInput": "拼音输入",
+  "keyboard.dictionaryLoading": "加载 Rime 词库",
+  "keyboard.pinyinHint": "输入拼音选择候选"
 }

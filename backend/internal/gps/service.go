@@ -158,7 +158,7 @@ func (s *Service) Start(req model.GPSSessionRequest, locale string) (model.GPSSe
 		}
 	}
 
-	gpsClient, err := s.connectOnce(&sess.config, sess.controlPort)
+	gpsClient, err := s.connectOnce(&sess.config, sess.controlPort, locale)
 	if err == nil {
 		if !s.assignConnectedClient(seq, sess, gpsClient) {
 			gpsClient.Close()
@@ -290,7 +290,7 @@ func (s *Service) manageSession(seq uint64, sess *session, connected bool) {
 		}
 
 		if !connected {
-			gpsClient, err := s.connectOnce(&sess.config, sess.controlPort)
+			gpsClient, err := s.connectOnce(&sess.config, sess.controlPort, sess.locale)
 			if err != nil {
 				state := sess.state
 				if state == "" {
@@ -419,7 +419,7 @@ func (s *Service) responseForSession(sess *session, locale, message string) mode
 	}
 }
 
-func (s *Service) connectOnce(cfg *serialport.Config, controlPortName string) (*client.SerialClient, error) {
+func (s *Service) connectOnce(cfg *serialport.Config, controlPortName string, locale string) (*client.SerialClient, error) {
 	s.mu.RLock()
 	openPort := s.openPort
 	s.mu.RUnlock()
@@ -445,7 +445,7 @@ func (s *Service) connectOnce(cfg *serialport.Config, controlPortName string) (*
 
 	if err := gpsClient.Send(startGPSCommand); err != nil {
 		gpsClient.Close()
-		return nil, fmt.Errorf("发送 GPS 启动命令失败: %w", err)
+		return nil, fmt.Errorf("%s: %w", s.translator.T(locale, "errors", "gps_start_command_failed"), err)
 	}
 	return gpsClient, nil
 }

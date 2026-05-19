@@ -13,6 +13,8 @@
   "gps.session.disconnected": "GPS serial connection was lost",
   "gpio.enabled": "Interference channel enabled",
   "gpio.disabled": "Interference channel disabled",
+  "strike.started": "Interference started",
+  "strike.stopped": "Interference stopped",
   "developer.login": "Developer login is active",
   "network.updated": "Network interface configuration updated",
   "network.priority_updated": "Network priority updated",

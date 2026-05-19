@@ -34,7 +34,8 @@ func TestStoreKeepsDetectionGPSNetworkAndUserSettings(t *testing.T) {
 		},
 	}
 	userReq := model.UserSettings{
-		ManualDeviceLocation: &model.GeoPoint{Latitude: 23.12911, Longitude: 113.264385},
+		ManualDeviceLocation:      &model.GeoPoint{Latitude: 23.12911, Longitude: 113.264385},
+		ScreenStrikeChannelLabels: []string{"2.4G", "5.2G", "5.8G"},
 	}
 
 	if err := store.Save(detectionReq); err != nil {
@@ -79,6 +80,12 @@ func TestStoreKeepsDetectionGPSNetworkAndUserSettings(t *testing.T) {
 		gotUser.ManualDeviceLocation.Latitude != userReq.ManualDeviceLocation.Latitude ||
 		gotUser.ManualDeviceLocation.Longitude != userReq.ManualDeviceLocation.Longitude {
 		t.Fatalf("user settings = %+v, want %+v", gotUser, userReq)
+	}
+	if len(gotUser.ScreenStrikeChannelLabels) != len(userReq.ScreenStrikeChannelLabels) ||
+		gotUser.ScreenStrikeChannelLabels[0] != userReq.ScreenStrikeChannelLabels[0] ||
+		gotUser.ScreenStrikeChannelLabels[1] != userReq.ScreenStrikeChannelLabels[1] ||
+		gotUser.ScreenStrikeChannelLabels[2] != userReq.ScreenStrikeChannelLabels[2] {
+		t.Fatalf("user strike labels = %+v, want %+v", gotUser.ScreenStrikeChannelLabels, userReq.ScreenStrikeChannelLabels)
 	}
 }
 

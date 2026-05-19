@@ -87,8 +87,8 @@ export function VirtualMessageTable({
           <tbody>
             {records.length === 0 ? (
               <tr>
-                <td colSpan={colSpan} className="py-8 text-center text-sm text-base-content/55">
-                  {t("empty", { ns: "common" })}
+                <td colSpan={colSpan} className="p-3">
+                  <div className="admin-empty-state admin-empty-state--table">{t("empty", { ns: "common" })}</div>
                 </td>
               </tr>
             ) : (

@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 
 import { cx } from "../utils/classnames";
 import { getPinyinCandidates, loadPinyinDictionary } from "../utils/pinyinCandidates";
@@ -61,15 +62,11 @@ const digitLayout = [
   ["{hide}"],
 ];
 
-const buttonLabels: Record<string, string> = {
+const staticButtonLabels: Record<string, string> = {
   "{abc}": "ABC",
   "{bksp}": "⌫",
-  "{clear}": "Clear",
-  "{enter}": "Enter",
-  "{hide}": "Close",
   "{lang}": "中",
   "{shift}": "⇧",
-  "{space}": "Space",
   "{symbols}": "#+=",
 };
 
@@ -78,6 +75,7 @@ const keyboardLanguageByLocale: Record<SupportedKeyboardLanguage, LanguageMode> 
   "en-US": "en",
   "zh-CN": "zh",
 };
+const keyboardViewportGap = 16;
 
 function normalizeKeyboardLocale(locale: string): SupportedKeyboardLanguage {
   return locale === "zh-CN" ? "zh-CN" : "en-US";
@@ -102,6 +100,48 @@ function isEditableElement(element: EventTarget | null): element is EditableElem
     return false;
   }
   return element.dataset.virtualKeyboard !== "off";
+}
+
+function scrollableAncestor(element: Element | null) {
+  if (!(element instanceof HTMLElement)) {
+    return null;
+  }
+  let current = element.parentElement;
+  while (current && current !== document.body) {
+    const style = window.getComputedStyle(current);
+    if (
+      ["auto", "scroll", "overlay"].includes(style.overflowY) &&
+      current.scrollHeight > current.clientHeight
+    ) {
+      return current;
+    }
+    current = current.parentElement;
+  }
+  return document.scrollingElement instanceof HTMLElement ? document.scrollingElement : null;
+}
+
+function keepElementAboveKeyboard(element: EditableElement, keyboardHeight: number) {
+  const container = scrollableAncestor(element);
+  if (!container) {
+    element.scrollIntoView({ block: "center", inline: "nearest" });
+    return;
+  }
+
+  const elementRect = element.getBoundingClientRect();
+  const containerRect = container === document.documentElement
+    ? { top: 0, bottom: window.innerHeight }
+    : container.getBoundingClientRect();
+  const keyboardTop = window.innerHeight - keyboardHeight;
+  const visibleTop = Math.max(containerRect.top, 0) + keyboardViewportGap;
+  const visibleBottom = Math.min(containerRect.bottom, keyboardTop) - keyboardViewportGap;
+
+  if (elementRect.bottom > visibleBottom) {
+    container.scrollBy({ top: elementRect.bottom - visibleBottom, behavior: "auto" });
+    return;
+  }
+  if (elementRect.top < visibleTop) {
+    container.scrollBy({ top: elementRect.top - visibleTop, behavior: "auto" });
+  }
 }
 
 function getKeyboardMode(element: EditableElement): KeyboardMode {
@@ -218,7 +258,9 @@ export function VirtualKeyboard({
   locale: string;
   localeOptions: string[];
 }) {
+  const { t } = useTranslation();
   const activeElementRef = useRef<EditableElement | null>(null);
+  const keyboardRef = useRef<HTMLDivElement | null>(null);
   const closeTimerRef = useRef<number | null>(null);
   const supportsChinese = localeOptions.includes("zh-CN");
   const supportsEnglish = localeOptions.includes("en-US");
@@ -248,6 +290,21 @@ export function VirtualKeyboard({
     activeElementRef.current = null;
   }, [cancelClose]);
 
+  const syncKeyboardViewport = useCallback(() => {
+    if (!visible) {
+      document.documentElement.style.removeProperty("--virtual-keyboard-height");
+      document.body.classList.remove("virtual-keyboard-open");
+      return 0;
+    }
+    const height = Math.ceil(keyboardRef.current?.getBoundingClientRect().height ?? 0);
+    document.documentElement.style.setProperty("--virtual-keyboard-height", `${height}px`);
+    document.body.classList.add("virtual-keyboard-open");
+    if (height > 0 && activeElementRef.current) {
+      keepElementAboveKeyboard(activeElementRef.current, height);
+    }
+    return height;
+  }, [visible]);
+
   const showForElement = useCallback(
     (element: EditableElement) => {
       cancelClose();
@@ -261,6 +318,12 @@ export function VirtualKeyboard({
       setPinyinBuffer("");
       setPinyinCandidates(emptyCandidates);
       setVisible(true);
+      window.requestAnimationFrame(() => {
+        const height = Math.ceil(keyboardRef.current?.getBoundingClientRect().height ?? 0);
+        if (height > 0) {
+          keepElementAboveKeyboard(element, height);
+        }
+      });
     },
     [cancelClose, locale, localeOptions],
   );
@@ -270,6 +333,18 @@ export function VirtualKeyboard({
       if (isEditableElement(event.target)) {
         showForElement(event.target);
       }
+    };
+
+    const handlePointerDown = (event: PointerEvent) => {
+      if (isEditableElement(event.target)) {
+        showForElement(event.target);
+        return;
+      }
+      window.setTimeout(() => {
+        if (isEditableElement(document.activeElement)) {
+          showForElement(document.activeElement);
+        }
+      }, 0);
     };
 
     const handleFocusOut = () => {
@@ -286,18 +361,55 @@ export function VirtualKeyboard({
       }
     };
 
-    window.addEventListener("focusin", handleFocusIn);
-    window.addEventListener("focusout", handleFocusOut);
+    document.addEventListener("focusin", handleFocusIn);
+    document.addEventListener("focusout", handleFocusOut);
+    document.addEventListener("pointerdown", handlePointerDown, true);
     window.addEventListener("keydown", handleKeyDown);
     window.addEventListener("hashchange", hideKeyboard);
     return () => {
-      window.removeEventListener("focusin", handleFocusIn);
-      window.removeEventListener("focusout", handleFocusOut);
+      document.removeEventListener("focusin", handleFocusIn);
+      document.removeEventListener("focusout", handleFocusOut);
+      document.removeEventListener("pointerdown", handlePointerDown, true);
       window.removeEventListener("keydown", handleKeyDown);
       window.removeEventListener("hashchange", hideKeyboard);
       cancelClose();
     };
   }, [cancelClose, hideKeyboard, showForElement, visible]);
+
+  useLayoutEffect(() => {
+    const update = () => {
+      syncKeyboardViewport();
+    };
+    update();
+
+    if (!visible) {
+      return update;
+    }
+
+    const frame = window.requestAnimationFrame(update);
+    const resizeObserver = typeof ResizeObserver === "undefined" || !keyboardRef.current
+      ? null
+      : new ResizeObserver(update);
+    if (keyboardRef.current) {
+      resizeObserver?.observe(keyboardRef.current);
+    }
+    window.addEventListener("resize", update);
+    window.visualViewport?.addEventListener("resize", update);
+    window.visualViewport?.addEventListener("scroll", update);
+
+    return () => {
+      window.cancelAnimationFrame(frame);
+      resizeObserver?.disconnect();
+      window.removeEventListener("resize", update);
+      window.visualViewport?.removeEventListener("resize", update);
+      window.visualViewport?.removeEventListener("scroll", update);
+    };
+  }, [syncKeyboardViewport, visible, mode, layoutName, languageMode]);
+
+  useEffect(() => () => {
+    document.documentElement.style.removeProperty("--virtual-keyboard-height");
+    document.body.classList.remove("virtual-keyboard-open");
+  }, []);
 
   useEffect(() => {
     if (!visible || mode !== "text") {
@@ -449,19 +561,27 @@ export function VirtualKeyboard({
       : textLayouts[layoutName].map((row) =>
         canSwitchLanguage && textLanguagePolicy === "auto" ? row : row.filter((key) => key !== "{lang}"),
       );
+  const buttonLabels: Record<string, string> = {
+    ...staticButtonLabels,
+    "{clear}": t("keyboard.clear", { ns: "common" }),
+    "{enter}": t("keyboard.enter", { ns: "common" }),
+    "{hide}": t("keyboard.close", { ns: "common" }),
+    "{space}": t("keyboard.space", { ns: "common" }),
+  };
 
   return (
     <div
+      ref={keyboardRef}
       className={cx("virtual-keyboard", mode !== "text" && "virtual-keyboard--numeric")}
       onPointerDown={(event) => event.preventDefault()}
     >
-      <div className="virtual-keyboard__panel" role="group" aria-label="Virtual keyboard">
+      <div className="virtual-keyboard__panel" role="group" aria-label={t("keyboard.virtualKeyboard", { ns: "common" })}>
         {mode === "text" && languageMode === "zh" ? (
           <div className="virtual-keyboard__ime">
             <div className="virtual-keyboard__composition">
-              <span>{pinyinBuffer || "拼音输入"}</span>
+              <span>{pinyinBuffer || t("keyboard.pinyinInput", { ns: "common" })}</span>
             </div>
-            <div className="virtual-keyboard__candidates" aria-label="Chinese candidates">
+            <div className="virtual-keyboard__candidates" aria-label={t("keyboard.chineseCandidates", { ns: "common" })}>
               {pinyinCandidates.length > 0 ? (
                 pinyinCandidates.map((candidate, index) => (
                   <button
@@ -481,7 +601,9 @@ export function VirtualKeyboard({
                 ))
               ) : (
                 <span className="virtual-keyboard__candidate-empty">
-                  {dictionaryLoading ? "加载 Rime 词库" : "输入拼音选择候选"}
+                  {dictionaryLoading
+                    ? t("keyboard.dictionaryLoading", { ns: "common" })
+                    : t("keyboard.pinyinHint", { ns: "common" })}
                 </span>
               )}
             </div>

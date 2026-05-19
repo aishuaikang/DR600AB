@@ -78,6 +78,9 @@ class LeafletCoordConverter {
   }
 
   gps84ToGcj02(lng: number, lat: number): CoordPoint {
+    if (this.outOfChina(lng, lat)) {
+      return { lng, lat };
+    }
     let dLat = this.transformLat(lng - 105.0, lat - 35.0);
     let dLng = this.transformLng(lng - 105.0, lat - 35.0);
     const radLat = (lat / 180.0) * this.pi;
@@ -93,6 +96,9 @@ class LeafletCoordConverter {
   }
 
   gcj02ToGps84(lng: number, lat: number): CoordPoint {
+    if (this.outOfChina(lng, lat)) {
+      return { lng, lat };
+    }
     const coord = this.transform(lng, lat);
     return {
       lng: lng * 2 - coord.lng,
@@ -146,6 +152,10 @@ class LeafletCoordConverter {
     return this.gps84ToGcj02(lng, lat);
   }
 
+  private outOfChina(lng: number, lat: number) {
+    return lng < 72.004 || lng > 137.8347 || lat < 0.8293 || lat > 55.8271;
+  }
+
   private transformLat(x: number, y: number) {
     let result = -100.0 + 2.0 * x + 3.0 * y + 0.2 * y * y + 0.1 * x * y + 0.2 * Math.sqrt(Math.abs(x));
     result += ((20.0 * Math.sin(6.0 * x * this.pi) + 20.0 * Math.sin(2.0 * x * this.pi)) * 2.0) / 3.0;
@@ -164,6 +174,12 @@ class LeafletCoordConverter {
       3.0;
     return result;
   }
+}
+
+const standaloneCoordConverter = new LeafletCoordConverter();
+
+export function gps84ToGcj02(lng: number, lat: number) {
+  return standaloneCoordConverter.gps84ToGcj02(lng, lat);
 }
 
 function convertCenter(layer: CoordLayer, center: L.LatLng) {

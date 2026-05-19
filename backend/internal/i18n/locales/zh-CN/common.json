@@ -13,6 +13,8 @@
   "gps.session.disconnected": "GPS 串口连接已断开",
   "gpio.enabled": "干扰通道已开启",
   "gpio.disabled": "干扰通道已关闭",
+  "strike.started": "干扰已开启",
+  "strike.stopped": "干扰已停止",
   "developer.login": "开发者登录已启用",
   "network.updated": "网口配置已更新",
   "network.priority_updated": "网络优先级已更新",

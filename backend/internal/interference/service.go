@@ -2,6 +2,7 @@
 package interference
 
 import (
+	"errors"
 	"fmt"
 	"sort"
 	"strconv"
@@ -14,6 +15,30 @@ import (
 	"gpio-controller/board"
 	"gpio-controller/gpio"
 )
+
+const (
+	screenStrikeEventType          = "screen.strike.updated"
+	screenStrikeMinDurationSeconds = 10
+	screenStrikeMaxDurationSeconds = 60
+)
+
+type codedError struct {
+	code    string
+	message string
+}
+
+func (e *codedError) Error() string {
+	return e.message
+}
+
+// ErrorCode 返回 Service 产生的可识别错误码。
+func ErrorCode(err error) string {
+	var coded *codedError
+	if errors.As(err, &coded) {
+		return coded.code
+	}
+	return ""
+}
 
 // GPIOPin 是 GPIO 控制服务依赖的引脚操作接口。
 type GPIOPin interface {
@@ -45,6 +70,14 @@ type Service struct {
 	pinFactory PinFactory
 	store      *store.MemoryStore
 	translator *i18n.Translator
+
+	strikeTimer           *time.Timer
+	strikeSeq             uint64
+	strikeActive          bool
+	strikeChannelIDs      []string
+	strikeDurationSeconds int
+	strikeStartedAt       time.Time
+	strikeEndsAt          time.Time
 }
 
 type channelState struct {
@@ -126,6 +159,123 @@ func (s *Service) SetState(id string, enabled bool, locale string) (model.GpioCh
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	channel, err := s.setStateLocked(id, enabled, locale)
+	if err == nil && s.isScreenStrikeChannelIDLocked(id) {
+		if !s.screenStrikeHasHighChannelLocked() {
+			s.strikeSeq++
+			if s.strikeTimer != nil {
+				s.strikeTimer.Stop()
+				s.strikeTimer = nil
+			}
+			s.clearScreenStrikeLocked()
+		}
+		s.publishScreenStrikeLocked(s.screenStrikeStateLocked(time.Now()))
+	}
+	return channel, err
+}
+
+// ScreenStrikeState 返回大屏干扰控制当前状态。
+func (s *Service) ScreenStrikeState() model.ScreenStrikeState {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	return s.screenStrikeStateLocked(time.Now())
+}
+
+// SetScreenStrike 更新大屏干扰控制状态。启用时只允许控制前三个非预留 GPIO 通道。
+func (s *Service) SetScreenStrike(req model.ScreenStrikeRequest, locale string) (model.ScreenStrikeState, error) {
+	durationSeconds := req.DurationSeconds
+	duration := time.Duration(durationSeconds) * time.Second
+	return s.applyScreenStrike(req.Enabled, req.ChannelIDs, duration, durationSeconds, locale)
+}
+
+func (s *Service) applyScreenStrike(
+	enabled bool,
+	channelIDs []string,
+	duration time.Duration,
+	durationSeconds int,
+	locale string,
+) (model.ScreenStrikeState, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if !enabled {
+		s.strikeSeq++
+		if s.strikeTimer != nil {
+			s.strikeTimer.Stop()
+			s.strikeTimer = nil
+		}
+		err := s.stopScreenStrikeChannelsLocked(locale)
+		s.clearScreenStrikeLocked()
+		state := s.screenStrikeStateLocked(time.Now())
+		s.publishScreenStrikeLocked(state)
+		return state, err
+	}
+
+	selected, err := s.validateScreenStrikeChannelsLocked(channelIDs, locale)
+	if err != nil {
+		return s.screenStrikeStateLocked(time.Now()), err
+	}
+	if duration <= 0 || durationSeconds < screenStrikeMinDurationSeconds || durationSeconds > screenStrikeMaxDurationSeconds {
+		return s.screenStrikeStateLocked(time.Now()), s.localizedError(locale, "strike_invalid_duration")
+	}
+	if s.screenStrikeHasHighChannelLocked() {
+		return s.screenStrikeStateLocked(time.Now()), s.localizedError(locale, "strike_already_active")
+	}
+
+	s.strikeSeq++
+	if s.strikeTimer != nil {
+		s.strikeTimer.Stop()
+		s.strikeTimer = nil
+	}
+
+	selectedSet := make(map[string]bool, len(selected))
+	for _, id := range selected {
+		selectedSet[id] = true
+	}
+	for _, id := range s.screenStrikeChannelIDsLocked() {
+		if _, err := s.setStateLocked(id, selectedSet[id], locale); err != nil {
+			_ = s.stopScreenStrikeChannelsLocked(locale)
+			s.clearScreenStrikeLocked()
+			state := s.screenStrikeStateLocked(time.Now())
+			s.publishScreenStrikeLocked(state)
+			return state, err
+		}
+	}
+
+	now := time.Now()
+	endsAt := now.Add(duration)
+	s.strikeActive = true
+	s.strikeChannelIDs = append([]string(nil), selected...)
+	s.strikeDurationSeconds = durationSeconds
+	s.strikeStartedAt = now
+	s.strikeEndsAt = endsAt
+
+	seq := s.strikeSeq
+	s.strikeTimer = time.AfterFunc(duration, func() {
+		s.stopScreenStrikeOnTimeout(seq)
+	})
+
+	state := s.screenStrikeStateLocked(now)
+	s.publishScreenStrikeLocked(state)
+	return state, nil
+}
+
+func (s *Service) stopScreenStrikeOnTimeout(seq uint64) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if seq != s.strikeSeq || !s.strikeActive {
+		return
+	}
+	s.strikeSeq++
+	s.strikeTimer = nil
+	_ = s.stopScreenStrikeChannelsLocked("")
+	s.clearScreenStrikeLocked()
+	s.publishScreenStrikeLocked(s.screenStrikeStateLocked(time.Now()))
+}
+
+func (s *Service) setStateLocked(id string, enabled bool, locale string) (model.GpioChannel, error) {
 	state, ok := s.channels[id]
 	if !ok {
 		return model.GpioChannel{}, fmt.Errorf("%s", s.translator.T(locale, "errors", "channel_not_found"))
@@ -151,6 +301,12 @@ func (s *Service) SetState(id string, enabled bool, locale string) (model.GpioCh
 		state.status = "active"
 		state.lastError = ""
 	} else {
+		if state.pin == nil {
+			pin := s.pinFactory(state.def.Pin)
+			if value, err := pin.GetValue(); err == nil && value != 0 {
+				state.pin = pin
+			}
+		}
 		if state.pin != nil {
 			if err := state.pin.SetLow(); err != nil {
 				return s.markError(state, locale, err)
@@ -176,6 +332,13 @@ func (s *Service) Shutdown() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	s.strikeSeq++
+	if s.strikeTimer != nil {
+		s.strikeTimer.Stop()
+		s.strikeTimer = nil
+	}
+	s.clearScreenStrikeLocked()
+
 	for _, state := range s.channels {
 		if state.pin == nil {
 			continue
@@ -188,6 +351,140 @@ func (s *Service) Shutdown() {
 		state.actualLevel = "low"
 		state.desiredLevel = "low"
 		state.status = initialStatus(state.def)
+	}
+}
+
+func (s *Service) validateScreenStrikeChannelsLocked(ids []string, locale string) ([]string, error) {
+	if len(ids) == 0 {
+		return nil, s.localizedError(locale, "strike_channels_required")
+	}
+
+	requested := make(map[string]struct{}, len(ids))
+	for _, id := range ids {
+		if id == "" {
+			continue
+		}
+		requested[id] = struct{}{}
+	}
+	if len(requested) == 0 {
+		return nil, s.localizedError(locale, "strike_channels_required")
+	}
+
+	selected := make([]string, 0, len(requested))
+	for _, id := range s.screenStrikeChannelIDsLocked() {
+		if _, ok := requested[id]; ok {
+			selected = append(selected, id)
+			delete(requested, id)
+		}
+	}
+	if len(requested) > 0 {
+		return nil, s.localizedError(locale, "strike_invalid_channels")
+	}
+	return selected, nil
+}
+
+func (s *Service) screenStrikeChannelIDsLocked() []string {
+	ids := make([]string, 0, 3)
+	for _, id := range s.order {
+		state := s.channels[id]
+		if state == nil || state.def.Reserved {
+			continue
+		}
+		ids = append(ids, id)
+		if len(ids) == 3 {
+			break
+		}
+	}
+	return ids
+}
+
+func (s *Service) isScreenStrikeChannelIDLocked(id string) bool {
+	for _, strikeID := range s.screenStrikeChannelIDsLocked() {
+		if strikeID == id {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *Service) screenStrikeHasHighChannelLocked() bool {
+	for _, id := range s.screenStrikeChannelIDsLocked() {
+		if s.dtoWithActual(s.channels[id]).Enabled {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *Service) stopScreenStrikeChannelsLocked(locale string) error {
+	var firstErr error
+	for _, id := range s.screenStrikeChannelIDsLocked() {
+		if _, err := s.setStateLocked(id, false, locale); err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
+	return firstErr
+}
+
+func (s *Service) clearScreenStrikeLocked() {
+	s.strikeActive = false
+	s.strikeChannelIDs = nil
+	s.strikeDurationSeconds = 0
+	s.strikeStartedAt = time.Time{}
+	s.strikeEndsAt = time.Time{}
+}
+
+func (s *Service) screenStrikeStateLocked(now time.Time) model.ScreenStrikeState {
+	if now.IsZero() {
+		now = time.Now()
+	}
+
+	channels := make([]model.GpioChannel, 0, 3)
+	activeChannelIDs := make([]string, 0, 3)
+	for _, id := range s.screenStrikeChannelIDsLocked() {
+		channel := s.dtoWithActual(s.channels[id])
+		channels = append(channels, channel)
+		if channel.Enabled {
+			activeChannelIDs = append(activeChannelIDs, channel.ID)
+		}
+	}
+
+	active := len(activeChannelIDs) > 0
+	state := model.ScreenStrikeState{
+		Active:           active,
+		ChannelIDs:       append([]string(nil), activeChannelIDs...),
+		DurationSeconds:  s.strikeDurationSeconds,
+		RemainingSeconds: 0,
+		Channels:         channels,
+	}
+	if active && s.strikeActive {
+		startedAt := s.strikeStartedAt
+		endsAt := s.strikeEndsAt
+		state.StartedAt = &startedAt
+		state.EndsAt = &endsAt
+		state.RemainingSeconds = ceilSeconds(endsAt.Sub(now))
+	}
+	return state
+}
+
+func (s *Service) publishScreenStrikeLocked(state model.ScreenStrikeState) {
+	if s.store == nil {
+		return
+	}
+	s.store.Publish(model.Event{Type: screenStrikeEventType, Time: time.Now(), Payload: state})
+}
+
+func ceilSeconds(duration time.Duration) int {
+	if duration <= 0 {
+		return 0
+	}
+	return int((duration + time.Second - 1) / time.Second)
+}
+
+func (s *Service) localizedError(locale string, code string) error {
+	return &codedError{
+		code:    code,
+		message: s.translator.T(locale, "errors", code),
 	}
 }
 
