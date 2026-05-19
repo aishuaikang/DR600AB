@@ -6,6 +6,7 @@ import {
   deleteDeveloperSessionRequest,
   getChannels,
   getDetectionSettings,
+  getDetections,
   getGPSRecords,
   getGPSSession,
   getGPSSettings,
@@ -13,10 +14,12 @@ import {
   getParsed,
   getPorts,
   getSession,
+  getUserSettings,
   openDetectionStream,
   setChannelState,
   updateDetectionSettings,
   updateGPSSettings,
+  updateUserSettings,
 } from "./api";
 import { MESSAGE_PAGE_ORDER } from "./app/message-pages";
 import { isDebugPage } from "./app/navigation";
@@ -37,13 +40,15 @@ import { getStoredSettings, persistSettings } from "./preferences";
 import { FIXED_SERIAL_PROFILE } from "./serial-profile";
 import type {
   DetectionSessionResponse,
+  DetectionRecord,
+  DebugRecordPage,
   GpioChannel,
   GPSRecord,
   GPSSessionResponse,
   LocaleMeta,
   ParsedMessage,
-  ParsedMessageType,
   PortInfo,
+  UserSettings,
 } from "./types";
 import { cx } from "./utils/classnames";
 import {
@@ -60,6 +65,7 @@ import {
 import { normalizeGpioChannels } from "./utils/gpioChannels";
 import {
   dedupeById,
+  dedupeDetections,
   dedupeGPSRecords,
   dedupeParsed,
   extractErrorMessage,
@@ -84,9 +90,11 @@ function App() {
   const [ports, setPorts] = useState<PortInfo[]>([]);
   const [session, setSession] = useState<DetectionSessionResponse | null>(null);
   const [gpsSession, setGPSSession] = useState<GPSSessionResponse | null>(null);
+  const [detections, setDetections] = useState<DetectionRecord[]>([]);
   const [messages, setMessages] = useState<ParsedMessage[]>([]);
   const [gpsRecords, setGPSRecords] = useState<GPSRecord[]>([]);
   const [channels, setChannels] = useState<GpioChannel[]>([]);
+  const [userSettings, setUserSettings] = useState<UserSettings>({});
   const [selectedReceivePort, setSelectedReceivePort] = useState("");
   const [selectedSendPort, setSelectedSendPort] = useState("");
   const [selectedGPSDataPort, setSelectedGPSDataPort] = useState("");
@@ -128,10 +136,13 @@ function App() {
       const parsedPromise = developerActive
         ? getParsed(locale, developerToken, 400)
         : Promise.resolve({ items: [] as ParsedMessage[], count: 0 });
+      const detectionsPromise = developerActive
+        ? getDetections(locale, developerToken, 400)
+        : Promise.resolve({ items: [] as DetectionRecord[], count: 0 });
       const channelsPromise = developerActive
         ? getChannels(locale, developerToken)
         : Promise.resolve({ channels: [] as GpioChannel[], count: 0 });
-      const [metaRes, portsRes, sessionRes, gpsSessionRes, settingsRes, gpsSettingsRes, parsedRes, channelsRes] = await Promise.all([
+      const [metaRes, portsRes, sessionRes, gpsSessionRes, settingsRes, gpsSettingsRes, parsedRes, detectionsRes, channelsRes] = await Promise.all([
         getLocales(),
         getPorts(locale, developerToken),
         getSession(locale, developerToken),
@@ -139,6 +150,7 @@ function App() {
         getDetectionSettings(locale, developerToken),
         getGPSSettings(locale, developerToken),
         parsedPromise,
+        detectionsPromise,
         channelsPromise,
       ]);
 
@@ -147,6 +159,7 @@ function App() {
       setSession(sessionRes);
       setGPSSession(gpsSessionRes);
       setMessages(parsedRes.items);
+      setDetections(detectionsRes.items);
       setChannels(normalizeGpioChannels(channelsRes.channels));
 
       const { receivePort, sendPort } = resolveInitialPorts(sessionRes, settingsRes, portsRes.ports);
@@ -186,6 +199,15 @@ function App() {
     }
   }, [developerActive, developerToken, locale, t]);
 
+  const loadUserSettings = useCallback(async () => {
+    try {
+      const response = await getUserSettings();
+      setUserSettings(response);
+    } catch {
+      // 用户设置不影响主页面运行，失败时保留当前值。
+    }
+  }, []);
+
   const refreshChannels = useCallback(async () => {
     if (!developerActive) {
       setChannels([]);
@@ -199,6 +221,10 @@ function App() {
     void i18n.changeLanguage(locale);
     persistLocale(locale);
   }, [i18n, locale]);
+
+  useEffect(() => {
+    void loadUserSettings();
+  }, [loadUserSettings]);
 
   useEffect(() => {
     if (!needsRuntimeData) {
@@ -458,6 +484,11 @@ function App() {
           setMessages((items) => dedupeParsed(items, event.payload!, 400));
         }
       },
+      onDetection: (event) => {
+        if (developerActive && event.payload) {
+          setDetections((items) => dedupeDetections(items, event.payload!, 400));
+        }
+      },
       onChannelUpdated: (event) => {
         if (developerActive && event.payload) {
           setChannels((items) => normalizeGpioChannels(dedupeById(items, event.payload!, 16)));
@@ -488,7 +519,7 @@ function App() {
   const allLocaleOptions = meta?.supportedLocales.length ? meta.supportedLocales : supportedLocales;
   const localeOptions = normalizeVisibleLocales(allLocaleOptions, visibleLocales, locale);
   const developerExpiresAt = developerSession?.expiresAt ?? 0;
-  const isMessagePage = developerActive && MESSAGE_PAGE_ORDER.includes(page as ParsedMessageType);
+  const isMessagePage = developerActive && MESSAGE_PAGE_ORDER.includes(page as DebugRecordPage);
   const loadingLabel = t("loading", { ns: "common" });
   const hasRuntimeData = Boolean(meta || ports.length > 0 || session || gpsSession);
   const showRuntimeFallback = needsRuntimeData && runtimeLoading && !hasRuntimeData;
@@ -560,6 +591,12 @@ function App() {
     persistSettings(nextSettings);
   };
 
+  const handleUserSettingsChange = async (nextSettings: UserSettings) => {
+    const response = await updateUserSettings(nextSettings, locale);
+    setUserSettings(response);
+    return response;
+  };
+
   const handleDeveloperLogin = async (code: string) => {
     const response = await createDeveloperSessionRequest({ code }, locale);
     const nextSession = storeDeveloperSession({
@@ -624,8 +661,8 @@ function App() {
               <>
                 {isMessagePage ? (
                   <MessagePage
-                    page={page as ParsedMessageType}
-                    records={messages.filter((item) => item.type === page)}
+                    page={page as DebugRecordPage}
+                    records={page === "detection-records" ? detections : messages}
                     locale={locale}
                     query={messageSearch}
                     onQueryChange={setMessageSearch}
@@ -659,8 +696,10 @@ function App() {
                   <UserSettingsPage
                     appTitle={appTitle}
                     defaultAppTitle={defaultAppTitle}
+                    userSettings={userSettings}
                     t={t}
                     onAppTitleChange={handleAppTitleChange}
+                    onUserSettingsChange={handleUserSettingsChange}
                   />
                 ) : null}
 

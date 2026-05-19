@@ -86,6 +86,25 @@ type GPSRecord struct {
 	Fix        *GPSFix   `json:"fix,omitempty"`
 }
 
+// GeoPoint 描述 WGS84 经纬度坐标。
+type GeoPoint struct {
+	Latitude  float64 `json:"latitude"`
+	Longitude float64 `json:"longitude"`
+}
+
+// UserSettings 保存公开用户设置。
+type UserSettings struct {
+	ManualDeviceLocation *GeoPoint `json:"manualDeviceLocation,omitempty"`
+}
+
+// ScreenDeviceLocationResponse 返回大屏地图使用的设备位置。
+type ScreenDeviceLocationResponse struct {
+	Source    string     `json:"source"`
+	Point     *GeoPoint  `json:"point,omitempty"`
+	UpdatedAt *time.Time `json:"updatedAt,omitempty"`
+	Valid     bool       `json:"valid"`
+}
+
 // GPSSessionResponse 返回当前 GPS 会话状态。
 type GPSSessionResponse struct {
 	Active          bool       `json:"active"`
@@ -129,23 +148,71 @@ type DetectionRecord struct {
 	RSSI       float64       `json:"rssi,omitempty"`
 	Summary    string        `json:"summary"`
 	Parsed     ParsedMessage `json:"parsed"`
-	IsFPV      bool          `json:"isFpv"`
-	FPVBand    string        `json:"fpvBand,omitempty"`
 }
 
-// FpvRecord 保存被识别为图传信号的侦测记录。
-type FpvRecord struct {
-	ID          string    `json:"id"`
-	DetectionID string    `json:"detectionId"`
-	Band        string    `json:"band"`
-	Label       string    `json:"label"`
-	PortName    string    `json:"portName"`
-	Device      string    `json:"device,omitempty"`
-	Model       string    `json:"model,omitempty"`
-	Frequency   float64   `json:"frequency"`
-	RSSI        float64   `json:"rssi"`
-	ReceivedAt  time.Time `json:"receivedAt"`
-	SourceKind  string    `json:"sourceKind"`
+// ScreenDetectionLastRecord 是大屏公开接口可返回的最近侦测摘要，不包含解析原文。
+type ScreenDetectionLastRecord struct {
+	ID         string    `json:"id"`
+	Kind       string    `json:"kind"`
+	ReceivedAt time.Time `json:"receivedAt"`
+	Device     string    `json:"device,omitempty"`
+	Model      string    `json:"model,omitempty"`
+	Frequency  float64   `json:"frequency,omitempty"`
+	RSSI       float64   `json:"rssi,omitempty"`
+	Summary    string    `json:"summary"`
+}
+
+// ScreenDetectionTarget 是大屏侦测列表使用的合并目标。
+type ScreenDetectionTarget struct {
+	ID         string                    `json:"id"`
+	Model      string                    `json:"model"`
+	Frequency  float64                   `json:"frequency"`
+	RSSI       float64                   `json:"rssi"`
+	Devices    []string                  `json:"devices"`
+	FirstSeen  time.Time                 `json:"firstSeen"`
+	LastSeen   time.Time                 `json:"lastSeen"`
+	HitCount   int                       `json:"hitCount"`
+	LastRecord ScreenDetectionLastRecord `json:"lastRecord"`
+}
+
+// ScreenPositionPoint 描述大屏定位目标中的一个坐标点。
+type ScreenPositionPoint struct {
+	Latitude  float64 `json:"latitude"`
+	Longitude float64 `json:"longitude"`
+}
+
+// ScreenPositionLastRecord 是大屏公开定位接口可返回的最近解析摘要，不包含原始报文。
+type ScreenPositionLastRecord struct {
+	Type       string    `json:"type"`
+	ReceivedAt time.Time `json:"receivedAt"`
+	Device     string    `json:"device,omitempty"`
+	Serial     string    `json:"serial,omitempty"`
+	Model      string    `json:"model,omitempty"`
+	Frequency  float64   `json:"frequency,omitempty"`
+	RSSI       float64   `json:"rssi,omitempty"`
+	Cracked    bool      `json:"cracked,omitempty"`
+}
+
+// ScreenPositionTarget 是大屏定位列表使用的合并目标。
+type ScreenPositionTarget struct {
+	ID         string                   `json:"id"`
+	Serial     string                   `json:"serial"`
+	Model      string                   `json:"model"`
+	Source     string                   `json:"source"`
+	Frequency  float64                  `json:"frequency,omitempty"`
+	RSSI       float64                  `json:"rssi,omitempty"`
+	Devices    []string                 `json:"devices"`
+	Drone      *ScreenPositionPoint     `json:"drone,omitempty"`
+	Pilot      *ScreenPositionPoint     `json:"pilot,omitempty"`
+	Home       *ScreenPositionPoint     `json:"home,omitempty"`
+	Height     *float64                 `json:"height,omitempty"`
+	Altitude   *float64                 `json:"altitude,omitempty"`
+	Speed      *float64                 `json:"speed,omitempty"`
+	Cracked    bool                     `json:"cracked,omitempty"`
+	FirstSeen  time.Time                `json:"firstSeen"`
+	LastSeen   time.Time                `json:"lastSeen"`
+	HitCount   int                      `json:"hitCount"`
+	LastRecord ScreenPositionLastRecord `json:"lastRecord"`
 }
 
 // GpioChannel 描述一个 GPIO 控制通道及其运行状态。
@@ -234,11 +301,6 @@ type NetworkInterfaceUpdateRequest struct {
 type NetworkInterfaceUpdateResponse struct {
 	Interface NetworkInterface `json:"interface"`
 	Message   string           `json:"message"`
-}
-
-// NetworkPriorityRequest 更新网口路由优先级。
-type NetworkPriorityRequest struct {
-	RouteMetric int `json:"routeMetric"`
 }
 
 // NetworkPriorityBatchItem 更新单个网口的路由优先级。

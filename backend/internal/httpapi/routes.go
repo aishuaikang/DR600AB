@@ -24,8 +24,10 @@ func (s *Server) routes() {
 
 	api := s.app.Group("/api/v1")
 	s.registerMetaRoutes(api)
+	s.registerUserRoutes(api)
 	s.registerDeveloperRoutes(api)
 	s.registerDetectionRoutes(api)
+	s.registerScreenRoutes(api)
 	s.registerInterferenceRoutes(api)
 	s.registerNetworkRoutes(api)
 

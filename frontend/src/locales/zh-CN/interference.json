@@ -1,9 +1,6 @@
 {
   "title": "GPIO 控制",
   "description": "控制 IO1 到 IO8 的 GPIO 输出；IO4 到 IO8 为预留调试通道。",
-  "channels": "通道",
-  "pin": "GPIO",
-  "bands": "频段映射",
   "desired": "目标电平",
   "actual": "当前电平",
   "reservedChannel": "预留通道",
@@ -13,6 +10,5 @@
   "statusReady": "就绪",
   "statusActive": "已开启",
   "statusIdle": "已关闭",
-  "statusError": "异常",
-  "lastError": "最近错误"
+  "statusError": "异常"
 }

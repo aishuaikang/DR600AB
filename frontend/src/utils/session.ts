@@ -1,5 +1,6 @@
 import type { Banner } from "../app/types";
 import type {
+  DetectionRecord,
   DetectionSessionResponse,
   DetectionSettings,
   GPSRecord,
@@ -99,6 +100,10 @@ export function dedupeById<T extends { id: string }>(items: T[], item: T, limit:
 export function dedupeParsed(items: ParsedMessage[], item: ParsedMessage, limit: number) {
   const key = `${item.type}|${item.time}|${item.raw}`;
   return [item, ...items.filter((entry) => `${entry.type}|${entry.time}|${entry.raw}` !== key)].slice(0, limit);
+}
+
+export function dedupeDetections(items: DetectionRecord[], item: DetectionRecord, limit: number) {
+  return [item, ...items.filter((entry) => entry.id !== item.id)].slice(0, limit);
 }
 
 export function dedupeGPSRecords(items: GPSRecord[], item: GPSRecord, limit: number) {

@@ -225,6 +225,23 @@ func (s *Service) Current(locale string) model.GPSSessionResponse {
 	return s.responseForSession(current, locale, s.messageForState(current.state, locale))
 }
 
+// LatestFix 返回当前会话最后一次有效 GPS 定位的副本。
+func (s *Service) LatestFix() (*model.GPSFix, *time.Time) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.current == nil || s.current.lastFix == nil {
+		return nil, nil
+	}
+
+	fix := *s.current.lastFix
+	var updatedAt *time.Time
+	if s.current.lastRecord != nil {
+		value := s.current.lastRecord.ReceivedAt
+		updatedAt = &value
+	}
+	return &fix, updatedAt
+}
+
 // Records 返回最新 GPS NMEA 记录。
 func (s *Service) Records(limit int) []model.GPSRecord {
 	return s.store.ListGPS(limit)

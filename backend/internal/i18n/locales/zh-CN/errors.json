@@ -1,12 +1,9 @@
 {
   "invalid_request": "请求参数错误",
   "port_required": "请选择接收串口后再启动侦测",
-  "port_open_failed": "打开串口失败",
   "gps_data_port_required": "请选择 GPS NMEA 数据串口",
   "gps_control_port_required": "请选择 GPS 控制串口",
-  "gps_port_open_failed": "打开 GPS 串口失败",
   "channel_not_found": "未找到指定干扰通道",
-  "channel_reserved": "当前通道为预留通道，不能控制",
   "gpio_update_failed": "更新 GPIO 状态失败",
   "developer_not_configured": "开发者 TOTP 密钥未配置",
   "developer_invalid_code": "开发者动态验证码无效或已过期",
@@ -17,5 +14,6 @@
   "network_interface_unmanaged": "该网口未被 NetworkManager 管理，无法在线配置",
   "wifi_unavailable": "未检测到可用 Wi-Fi 设备，功能已禁用",
   "wifi_invalid_config": "Wi-Fi 配置参数不合法",
+  "user_invalid_location": "设备手动坐标不合法",
   "internal": "服务暂时不可用"
 }

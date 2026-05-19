@@ -1,20 +1,6 @@
 {
-  "serialTitle": "Detection runtime",
   "receivePort": "Receive port",
   "sendPort": "Send port",
-  "selectReceivePort": "Select receive port",
-  "selectSendPort": "Select send port",
   "sessionTitle": "Session status",
-  "sessionHint": "Choose the receive and send ports in Settings. The system will connect automatically and reconnect after drops. Live updates refresh the lists automatically.",
-  "recordsTitle": "Detection list",
-  "parsedTitle": "Parsed list",
-  "fpvTitle": "FPV list",
-  "raw": "Raw",
-  "parsed": "Parsed",
-  "live": "Live stream",
-  "device": "Device",
-  "model": "Model",
-  "kind": "Type",
-  "summaryHint": "Parsed output keeps the raw serial line alongside the structured payload.",
-  "filterAll": "All"
+  "sessionHint": "Choose the receive and send ports in Settings. The system will connect automatically and reconnect after drops. Live updates refresh the lists automatically."
 }

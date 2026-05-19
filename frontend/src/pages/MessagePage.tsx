@@ -4,7 +4,7 @@ import type { TFunction } from "i18next";
 import { MESSAGE_PAGE_CONFIG } from "../app/message-pages";
 import { Panel, PanelBody } from "../components/Panel";
 import { VirtualMessageTable } from "../components/VirtualMessageTable";
-import type { ParsedMessage, ParsedMessageType } from "../types";
+import type { DebugRecord, DebugRecordPage } from "../types";
 import { buildSearchText } from "../utils/records";
 
 export function MessagePage({
@@ -15,8 +15,8 @@ export function MessagePage({
   onQueryChange,
   t,
 }: {
-  page: ParsedMessageType;
-  records: ParsedMessage[];
+  page: DebugRecordPage;
+  records: DebugRecord[];
   locale: string;
   query: string;
   onQueryChange: (value: string) => void;

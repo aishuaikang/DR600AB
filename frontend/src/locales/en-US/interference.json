@@ -1,9 +1,6 @@
 {
   "title": "GPIO Control",
   "description": "Control GPIO output for IO1 through IO8. IO4 through IO8 are reserved debug channels.",
-  "channels": "Channels",
-  "pin": "GPIO",
-  "bands": "Band mapping",
   "desired": "Target level",
   "actual": "Current level",
   "reservedChannel": "Reserved channel",
@@ -13,6 +10,5 @@
   "statusReady": "Ready",
   "statusActive": "Enabled",
   "statusIdle": "Disabled",
-  "statusError": "Error",
-  "lastError": "Last error"
+  "statusError": "Error"
 }

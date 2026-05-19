@@ -1,6 +1,7 @@
 package detection
 
 import (
+	"context"
 	"io"
 	"path/filepath"
 	"sync"
@@ -14,14 +15,15 @@ import (
 	"dr600ab-api/internal/settings"
 	"dr600ab-api/internal/store"
 	"serialport"
+	"tri-detector/parser"
 )
 
-func TestIngestLineStoresDetectionAndFPVRecords(t *testing.T) {
+func TestIngestLineStoresParsedAndDetectionRecords(t *testing.T) {
 	tr, err := i18n.New("zh-CN")
 	if err != nil {
 		t.Fatalf("i18n.New() error = %v", err)
 	}
-	st := store.NewMemoryStore(10, 10, 10)
+	st := store.NewMemoryStore(10, 10)
 	svc := NewService(st, tr, settings.NewStore(filepath.Join(t.TempDir(), "settings.json")), Options{})
 
 	svc.IngestLine("session-1", "/dev/ttyUSB0", "device=10125, model=PAL Analog, freq=5865.0, rssi=-56.9")
@@ -38,19 +40,150 @@ func TestIngestLineStoresDetectionAndFPVRecords(t *testing.T) {
 	if len(records) != 1 {
 		t.Fatalf("detection count = %d, want 1", len(records))
 	}
-	if !records[0].IsFPV {
-		t.Fatal("expected detection record to be classified as FPV")
+	if records[0].Kind != "detect" {
+		t.Fatalf("detection kind = %q, want detect", records[0].Kind)
 	}
-	if records[0].FPVBand != "5.8" {
-		t.Fatalf("fpv band = %q, want 5.8", records[0].FPVBand)
+	if records[0].Frequency != 5865 {
+		t.Fatalf("frequency = %v, want 5865", records[0].Frequency)
 	}
+}
 
-	fpv := svc.FPV(10)
-	if len(fpv) != 1 {
-		t.Fatalf("fpv count = %d, want 1", len(fpv))
+func TestIngestLineStoresScreenPositionFromRID(t *testing.T) {
+	tr, err := i18n.New("zh-CN")
+	if err != nil {
+		t.Fatalf("i18n.New() error = %v", err)
 	}
-	if fpv[0].Band != "5.8" {
-		t.Fatalf("fpv band = %q, want 5.8", fpv[0].Band)
+	st := store.NewMemoryStore(10, 10)
+	svc := NewService(st, tr, settings.NewStore(filepath.Join(t.TempDir(), "settings.json")), Options{})
+
+	svc.IngestLine("session-1", "/dev/ttyUSB0", "RID ssid=RID-1581ABC, serial=1581ABC, model=DJI Mini 4 Pro, UA_type=2, drone_GPS=31.200000,121.400000, pilot_GPS=31.210000,121.410000, speed=12.5, Vspeed=0, direc=90, AltitudeP=20.0, AltitudeG=110.0, Height_AGL=35.5, MAC=60:60:1f:38:98:b9, rssi=-82, freq=2437")
+
+	items := svc.ScreenPositions(10)
+	if len(items) != 1 {
+		t.Fatalf("screen positions count = %d, want 1", len(items))
+	}
+	if items[0].Serial != "1581ABC" {
+		t.Fatalf("serial = %q, want 1581ABC", items[0].Serial)
+	}
+	if items[0].Drone == nil || items[0].Drone.Latitude != 31.2 || items[0].Drone.Longitude != 121.4 {
+		t.Fatalf("unexpected drone point: %#v", items[0].Drone)
+	}
+	if items[0].Pilot == nil {
+		t.Fatalf("expected pilot point")
+	}
+	if records := svc.Records(10); len(records) != 0 {
+		t.Fatalf("detection records count = %d, want 0 for RID", len(records))
+	}
+}
+
+func TestIngestLineStoresScreenPositionFromRIDWithoutCoordinates(t *testing.T) {
+	tr, err := i18n.New("zh-CN")
+	if err != nil {
+		t.Fatalf("i18n.New() error = %v", err)
+	}
+	st := store.NewMemoryStore(10, 10)
+	svc := NewService(st, tr, settings.NewStore(filepath.Join(t.TempDir(), "settings.json")), Options{})
+
+	svc.IngestLine("session-1", "/dev/ttyUSB0", "RID ssid=RID-1581F6Z9C2412003L1W8, serial=1581F6Z9C2412003L1W8, model=DJI, UA_type=2, drone_GPS=0,0, pilot_GPS=0,0, speed=0, Vspeed=0, direc=361, AltitudeP=93.5, AltitudeG=-1000, Height_AGL=0, MAC=60:60:1f:38:98:b9, rssi=-72, freq=2437")
+
+	items := svc.ScreenPositions(10)
+	if len(items) != 1 {
+		t.Fatalf("screen positions count = %d, want 1", len(items))
+	}
+	if items[0].Serial != "1581F6Z9C2412003L1W8" {
+		t.Fatalf("serial = %q, want RID serial", items[0].Serial)
+	}
+	if items[0].Drone == nil || items[0].Drone.Latitude != 0 || items[0].Drone.Longitude != 0 {
+		t.Fatalf("expected zero drone point, got %#v", items[0].Drone)
+	}
+	if items[0].Pilot == nil || items[0].Pilot.Latitude != 0 || items[0].Pilot.Longitude != 0 {
+		t.Fatalf("expected zero pilot point, got %#v", items[0].Pilot)
+	}
+}
+
+func TestIngestLineStoresScreenPositionFromDIDPlain(t *testing.T) {
+	tr, err := i18n.New("zh-CN")
+	if err != nil {
+		t.Fatalf("i18n.New() error = %v", err)
+	}
+	st := store.NewMemoryStore(10, 10)
+	svc := NewService(st, tr, settings.NewStore(filepath.Join(t.TempDir(), "settings.json")), Options{})
+
+	svc.IngestLine("session-1", "/dev/ttyUSB0", "num=672/3/1, device=10125, serial=0M6CH6AR0A100L, model=41-Mavic 2, uuid=176344372408408473, drone_GPS=31.200000,121.400000, home_GPS=31.190000,121.390000, pilot_GPS=31.210000,121.410000, Height=50, Altitude=110.0,EastV=3.0, NothV=4.0,UpV=0.0, freq=5796.5, rssi=-78, distance=0.0km,")
+
+	items := svc.ScreenPositions(10)
+	if len(items) != 1 {
+		t.Fatalf("screen positions count = %d, want 1", len(items))
+	}
+	if items[0].Source != string(parser.TypeDIDPlain) {
+		t.Fatalf("source = %q, want did_plain", items[0].Source)
+	}
+	if items[0].Speed == nil || *items[0].Speed != 5 {
+		t.Fatalf("speed = %#v, want 5", items[0].Speed)
+	}
+	if records := svc.Records(10); len(records) != 0 {
+		t.Fatalf("detection records count = %d, want 0 for DID plain", len(records))
+	}
+}
+
+func TestIngestLineStoresScreenPositionFromDIDEncryptedDecoder(t *testing.T) {
+	tr, err := i18n.New("zh-CN")
+	if err != nil {
+		t.Fatalf("i18n.New() error = %v", err)
+	}
+	st := store.NewMemoryStore(10, 10)
+	svc := NewService(st, tr, settings.NewStore(filepath.Join(t.TempDir(), "settings.json")), Options{})
+	svc.SetO3PlusO4Decoder(fakeO3Decoder{})
+
+	svc.IngestLine("session-1", "/dev/ttyUSB0", "#=632/3/1, device=10125, Encypted Mavic_O4_ID=875bb45f, freq=2429.5, rssi=-64, byte,15,1b,9b,58,f0,d9")
+
+	var items []model.ScreenPositionTarget
+	waitUntil(t, time.Second, func() bool {
+		items = svc.ScreenPositions(10)
+		return len(items) == 1
+	})
+	if items[0].Serial != "o3-sn" {
+		t.Fatalf("serial = %q, want o3-sn", items[0].Serial)
+	}
+	if items[0].LastRecord.Device != "10125" {
+		t.Fatalf("last record device = %q, want 10125", items[0].LastRecord.Device)
+	}
+	if records := svc.Records(10); len(records) != 0 {
+		t.Fatalf("detection records count = %d, want 0 for DID encrypted", len(records))
+	}
+}
+
+func TestO3DecryptResultKeepsZeroCoordinates(t *testing.T) {
+	decoder := &mqttO3PlusO4Decoder{}
+	receivedAt := time.Now()
+
+	target, ok := decoder.positionFromDecryptResult(parser.DIDEncrypted{
+		Device:      "4745",
+		EncryptedID: "86ca8046",
+		Freq:        5776.5,
+		RSSI:        -76,
+	}, o3DecryptAlert{
+		SN:       "o3-sn",
+		Model:    "DJI O3",
+		Lat:      0,
+		Lon:      0,
+		PilotLat: 0,
+		PilotLon: 0,
+		HomeLat:  0,
+		HomeLon:  0,
+	}, receivedAt)
+
+	if !ok {
+		t.Fatalf("expected zero coordinates to produce a screen position target")
+	}
+	if target.Drone == nil || target.Drone.Latitude != 0 || target.Drone.Longitude != 0 {
+		t.Fatalf("expected zero drone point, got %#v", target.Drone)
+	}
+	if target.Pilot == nil || target.Pilot.Latitude != 0 || target.Pilot.Longitude != 0 {
+		t.Fatalf("expected zero pilot point, got %#v", target.Pilot)
+	}
+	if target.Home == nil || target.Home.Latitude != 0 || target.Home.Longitude != 0 {
+		t.Fatalf("expected zero home point, got %#v", target.Home)
 	}
 }
 
@@ -58,6 +191,50 @@ type fakeSerialPort struct {
 	closeCount int
 	closeCh    chan struct{}
 	writes     []string
+}
+
+type fakeO3Decoder struct{}
+
+func (fakeO3Decoder) ParseO3PlusO4PacketMQTT(_ context.Context, packet parser.DIDEncrypted, deviceSN string, receivedAt time.Time) (model.ScreenPositionTarget, bool) {
+	if deviceSN != "10125" {
+		return model.ScreenPositionTarget{}, false
+	}
+	return model.ScreenPositionTarget{
+		Serial:    "o3-sn",
+		Model:     "DJI O4",
+		Source:    string(parser.TypeDIDEncrypted),
+		Frequency: packet.Freq,
+		RSSI:      packet.RSSI,
+		Devices:   []string{packet.Device},
+		Drone:     &model.ScreenPositionPoint{Latitude: 31.2, Longitude: 121.4},
+		Cracked:   true,
+		FirstSeen: receivedAt,
+		LastSeen:  receivedAt,
+		LastRecord: model.ScreenPositionLastRecord{
+			Type:       string(parser.TypeDIDEncrypted),
+			ReceivedAt: receivedAt,
+			Device:     packet.Device,
+			Serial:     "o3-sn",
+			Model:      "DJI O4",
+			Frequency:  packet.Freq,
+			RSSI:       packet.RSSI,
+			Cracked:    true,
+		},
+	}, true
+}
+
+func waitUntil(t *testing.T, timeout time.Duration, condition func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if condition() {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if !condition() {
+		t.Fatalf("condition not met within %s", timeout)
+	}
 }
 
 func newFakeSerialPort() *fakeSerialPort {
@@ -109,7 +286,7 @@ func TestStartSessionSupportsSeparateReceiveAndSendPorts(t *testing.T) {
 	if err != nil {
 		t.Fatalf("i18n.New() error = %v", err)
 	}
-	st := store.NewMemoryStore(10, 10, 10)
+	st := store.NewMemoryStore(10, 10)
 	svc := NewService(st, tr, settings.NewStore(filepath.Join(t.TempDir(), "settings.json")), Options{})
 
 	opened := map[string]*fakeSerialPort{}
@@ -179,7 +356,7 @@ func TestStartSessionFallsBackToLegacyPortName(t *testing.T) {
 	if err != nil {
 		t.Fatalf("i18n.New() error = %v", err)
 	}
-	st := store.NewMemoryStore(10, 10, 10)
+	st := store.NewMemoryStore(10, 10)
 	svc := NewService(st, tr, settings.NewStore(filepath.Join(t.TempDir(), "settings.json")), Options{})
 
 	openCount := 0
@@ -224,7 +401,7 @@ func TestStartSessionSendsStartCommandAfterSwitchingTxPort(t *testing.T) {
 	if err != nil {
 		t.Fatalf("i18n.New() error = %v", err)
 	}
-	st := store.NewMemoryStore(10, 10, 10)
+	st := store.NewMemoryStore(10, 10)
 	svc := NewService(st, tr, settings.NewStore(filepath.Join(t.TempDir(), "settings.json")), Options{})
 
 	opened := map[string][]*fakeSerialPort{}
@@ -281,7 +458,7 @@ func TestRestoreSavedSettingsAutoConnectsOnStartup(t *testing.T) {
 		t.Fatalf("i18n.New() error = %v", err)
 	}
 
-	st := store.NewMemoryStore(10, 10, 10)
+	st := store.NewMemoryStore(10, 10)
 	settingsStore := settings.NewStore(filepath.Join(t.TempDir(), "settings.json"))
 	req := model.DetectionSessionRequest{
 		RxPortName:  "/dev/rx",
@@ -334,7 +511,7 @@ func TestReconnectsAfterPortClosesAutomatically(t *testing.T) {
 		t.Fatalf("i18n.New() error = %v", err)
 	}
 
-	st := store.NewMemoryStore(10, 10, 10)
+	st := store.NewMemoryStore(10, 10)
 	svc := NewService(st, tr, settings.NewStore(filepath.Join(t.TempDir(), "settings.json")), Options{
 		ReconnectInitialDelay: 10 * time.Millisecond,
 		ReconnectMaxDelay:     20 * time.Millisecond,
@@ -404,12 +581,12 @@ func TestReconnectsAfterPortClosesAutomatically(t *testing.T) {
 	_ = svc.Stop("zh-CN")
 }
 
-func TestIngestLineKeepsHeartbeatInParsedRecordsOnly(t *testing.T) {
+func TestIngestLineStoresHeartbeatAsParsedOnly(t *testing.T) {
 	tr, err := i18n.New("zh-CN")
 	if err != nil {
 		t.Fatalf("i18n.New() error = %v", err)
 	}
-	st := store.NewMemoryStore(10, 10, 10)
+	st := store.NewMemoryStore(10, 10)
 	svc := NewService(st, tr, settings.NewStore(filepath.Join(t.TempDir(), "settings.json")), Options{})
 
 	svc.IngestLine("session-1", "/dev/ttyUSB0", "#=84, device=10125, Heart Beat, 879,  0")
@@ -417,11 +594,9 @@ func TestIngestLineKeepsHeartbeatInParsedRecordsOnly(t *testing.T) {
 	if got := len(svc.Parsed(10)); got != 1 {
 		t.Fatalf("parsed count = %d, want 1", got)
 	}
-	if got := len(svc.Records(10)); got != 0 {
+	records := svc.Records(10)
+	if got := len(records); got != 0 {
 		t.Fatalf("detection count = %d, want 0", got)
-	}
-	if got := len(svc.FPV(10)); got != 0 {
-		t.Fatalf("fpv count = %d, want 0", got)
 	}
 }
 

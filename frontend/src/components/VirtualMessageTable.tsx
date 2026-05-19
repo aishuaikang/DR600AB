@@ -3,9 +3,10 @@ import type { UIEvent } from "react";
 import type { TFunction } from "i18next";
 
 import type { DetailContent, MessagePageConfig } from "../app/types";
-import type { ParsedMessage } from "../types";
+import type { DebugRecord } from "../types";
 import { cx } from "../utils/classnames";
 import { formatTime } from "../utils/format";
+import { isDetectionRecord } from "../utils/records";
 import { DetailDialog } from "./DetailDialog";
 import { CellValue, LongTextCell } from "./LongTextCell";
 
@@ -22,7 +23,7 @@ export function VirtualMessageTable({
   t,
 }: {
   config: MessagePageConfig;
-  records: ParsedMessage[];
+  records: DebugRecord[];
   locale: string;
   resetKey: string;
   t: TFunction;
@@ -97,47 +98,54 @@ export function VirtualMessageTable({
                     <td colSpan={colSpan} style={{ height: topPadding, padding: 0 }} />
                   </tr>
                 ) : null}
-                {visibleRecords.map((record) => (
-                  <tr
-                    key={`${record.type}-${record.time}-${record.raw}`}
-                    className="row-hover"
-                    style={{ height: VIRTUAL_TABLE_ROW_HEIGHT }}
-                  >
-                    <td className={cx("align-middle tabular-nums whitespace-nowrap", TIME_COLUMN_WIDTH)}>
-                      <LongTextCell value={formatTime(locale, record.time)} />
-                    </td>
-                    {config.columns.map((column) => {
-                      const rendered = column.render(record, locale);
-                      const label = t(column.labelKey, { ns: "messages" });
-                      const detailValue = typeof rendered === "string" ? rendered : undefined;
+                {visibleRecords.map((record) => {
+                  const recordType = isDetectionRecord(record) ? record.kind : record.type;
+                  const recordTime = isDetectionRecord(record) ? record.receivedAt : record.time;
+                  const recordRaw = isDetectionRecord(record) ? record.parsed.raw : record.raw;
+                  const recordData = isDetectionRecord(record) ? record.parsed.data : record.data;
 
-                      return (
-                        <td
-                          key={column.labelKey}
-                          className={cx(
-                            "align-middle overflow-hidden whitespace-nowrap",
-                            column.width,
-                            column.labelKey.includes("frequency") || column.labelKey.includes("rssi") ? "tabular-nums" : "",
-                          )}
-                        >
-                          <CellValue
-                            detail={detailValue ? { title: label, value: detailValue } : undefined}
-                            onOpenDetail={setDetail}
+                  return (
+                    <tr
+                      key={`${recordType}-${recordTime}-${recordRaw}`}
+                      className="row-hover"
+                      style={{ height: VIRTUAL_TABLE_ROW_HEIGHT }}
+                    >
+                      <td className={cx("align-middle tabular-nums whitespace-nowrap", TIME_COLUMN_WIDTH)}>
+                        <LongTextCell value={formatTime(locale, recordTime)} />
+                      </td>
+                      {config.columns.map((column) => {
+                        const rendered = column.render(record, locale);
+                        const label = t(column.labelKey, { ns: "messages" });
+                        const detailValue = typeof rendered === "string" ? rendered : undefined;
+
+                        return (
+                          <td
+                            key={column.labelKey}
+                            className={cx(
+                              "align-middle overflow-hidden whitespace-nowrap",
+                              column.width,
+                              column.labelKey.includes("frequency") || column.labelKey.includes("rssi") ? "tabular-nums" : "",
+                            )}
                           >
-                            {rendered}
-                          </CellValue>
-                        </td>
-                      );
-                    })}
-                    <td className={cx("align-middle overflow-hidden whitespace-nowrap", DETAIL_COLUMN_WIDTH)}>
-                      <LongTextCell
-                        value={record.raw}
-                        detail={{ title: t("details", { ns: "common" }), value: JSON.stringify(record.data, null, 2) }}
-                        onOpenDetail={setDetail}
-                      />
-                    </td>
-                  </tr>
-                ))}
+                            <CellValue
+                              detail={detailValue ? { title: label, value: detailValue } : undefined}
+                              onOpenDetail={setDetail}
+                            >
+                              {rendered}
+                            </CellValue>
+                          </td>
+                        );
+                      })}
+                      <td className={cx("align-middle overflow-hidden whitespace-nowrap", DETAIL_COLUMN_WIDTH)}>
+                        <LongTextCell
+                          value={recordRaw}
+                          detail={{ title: t("details", { ns: "common" }), value: JSON.stringify(recordData, null, 2) }}
+                          onOpenDetail={setDetail}
+                        />
+                      </td>
+                    </tr>
+                  );
+                })}
                 {bottomPadding > 0 ? (
                   <tr aria-hidden="true">
                     <td colSpan={colSpan} style={{ height: bottomPadding, padding: 0 }} />

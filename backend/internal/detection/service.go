@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"strings"
 	"sync"
 	"time"
@@ -28,10 +29,27 @@ type Options struct {
 	DefaultReadTimeout    time.Duration
 	ReconnectInitialDelay time.Duration
 	ReconnectMaxDelay     time.Duration
+	O3Decrypt             O3DecryptOptions
+}
+
+// O3DecryptOptions 配置 O3+/O4 DID 加密报文的 MQTT 解密分支。
+type O3DecryptOptions struct {
+	Enabled        bool
+	Broker         string
+	Port           int
+	Username       string
+	Password       string
+	Timeout        time.Duration
+	ConnectTimeout time.Duration
 }
 
 // SerialOpener 根据串口配置打开串口。
 type SerialOpener func(cfg *serialport.Config) (serial.Port, error)
+
+// O3PlusO4Decoder 解密 DID 加密报文并返回定位目标。
+type O3PlusO4Decoder interface {
+	ParseO3PlusO4PacketMQTT(ctx context.Context, packet parser.DIDEncrypted, deviceSN string, receivedAt time.Time) (model.ScreenPositionTarget, bool)
+}
 
 const startDetectionCommand = "start -freq 1"
 
@@ -50,6 +68,7 @@ type Service struct {
 	settings   SettingsStore
 	options    Options
 	openPort   SerialOpener
+	o3Decoder  O3PlusO4Decoder
 	listPorts  func() ([]string, error)
 	current    *session
 	sequence   uint64
@@ -73,7 +92,7 @@ type session struct {
 
 // NewService 创建带串口默认值和存储依赖的侦测服务。
 func NewService(store *store.MemoryStore, translator *i18n.Translator, settingsStore SettingsStore, options Options) *Service {
-	return &Service{
+	service := &Service{
 		store:      store,
 		translator: translator,
 		settings:   settingsStore,
@@ -81,6 +100,8 @@ func NewService(store *store.MemoryStore, translator *i18n.Translator, settingsS
 		openPort:   serialport.Open,
 		listPorts:  serialport.ListPorts,
 	}
+	service.o3Decoder = NewMQTTO3PlusO4Decoder(service.options.O3Decrypt)
+	return service
 }
 
 // SetSerialOpener 替换串口打开函数，主要用于测试。
@@ -91,6 +112,13 @@ func (s *Service) SetSerialOpener(open SerialOpener) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.openPort = open
+}
+
+// SetO3PlusO4Decoder 替换 O3+/O4 解密器，主要用于测试。
+func (s *Service) SetO3PlusO4Decoder(decoder O3PlusO4Decoder) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.o3Decoder = decoder
 }
 
 // SetPortLister 替换串口枚举函数，主要用于测试。
@@ -260,14 +288,19 @@ func (s *Service) Records(limit int) []model.DetectionRecord {
 	return s.store.ListDetections(limit)
 }
 
+// ScreenDetections 返回大屏使用的合并侦测目标。
+func (s *Service) ScreenDetections(limit int) []model.ScreenDetectionTarget {
+	return s.store.ListScreenDetections(limit)
+}
+
+// ScreenPositions 返回大屏使用的合并定位目标。
+func (s *Service) ScreenPositions(limit int) []model.ScreenPositionTarget {
+	return s.store.ListScreenPositions(limit)
+}
+
 // Parsed 返回最新解析结果，包含无法识别的原始行。
 func (s *Service) Parsed(limit int) []model.ParsedMessage {
 	return s.store.ListParsed(limit)
-}
-
-// FPV 返回最新识别为图传信号的记录。
-func (s *Service) FPV(limit int) []model.FpvRecord {
-	return s.store.ListFPV(limit)
 }
 
 // Subscribe 注册带缓冲的事件订阅者，并返回取消订阅函数。
@@ -287,7 +320,7 @@ func (s *Service) RestoreSavedSettings(locale string) {
 	_, _ = s.Start(req, locale)
 }
 
-// IngestLine 解析一行串口数据，并写入解析、侦测和图传记录。
+// IngestLine 解析一行串口数据，并写入解析和侦测记录。
 func (s *Service) IngestLine(sessionID, portName, line string) {
 	msg, err := parser.ParseLine(line)
 	if err != nil {
@@ -303,31 +336,13 @@ func (s *Service) IngestLine(sessionID, portName, line string) {
 
 	parsed := toParsedMessage(msg)
 	s.store.AddParsed(parsed)
+	s.ingestScreenPosition(parsed, msg)
 
 	record, ok := detectionRecordFromMessage(sessionID, portName, parsed, msg)
 	if !ok {
 		return
 	}
-	band, label, fpv := classifyFPV(record.Frequency, record.Model, parsed.Raw)
-	record.IsFPV = fpv
-	record.FPVBand = band
 	s.store.AddDetection(record)
-
-	if fpv {
-		s.store.AddFPV(model.FpvRecord{
-			ID:          record.ID + "-fpv",
-			DetectionID: record.ID,
-			Band:        band,
-			Label:       label,
-			PortName:    record.PortName,
-			Device:      record.Device,
-			Model:       record.Model,
-			Frequency:   record.Frequency,
-			RSSI:        record.RSSI,
-			ReceivedAt:  record.ReceivedAt,
-			SourceKind:  record.Kind,
-		})
-	}
 }
 
 // manageSession 保持单个串口会话运行，直到被停止或替换。
@@ -660,8 +675,12 @@ func sessionEventType(state string) string {
 	}
 }
 
-// detectionRecordFromMessage 从解析结果中提取可列表展示的侦测字段。
+// detectionRecordFromMessage 从 detect 解析结果中提取可列表展示的侦测字段。
 func detectionRecordFromMessage(sessionID, portName string, parsed model.ParsedMessage, msg *parser.Message) (model.DetectionRecord, bool) {
+	data, ok := msg.Data.(*parser.Detect)
+	if !ok {
+		return model.DetectionRecord{}, false
+	}
 	record := model.DetectionRecord{
 		ID:         fmt.Sprintf("%s-%d", sessionID, parsed.Time.UnixNano()),
 		SessionID:  sessionID,
@@ -670,34 +689,161 @@ func detectionRecordFromMessage(sessionID, portName string, parsed model.ParsedM
 		ReceivedAt: parsed.Time,
 		Parsed:     parsed,
 	}
-
-	switch data := msg.Data.(type) {
-	case *parser.Detect:
-		record.Device = data.Device
-		record.Model = data.Model
-		record.Frequency = data.Freq
-		record.RSSI = data.RSSI
-	case *parser.DIDPlain:
-		record.Device = data.Device
-		record.Model = data.Model
-		record.Frequency = data.Freq
-		record.RSSI = data.RSSI
-	case *parser.DIDEncrypted:
-		record.Device = data.Device
-		record.Model = data.EncryptedID
-		record.Frequency = data.Freq
-		record.RSSI = data.RSSI
-	case *parser.RID:
-		record.Device = data.SSID
-		record.Model = data.Model
-		record.Frequency = data.Freq
-		record.RSSI = data.RSSI
-	default:
-		return model.DetectionRecord{}, false
-	}
-
+	record.Device = data.Device
+	record.Model = data.Model
+	record.Frequency = data.Freq
+	record.RSSI = data.RSSI
 	record.Summary = buildSummary(record)
 	return record, true
+}
+
+func (s *Service) ingestScreenPosition(parsed model.ParsedMessage, msg *parser.Message) {
+	switch data := msg.Data.(type) {
+	case *parser.RID:
+		if target, ok := screenPositionFromRID(parsed, data); ok {
+			s.store.AddScreenPosition(target)
+		}
+	case *parser.DIDPlain:
+		if target, ok := screenPositionFromDIDPlain(parsed, data); ok {
+			s.store.AddScreenPosition(target)
+		}
+	case *parser.DIDEncrypted:
+		did := *data
+		s.mu.RLock()
+		decoder := s.o3Decoder
+		s.mu.RUnlock()
+		if decoder == nil {
+			return
+		}
+		deviceSN := did.Device
+		go func() {
+			target, ok := decoder.ParseO3PlusO4PacketMQTT(context.Background(), did, deviceSN, parsed.Time)
+			if !ok {
+				return
+			}
+			target.LastRecord.Type = parsed.Type
+			target.LastRecord.ReceivedAt = parsed.Time
+			if target.LastRecord.Device == "" {
+				target.LastRecord.Device = did.Device
+			}
+			if target.LastRecord.Frequency == 0 {
+				target.LastRecord.Frequency = did.Freq
+			}
+			if target.LastRecord.RSSI == 0 {
+				target.LastRecord.RSSI = did.RSSI
+			}
+			s.store.AddScreenPosition(target)
+		}()
+	}
+}
+
+func screenPositionFromRID(parsed model.ParsedMessage, data *parser.RID) (model.ScreenPositionTarget, bool) {
+	if data == nil || strings.TrimSpace(data.Serial) == "" {
+		return model.ScreenPositionTarget{}, false
+	}
+	target := model.ScreenPositionTarget{
+		Serial:    strings.TrimSpace(data.Serial),
+		Model:     strings.TrimSpace(data.Model),
+		Source:    string(parser.TypeRID),
+		Frequency: data.Freq,
+		RSSI:      data.RSSI,
+		Devices:   uniqueNonEmpty(data.SSID),
+		Drone:     screenPointFromGPS(data.DroneGPS),
+		Pilot:     screenPointFromGPS(data.PilotGPS),
+		Speed:     nonZeroFloatPtr(data.Speed),
+		Altitude:  nonZeroFloatPtr(data.AltitudeG),
+		Height:    nonZeroFloatPtr(data.HeightAGL),
+		FirstSeen: parsed.Time,
+		LastSeen:  parsed.Time,
+		LastRecord: model.ScreenPositionLastRecord{
+			Type:       parsed.Type,
+			ReceivedAt: parsed.Time,
+			Device:     data.SSID,
+			Serial:     data.Serial,
+			Model:      data.Model,
+			Frequency:  data.Freq,
+			RSSI:       data.RSSI,
+		},
+	}
+	return target, true
+}
+
+func screenPositionFromDIDPlain(parsed model.ParsedMessage, data *parser.DIDPlain) (model.ScreenPositionTarget, bool) {
+	if data == nil || strings.TrimSpace(data.Serial) == "" {
+		return model.ScreenPositionTarget{}, false
+	}
+	target := model.ScreenPositionTarget{
+		Serial:    strings.TrimSpace(data.Serial),
+		Model:     strings.TrimSpace(data.Model),
+		Source:    string(parser.TypeDIDPlain),
+		Frequency: data.Freq,
+		RSSI:      data.RSSI,
+		Devices:   uniqueNonEmpty(data.Device),
+		Drone:     screenPointFromGPS(data.DroneGPS),
+		Pilot:     screenPointFromGPS(data.PilotGPS),
+		Home:      screenPointFromGPS(data.HomeGPS),
+		Speed:     nonZeroFloatPtr(calculateFlightSpeed(data.EastV, data.NothV, data.UpV)),
+		Altitude:  nonZeroFloatPtr(data.Altitude),
+		Height:    nonZeroFloatPtr(data.Height),
+		FirstSeen: parsed.Time,
+		LastSeen:  parsed.Time,
+		LastRecord: model.ScreenPositionLastRecord{
+			Type:       parsed.Type,
+			ReceivedAt: parsed.Time,
+			Device:     data.Device,
+			Serial:     data.Serial,
+			Model:      data.Model,
+			Frequency:  data.Freq,
+			RSSI:       data.RSSI,
+		},
+	}
+	return target, true
+}
+
+func screenPointFromGPS(gps parser.GPS) *model.ScreenPositionPoint {
+	if !validCoordinate(gps.Lat, gps.Lng) {
+		return nil
+	}
+	return &model.ScreenPositionPoint{
+		Latitude:  gps.Lat,
+		Longitude: gps.Lng,
+	}
+}
+
+func validCoordinate(lat, lng float64) bool {
+	return lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180
+}
+
+func screenPositionHasCoordinate(target model.ScreenPositionTarget) bool {
+	return target.Drone != nil || target.Pilot != nil || target.Home != nil
+}
+
+func nonZeroFloatPtr(value float64) *float64 {
+	if value == 0 {
+		return nil
+	}
+	return &value
+}
+
+func uniqueNonEmpty(values ...string) []string {
+	seen := make(map[string]struct{}, len(values))
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		out = append(out, value)
+	}
+	return out
+}
+
+func calculateFlightSpeed(east, north, up float64) float64 {
+	return math.Sqrt(east*east + north*north + up*up)
 }
 
 // buildSummary 创建侦测列表中展示的简短摘要。

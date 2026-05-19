@@ -209,54 +209,6 @@ func (s *Service) UpdateInterface(
 	return model.NetworkInterface{}, ErrInterfaceNotFound
 }
 
-// UpdateInterfacePriority 更新指定网口连接的 IPv4 路由优先级，并在已连接时重新应用。
-func (s *Service) UpdateInterfacePriority(
-	ctx context.Context,
-	name string,
-	req model.NetworkPriorityRequest,
-) (model.NetworkInterface, error) {
-	name = strings.TrimSpace(name)
-	if name == "" {
-		return model.NetworkInterface{}, fmt.Errorf("%w: interface name is required", ErrInvalidConfig)
-	}
-	if err := s.checkBackend(ctx); err != nil {
-		return model.NetworkInterface{}, err
-	}
-	if err := validateInterfaceName(name); err != nil {
-		return model.NetworkInterface{}, err
-	}
-	if err := validateRouteMetric(&req.RouteMetric, ErrInvalidConfig); err != nil {
-		return model.NetworkInterface{}, err
-	}
-
-	target, err := s.findManagedInterface(ctx, name)
-	if err != nil {
-		return model.NetworkInterface{}, err
-	}
-
-	args := append([]string{"connection", "modify", target.ConnectionName}, persistentRouteMetricArgs(req.RouteMetric)...)
-	if _, err := s.nmcli(ctx, args...); err != nil {
-		return model.NetworkInterface{}, err
-	}
-	if err := s.saveNetworkPriority(target, req.RouteMetric); err != nil {
-		return model.NetworkInterface{}, err
-	}
-	if err := s.reapplyConnectedConnection(ctx, target); err != nil {
-		return model.NetworkInterface{}, err
-	}
-
-	updated, err := s.ListInterfaces(ctx)
-	if err != nil {
-		return model.NetworkInterface{}, err
-	}
-	for _, item := range updated {
-		if item.Name == name {
-			return item, nil
-		}
-	}
-	return model.NetworkInterface{}, ErrInterfaceNotFound
-}
-
 // UpdateInterfacePriorities 批量更新网口连接的 IPv4 路由优先级。
 func (s *Service) UpdateInterfacePriorities(
 	ctx context.Context,

@@ -1,10 +1,10 @@
 import type { ReactNode } from "react";
 import type { LucideIcon } from "lucide-react";
 
-import type { ParsedMessage, ParsedMessageType } from "../types";
+import type { DebugRecord, DebugRecordPage } from "../types";
 
 export type Page =
-  | ParsedMessageType
+  | DebugRecordPage
   | "developer-settings"
   | "gps-records"
   | "interference"
@@ -23,7 +23,7 @@ export type NavItem = {
 export type MessageColumn = {
   labelKey: string;
   width: string;
-  render: (record: ParsedMessage, locale: string) => ReactNode;
+  render: (record: DebugRecord, locale: string) => ReactNode;
 };
 
 export type DetailContent = {

@@ -10,8 +10,15 @@ import (
 	"dr600ab-api/internal/gps"
 	"dr600ab-api/internal/i18n"
 	"dr600ab-api/internal/interference"
+	"dr600ab-api/internal/model"
 	"dr600ab-api/internal/network"
 )
+
+// UserSettingsStore 持久化公开用户设置。
+type UserSettingsStore interface {
+	LoadUser() (model.UserSettings, bool, error)
+	SaveUser(model.UserSettings) error
+}
 
 // Server 持有 Fiber 应用以及对外暴露的后端服务。
 type Server struct {
@@ -23,6 +30,7 @@ type Server struct {
 	developer    *developer.Service
 	gps          *gps.Service
 	network      *network.Service
+	userSettings UserSettingsStore
 }
 
 // New 创建 Server，并注册中间件和 API 路由。
@@ -34,6 +42,7 @@ func New(
 	developerSvc *developer.Service,
 	gpsSvc *gps.Service,
 	networkSvc *network.Service,
+	userSettingsStore UserSettingsStore,
 ) *Server {
 	s := &Server{
 		cfg:          cfg,
@@ -43,6 +52,7 @@ func New(
 		developer:    developerSvc,
 		gps:          gpsSvc,
 		network:      networkSvc,
+		userSettings: userSettingsStore,
 	}
 	s.app = fiber.New(fiber.Config{
 		AppName: "dr600ab-api",

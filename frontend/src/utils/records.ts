@@ -1,14 +1,18 @@
-import type { ParsedMessage } from "../types";
+import type { DebugRecord, DetectionRecord, ParsedMessage } from "../types";
 
-export function getRecordData(record: ParsedMessage): Record<string, unknown> {
-  const data = record.data;
+export function isDetectionRecord(record: DebugRecord): record is DetectionRecord {
+  return "parsed" in record;
+}
+
+export function getRecordData(record: DebugRecord): Record<string, unknown> {
+  const data = isDetectionRecord(record) ? record.parsed.data : record.data;
   if (data && typeof data === "object" && !Array.isArray(data)) {
     return data as Record<string, unknown>;
   }
   return {};
 }
 
-export function getRecordField(record: ParsedMessage, ...keys: string[]): unknown {
+export function getRecordField(record: DebugRecord, ...keys: string[]): unknown {
   const data = getRecordData(record);
   for (const key of keys) {
     if (data[key] !== undefined && data[key] !== null) {
@@ -65,6 +69,9 @@ export function formatGps(value: unknown): string {
   return getTextValue(value);
 }
 
-export function buildSearchText(record: ParsedMessage): string {
+export function buildSearchText(record: DebugRecord): string {
+  if (isDetectionRecord(record)) {
+    return `${record.kind} ${record.summary} ${record.parsed.raw} ${JSON.stringify(record.parsed.data ?? {})}`.toLowerCase();
+  }
   return `${record.type} ${record.raw} ${JSON.stringify(record.data ?? {})}`.toLowerCase();
 }

@@ -8,7 +8,6 @@ import type {
   DeveloperLoginRequest,
   DeveloperSessionResponse,
   EventMessage,
-  FpvRecord,
   GpioChannel,
   GpioChannelStateRequest,
   GpioChannelStateResponse,
@@ -21,12 +20,16 @@ import type {
   NetworkInterfacesResponse,
   NetworkPriorityBatchRequest,
   NetworkPriorityBatchResponse,
-  NetworkPriorityRequest,
   NetworkInterfaceUpdateRequest,
   NetworkInterfaceUpdateResponse,
   ParsedMessage,
   PortsResponse,
+  ScreenDetectionTarget,
+  ScreenDeviceLocationResponse,
+  ScreenPositionTarget,
+  ScreenStreamHandlers,
   StreamHandlers,
+  UserSettings,
   WiFiConnectRequest,
   WiFiConnectResponse,
   WiFiNetworksResponse,
@@ -124,21 +127,6 @@ export function updateDetectionSettings(
   }, locale);
 }
 
-export function startSession(
-  payload: DetectionSessionRequest,
-  locale: string,
-  developerToken: string,
-): Promise<DetectionSessionResponse> {
-  return updateDetectionSettings(payload, locale, developerToken);
-}
-
-export function stopSession(locale: string, developerToken: string): Promise<DetectionSessionResponse> {
-  return requestJson<DetectionSessionResponse>("/detection/session", {
-    method: "DELETE",
-    headers: developerHeaders(developerToken),
-  }, locale);
-}
-
 export function getGPSSession(locale: string, developerToken: string): Promise<GPSSessionResponse> {
   return requestJson<GPSSessionResponse>("/gps/session", {
     headers: developerHeaders(developerToken),
@@ -163,13 +151,6 @@ export function updateGPSSettings(
   }, locale);
 }
 
-export function stopGPSSession(locale: string, developerToken: string): Promise<GPSSessionResponse> {
-  return requestJson<GPSSessionResponse>("/gps/session", {
-    method: "DELETE",
-    headers: developerHeaders(developerToken),
-  }, locale);
-}
-
 export function getDetections(
   locale: string,
   developerToken: string,
@@ -186,16 +167,33 @@ export function getParsed(locale: string, developerToken: string, limit = 200): 
   }, locale);
 }
 
-export function getFpv(locale: string, developerToken: string, limit = 100): Promise<ListResponse<FpvRecord>> {
-  return requestJson<ListResponse<FpvRecord>>(`/fpv/records?limit=${limit}`, {
-    headers: developerHeaders(developerToken),
-  }, locale);
-}
-
 export function getGPSRecords(locale: string, developerToken: string, limit = 200): Promise<ListResponse<GPSRecord>> {
   return requestJson<ListResponse<GPSRecord>>(`/gps/records?limit=${limit}`, {
     headers: developerHeaders(developerToken),
   }, locale);
+}
+
+export function getUserSettings(): Promise<UserSettings> {
+  return requestJson<UserSettings>("/user/settings");
+}
+
+export function updateUserSettings(payload: UserSettings, locale: string): Promise<UserSettings> {
+  return requestJson<UserSettings>("/user/settings", {
+    method: "PUT",
+    body: JSON.stringify(payload),
+  }, locale);
+}
+
+export function getScreenDetections(limit = 100): Promise<ListResponse<ScreenDetectionTarget>> {
+  return requestJson<ListResponse<ScreenDetectionTarget>>(`/screen/detections?limit=${limit}`);
+}
+
+export function getScreenPositions(limit = 100): Promise<ListResponse<ScreenPositionTarget>> {
+  return requestJson<ListResponse<ScreenPositionTarget>>(`/screen/positions?limit=${limit}`);
+}
+
+export function getScreenDeviceLocation(): Promise<ScreenDeviceLocationResponse> {
+  return requestJson<ScreenDeviceLocationResponse>("/screen/device-location");
 }
 
 export function getChannels(locale: string, developerToken: string): Promise<ChannelsResponse> {
@@ -230,19 +228,6 @@ export function updateNetworkInterface(
   developerToken: string,
 ): Promise<NetworkInterfaceUpdateResponse> {
   return requestJson<NetworkInterfaceUpdateResponse>(`/network/interfaces/${encodeURIComponent(name)}`, {
-    method: "PUT",
-    headers: developerHeaders(developerToken),
-    body: JSON.stringify(payload),
-  }, locale);
-}
-
-export function updateNetworkInterfacePriority(
-  name: string,
-  payload: NetworkPriorityRequest,
-  locale: string,
-  developerToken: string,
-): Promise<NetworkInterfaceUpdateResponse> {
-  return requestJson<NetworkInterfaceUpdateResponse>(`/network/interfaces/${encodeURIComponent(name)}/priority`, {
     method: "PUT",
     headers: developerHeaders(developerToken),
     body: JSON.stringify(payload),
@@ -334,12 +319,37 @@ export function openDetectionStream(locale: string, developerToken: string, hand
   bind("gps.record", handlers.onGPSRecord);
   bind("detection.parsed", handlers.onParsed);
   bind("detection.record", handlers.onDetection);
-  bind("fpv.record", handlers.onFpv);
   bind("gpio.channel.updated", handlers.onChannelUpdated);
 
   source.onerror = () => {
     if (source.readyState === EventSource.CLOSED) {
       handlers.onError?.(new Error("实时流连接已断开"));
+    }
+  };
+
+  return () => source.close();
+}
+
+export function openScreenStream(handlers: ScreenStreamHandlers): () => void {
+  const source = new EventSource(`${API_PREFIX}/screen/stream`);
+
+  source.addEventListener("screen.detection.updated", (message) => {
+    const event = parseStreamEvent<ScreenDetectionTarget>((message as MessageEvent<string>).data);
+    if (event) {
+      handlers.onDetectionUpdated?.(event);
+    }
+  });
+
+  source.addEventListener("screen.position.updated", (message) => {
+    const event = parseStreamEvent<ScreenPositionTarget>((message as MessageEvent<string>).data);
+    if (event) {
+      handlers.onPositionUpdated?.(event);
+    }
+  });
+
+  source.onerror = () => {
+    if (source.readyState === EventSource.CLOSED) {
+      handlers.onError?.(new Error("大屏实时流连接已断开"));
     }
   };
 

@@ -21,6 +21,7 @@ type savedSettings struct {
 	Detection model.DetectionSessionRequest `json:"detection"`
 	GPS       model.GPSSessionRequest       `json:"gps"`
 	Network   model.NetworkSettings         `json:"network"`
+	User      model.UserSettings            `json:"user"`
 }
 
 // NewStore 创建使用指定路径的设置存储。
@@ -127,6 +128,39 @@ func (s *Store) SaveNetwork(req model.NetworkSettings) error {
 	return s.save(settings)
 }
 
+// LoadUser 在文件存在时读取已持久化的公开用户设置。
+func (s *Store) LoadUser() (model.UserSettings, bool, error) {
+	if s == nil || s.path == "" {
+		return model.UserSettings{}, false, nil
+	}
+
+	settings, ok, err := s.load()
+	if err != nil || !ok {
+		return model.UserSettings{}, false, err
+	}
+	if isEmptyUserSettings(settings.User) {
+		return model.UserSettings{}, false, nil
+	}
+	return settings.User, true, nil
+}
+
+// SaveUser 以原子方式将公开用户设置写入磁盘。
+func (s *Store) SaveUser(req model.UserSettings) error {
+	if s == nil || s.path == "" {
+		return nil
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	settings, _, err := s.load()
+	if err != nil {
+		return err
+	}
+	settings.User = req
+	return s.save(settings)
+}
+
 func (s *Store) load() (savedSettings, bool, error) {
 	data, err := os.ReadFile(s.path)
 	if err != nil {
@@ -140,7 +174,8 @@ func (s *Store) load() (savedSettings, bool, error) {
 	if err := json.Unmarshal(data, &settings); err == nil {
 		if !isEmptyDetectionSettings(settings.Detection) ||
 			!isEmptyGPSSettings(settings.GPS) ||
-			!isEmptyNetworkSettings(settings.Network) {
+			!isEmptyNetworkSettings(settings.Network) ||
+			!isEmptyUserSettings(settings.User) {
 			return settings, true, nil
 		}
 	}
@@ -200,6 +235,10 @@ func isEmptyGPSSettings(req model.GPSSessionRequest) bool {
 
 func isEmptyNetworkSettings(req model.NetworkSettings) bool {
 	return len(req.Priorities) == 0
+}
+
+func isEmptyUserSettings(req model.UserSettings) bool {
+	return req.ManualDeviceLocation == nil
 }
 
 func normalizeSavedSettings(settings savedSettings) savedSettings {

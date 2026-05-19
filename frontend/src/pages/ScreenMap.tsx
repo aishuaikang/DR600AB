@@ -6,6 +6,7 @@ import "leaflet/dist/leaflet.css";
 import centerPointIcon from "../assets/images/centerPoint.svg";
 import compassIcon from "../assets/images/compass.png";
 import i18n from "../i18n";
+import type { ScreenDeviceLocationResponse, ScreenPositionPoint, ScreenPositionTarget } from "../types";
 import { createDrawControlButtonGroup } from "../utils/leafletControls";
 import { installLeafletCoordConverter } from "../utils/leafletCoordConverter";
 import {
@@ -15,16 +16,20 @@ import {
   REFERENCE_MAP_ZOOM,
   referenceMapLayers,
   referenceMarkerIcons,
-  screenAlerts,
-  screenDevices,
   type ReferenceMapLayer,
-  type ScreenAlert,
 } from "./screenData";
 
 installLeafletCoordConverter();
 
 const markerPane = "screenMarkers";
 const selectedPane = "screenSelectedMarkers";
+const deviceIconSize: [number, number] = [198 / 5, 256 / 5];
+const targetIconSize: [number, number] = [160 / 5, 256 / 5];
+
+type RealMapData = {
+  deviceLocation: ScreenDeviceLocationResponse | null;
+  positions: ScreenPositionTarget[];
+};
 
 function getOfflineTileBase() {
   if (typeof window === "undefined") {
@@ -105,122 +110,252 @@ function createIcon(iconUrl: string, size: [number, number], className?: string)
   });
 }
 
-function fitScreenBounds(map: L.Map) {
-  const points = [
-    ...screenDevices.map((item) => L.latLng(item.lat, item.lng)),
-    ...screenAlerts.flatMap((item) => [L.latLng(item.lat, item.lng), L.latLng(item.rcLat, item.rcLng)]),
-  ];
+function escapeHtml(value: string) {
+  return value
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
+}
 
+function formatMapTime(value?: string) {
+  if (!value) {
+    return "-";
+  }
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return "-";
+  }
+  return date.toLocaleTimeString(i18n.language.startsWith("zh") ? "zh-CN" : "en-US", { hour12: false });
+}
+
+function formatCoordinate(point: ScreenPositionPoint) {
+  return `${point.latitude.toFixed(6)}, ${point.longitude.toFixed(6)}`;
+}
+
+function formatMapFrequency(value?: number) {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return "-";
+  }
+  return `${Math.round(value)}MHz`;
+}
+
+function formatMapRSSI(value?: number) {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return "-";
+  }
+  return `${Math.round(value)}dBm`;
+}
+
+function validMapPoint(point?: ScreenPositionPoint | null): point is ScreenPositionPoint {
+  return Boolean(
+    point &&
+      Number.isFinite(point.latitude) &&
+      Number.isFinite(point.longitude) &&
+      point.latitude >= -90 &&
+      point.latitude <= 90 &&
+      point.longitude >= -180 &&
+      point.longitude <= 180 &&
+      !(point.latitude === 0 && point.longitude === 0),
+  );
+}
+
+function toLatLng(point: ScreenPositionPoint) {
+  return L.latLng(point.latitude, point.longitude);
+}
+
+function collectRealMapPoints(deviceLocation: ScreenDeviceLocationResponse | null, positions: ScreenPositionTarget[]) {
+  const points: L.LatLng[] = [];
+  if (deviceLocation?.valid && validMapPoint(deviceLocation.point)) {
+    points.push(toLatLng(deviceLocation.point));
+  }
+
+  positions.forEach((target) => {
+    if (validMapPoint(target.drone)) {
+      points.push(toLatLng(target.drone));
+    }
+    if (validMapPoint(target.pilot)) {
+      points.push(toLatLng(target.pilot));
+    }
+  });
+  return points;
+}
+
+function fitRealScreenBounds(
+  map: L.Map,
+  deviceLocation: ScreenDeviceLocationResponse | null,
+  positions: ScreenPositionTarget[],
+) {
+  const points = collectRealMapPoints(deviceLocation, positions);
   if (!points.length) {
     map.setView(REFERENCE_MAP_CENTER, REFERENCE_MAP_ZOOM);
     return;
   }
+  if (points.length === 1) {
+    map.setView(points[0], Math.max(map.getZoom(), 14), { animate: false });
+    return;
+  }
 
   map.fitBounds(L.latLngBounds(points), {
-    paddingTopLeft: L.point(650, 150),
-    paddingBottomRight: L.point(550, 150),
+    paddingTopLeft: L.point(110, 120),
+    paddingBottomRight: L.point(520, 120),
     maxZoom: 14,
   });
 }
 
-function renderStaticLayers(map: L.Map, t: TFunction) {
-  const deviceGroup = L.layerGroup().addTo(map);
-
-  screenDevices.forEach((device) => {
-    L.marker([device.lat, device.lng], {
-      icon: createIcon(device.online ? referenceMarkerIcons.detectionOnline : referenceMarkerIcons.detectionOffline, [198 / 5, 256 / 5]),
-      pane: markerPane,
-      riseOnHover: true,
-      alt: device.sn,
-    })
-      .bindTooltip(`${t(device.nameKey, { ns: "screen" })}<br>${device.sn}`, {
-        direction: "top",
-        offset: [0, -(256 / 5)],
-        className: "module-location-tooltip",
-        opacity: 0.9,
-      })
-      .addTo(deviceGroup);
-  });
-
-  return deviceGroup;
+function deviceTooltipContent(deviceLocation: ScreenDeviceLocationResponse, t: TFunction) {
+  const point = deviceLocation.point;
+  const sourceLabel = deviceLocation.source === "manual"
+    ? t("deviceLocationManual", { ns: "screen" })
+    : t("deviceLocationGps", { ns: "screen" });
+  return [
+    `<strong>${escapeHtml(t("deviceLocation", { ns: "screen" }))}</strong>`,
+    escapeHtml(sourceLabel),
+    point ? escapeHtml(formatCoordinate(point)) : "-",
+    `${escapeHtml(t("time", { ns: "screen" }))}: ${escapeHtml(formatMapTime(deviceLocation.updatedAt))}`,
+  ].join("<br>");
 }
 
-function renderAlertLayers(map: L.Map, selectedId: string, onSelectAlert: (alert: ScreenAlert) => void, t: TFunction) {
+function positionTooltipContent(target: ScreenPositionTarget, kind: "drone" | "pilot", point: ScreenPositionPoint, t: TFunction) {
+  const title = target.model || t("unknownTarget", { ns: "screen" });
+  const kindLabel = kind === "drone" ? t("positionDrone", { ns: "screen" }) : t("positionPilot", { ns: "screen" });
+  return [
+    `<strong>${escapeHtml(kindLabel)}</strong>`,
+    escapeHtml(title),
+    escapeHtml(target.serial || target.id),
+    escapeHtml(formatCoordinate(point)),
+    `${escapeHtml(t("frequency", { ns: "screen" }))}: ${escapeHtml(formatMapFrequency(target.frequency))}`,
+    `${escapeHtml(t("signalStrength", { ns: "screen" }))}: ${escapeHtml(formatMapRSSI(target.rssi))}`,
+  ].join("<br>");
+}
+
+function renderDeviceLayer(map: L.Map, deviceLocation: ScreenDeviceLocationResponse | null, t: TFunction) {
+  const group = L.layerGroup().addTo(map);
+  if (!deviceLocation?.valid || !validMapPoint(deviceLocation.point)) {
+    return group;
+  }
+
+  const className = deviceLocation.source === "manual"
+    ? "screen-map-device-marker screen-map-device-marker--manual"
+    : "screen-map-device-marker";
+  L.marker([deviceLocation.point.latitude, deviceLocation.point.longitude], {
+    icon: createIcon(referenceMarkerIcons.detectionOnline, deviceIconSize, className),
+    pane: markerPane,
+    riseOnHover: true,
+    alt: t("deviceLocation", { ns: "screen" }),
+  })
+    .bindTooltip(deviceTooltipContent(deviceLocation, t), {
+      direction: "top",
+      offset: [0, -deviceIconSize[1]],
+      className: "module-location-tooltip screen-map-tooltip",
+      opacity: 0.92,
+    })
+    .addTo(group);
+
+  return group;
+}
+
+function renderPositionLayers(
+  map: L.Map,
+  positions: ScreenPositionTarget[],
+  selectedId: string,
+  onSelectPosition: (target: ScreenPositionTarget) => void,
+  t: TFunction,
+) {
   const group = L.layerGroup().addTo(map);
 
-  screenAlerts.forEach((alert) => {
-    const isSelected = selectedId === alert.id;
-    const uavIconUrl = alert.inWhiteList
-      ? isSelected
-        ? referenceMarkerIcons.selectedUav
-        : referenceMarkerIcons.uav
-      : isSelected
-        ? referenceMarkerIcons.selectedUavBlackFly
-        : referenceMarkerIcons.uavBlackFly;
-    const remoteIconUrl = alert.inWhiteList
-      ? isSelected
-        ? referenceMarkerIcons.selectedRemote
-        : referenceMarkerIcons.remote
-      : isSelected
-        ? referenceMarkerIcons.selectedRemoteBlackFly
-        : referenceMarkerIcons.remoteBlackFly;
-
-    L.marker([alert.lat, alert.lng], {
-      icon: createIcon(uavIconUrl, [198 / 5, 256 / 5], isSelected ? "screen-reference-marker-selected" : undefined),
-      pane: isSelected ? selectedPane : markerPane,
-      riseOnHover: true,
-      alt: alert.sn,
-    })
-      .on("click", () => onSelectAlert(alert))
-      .bindTooltip(`${t(alert.nameKey, { ns: "screen" })}<br>${alert.frequencyMHz}MHz / ${alert.rssi}dBm`, {
-        direction: "top",
-        offset: [0, -(256 / 5)],
-        opacity: 0.9,
+  positions.forEach((target) => {
+    const selected = selectedId === target.id;
+    if (validMapPoint(target.pilot)) {
+      L.marker([target.pilot.latitude, target.pilot.longitude], {
+        icon: createIcon(
+          selected ? referenceMarkerIcons.selectedRemote : referenceMarkerIcons.remote,
+          targetIconSize,
+          selected ? "screen-reference-marker-selected" : undefined,
+        ),
+        pane: selected ? selectedPane : markerPane,
+        riseOnHover: true,
+        alt: `${target.serial || target.id}-pilot`,
       })
-      .addTo(group);
+        .on("click", () => onSelectPosition(target))
+        .bindTooltip(positionTooltipContent(target, "pilot", target.pilot, t), {
+          direction: "top",
+          offset: [0, -targetIconSize[1]],
+          className: "screen-map-tooltip",
+          opacity: 0.92,
+        })
+        .addTo(group);
+    }
 
-    L.marker([alert.rcLat, alert.rcLng], {
-      icon: createIcon(remoteIconUrl, [160 / 5, 256 / 5]),
-      pane: markerPane,
-      riseOnHover: true,
-      alt: `${alert.sn}-remote`,
-    })
-      .on("click", () => onSelectAlert(alert))
-      .bindTooltip(`${t("remoteController", { ns: "screen" })}<br>${alert.sn}`, {
-        direction: "top",
-        offset: [0, -(256 / 5)],
-        opacity: 0.9,
+    if (validMapPoint(target.drone)) {
+      L.marker([target.drone.latitude, target.drone.longitude], {
+        icon: createIcon(
+          selected ? referenceMarkerIcons.selectedUav : referenceMarkerIcons.uav,
+          targetIconSize,
+          selected ? "screen-reference-marker-selected" : undefined,
+        ),
+        pane: selected ? selectedPane : markerPane,
+        riseOnHover: true,
+        alt: `${target.serial || target.id}-drone`,
       })
-      .addTo(group);
+        .on("click", () => onSelectPosition(target))
+        .bindTooltip(positionTooltipContent(target, "drone", target.drone, t), {
+          direction: "top",
+          offset: [0, -targetIconSize[1]],
+          className: "screen-map-tooltip",
+          opacity: 0.92,
+        })
+        .addTo(group);
+    }
   });
 
   return group;
 }
 
+function selectedPositionPoint(positions: ScreenPositionTarget[], selectedId: string) {
+  const target = positions.find((item) => item.id === selectedId);
+  if (!target) {
+    return null;
+  }
+  return target.drone ?? target.pilot ?? null;
+}
+
 export function ScreenMap({
   t,
   selectedId,
-  onSelectAlert,
+  positions,
+  deviceLocation,
+  onSelectPosition,
   onMapReady,
 }: {
   t: TFunction;
   selectedId: string;
-  onSelectAlert: (alert: ScreenAlert) => void;
+  positions: ScreenPositionTarget[];
+  deviceLocation: ScreenDeviceLocationResponse | null;
+  onSelectPosition: (target: ScreenPositionTarget) => void;
   onMapReady: (map: L.Map | null) => void;
 }) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<L.Map | null>(null);
-  const alertLayerRef = useRef<L.LayerGroup | null>(null);
-  const onSelectAlertRef = useRef(onSelectAlert);
+  const deviceLayerRef = useRef<L.LayerGroup | null>(null);
+  const positionLayerRef = useRef<L.LayerGroup | null>(null);
+  const onSelectPositionRef = useRef(onSelectPosition);
   const selectedIdRef = useRef(selectedId);
+  const realDataRef = useRef<RealMapData>({ deviceLocation, positions });
+  const hasFitRealBoundsRef = useRef(false);
 
   useEffect(() => {
-    onSelectAlertRef.current = onSelectAlert;
-  }, [onSelectAlert]);
+    onSelectPositionRef.current = onSelectPosition;
+  }, [onSelectPosition]);
 
   useEffect(() => {
     selectedIdRef.current = selectedId;
   }, [selectedId]);
+
+  useEffect(() => {
+    realDataRef.current = { deviceLocation, positions };
+  }, [deviceLocation, positions]);
 
   const layerLabels = useMemo(() => {
     return Object.fromEntries(referenceMapLayers.map((key) => [key, t(key, { ns: "screen" })])) as Record<ReferenceMapLayer, string>;
@@ -274,7 +409,10 @@ export function ScreenMap({
         contentType: "image",
         text: centerPointIcon,
         className: "center-point-button",
-        onClick: () => fitScreenBounds(map),
+        onClick: () => {
+          const data = realDataRef.current;
+          fitRealScreenBounds(map, data.deviceLocation, data.positions);
+        },
       },
     ]);
     map.addControl(customButtons);
@@ -286,8 +424,15 @@ export function ScreenMap({
     );
 
     mapRef.current = map;
-    renderStaticLayers(map, t);
-    alertLayerRef.current = renderAlertLayers(map, selectedIdRef.current, (alert) => onSelectAlertRef.current(alert), t);
+    const data = realDataRef.current;
+    deviceLayerRef.current = renderDeviceLayer(map, data.deviceLocation, t);
+    positionLayerRef.current = renderPositionLayers(
+      map,
+      data.positions,
+      selectedIdRef.current,
+      (target) => onSelectPositionRef.current(target),
+      t,
+    );
 
     const labels = layerLabelsRef.current;
     const layersControl = new L.Control.Layers(
@@ -309,8 +454,12 @@ export function ScreenMap({
     });
 
     const fitTimer = window.setTimeout(() => {
-      if (mapRef.current === map) {
-        fitScreenBounds(map);
+      if (mapRef.current !== map) {
+        return;
+      }
+      if (collectRealMapPoints(data.deviceLocation, data.positions).length) {
+        fitRealScreenBounds(map, data.deviceLocation, data.positions);
+        hasFitRealBoundsRef.current = true;
       }
     }, 0);
     onMapReady(map);
@@ -319,7 +468,9 @@ export function ScreenMap({
       window.clearTimeout(fitTimer);
       map.remove();
       mapRef.current = null;
-      alertLayerRef.current = null;
+      deviceLayerRef.current = null;
+      positionLayerRef.current = null;
+      hasFitRealBoundsRef.current = false;
       onMapReady(null);
     };
   }, [onMapReady, t]);
@@ -330,16 +481,36 @@ export function ScreenMap({
       return;
     }
 
-    if (alertLayerRef.current) {
-      map.removeLayer(alertLayerRef.current);
+    if (deviceLayerRef.current) {
+      map.removeLayer(deviceLayerRef.current);
     }
-    alertLayerRef.current = renderAlertLayers(map, selectedId, (alert) => onSelectAlertRef.current(alert), t);
+    if (positionLayerRef.current) {
+      map.removeLayer(positionLayerRef.current);
+    }
 
-    const selectedAlert = screenAlerts.find((alert) => alert.id === selectedId);
-    if (selectedAlert) {
-      map.setView([selectedAlert.lat, selectedAlert.lng], Math.max(map.getZoom(), 14), { animate: false });
+    deviceLayerRef.current = renderDeviceLayer(map, deviceLocation, t);
+    positionLayerRef.current = renderPositionLayers(
+      map,
+      positions,
+      selectedId,
+      (target) => onSelectPositionRef.current(target),
+      t,
+    );
+
+    if (!hasFitRealBoundsRef.current && collectRealMapPoints(deviceLocation, positions).length) {
+      fitRealScreenBounds(map, deviceLocation, positions);
+      hasFitRealBoundsRef.current = true;
     }
-  }, [selectedId, t]);
+  }, [deviceLocation, positions, selectedId, t]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    const point = selectedPositionPoint(positions, selectedId);
+    if (!map || !validMapPoint(point)) {
+      return;
+    }
+    map.setView([point.latitude, point.longitude], Math.max(map.getZoom(), 14), { animate: false });
+  }, [positions, selectedId]);
 
   return <div id="lmap" ref={containerRef} className="screen-map dark" />;
 }

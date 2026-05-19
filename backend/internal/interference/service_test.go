@@ -48,7 +48,7 @@ func TestSetStateControlsPinLifecycle(t *testing.T) {
 	}
 
 	fake := &fakePin{}
-	svc := NewService(store.NewMemoryStore(10, 10, 10), tr, []ChannelDefinition{
+	svc := NewService(store.NewMemoryStore(10, 10), tr, []ChannelDefinition{
 		{ID: "io1", Label: "IO1", Pin: 96, Bands: []string{"2.4"}},
 	}, func(number int) GPIOPin {
 		return fake
@@ -127,7 +127,7 @@ func TestListChannelsReflectsActualPinValue(t *testing.T) {
 	}
 
 	fake := &fakePin{value: 1}
-	svc := NewService(store.NewMemoryStore(10, 10, 10), tr, []ChannelDefinition{
+	svc := NewService(store.NewMemoryStore(10, 10), tr, []ChannelDefinition{
 		{ID: "io1", Label: "IO1", Pin: 96, Bands: []string{"2.4"}},
 	}, func(number int) GPIOPin {
 		return fake
@@ -152,7 +152,7 @@ func TestReservedChannelAllowsStateChanges(t *testing.T) {
 	}
 
 	fake := &fakePin{}
-	svc := NewService(store.NewMemoryStore(10, 10, 10), tr, []ChannelDefinition{
+	svc := NewService(store.NewMemoryStore(10, 10), tr, []ChannelDefinition{
 		{ID: "io4", Label: "IO4", Pin: 62, Reserved: true},
 	}, func(number int) GPIOPin {
 		return fake
@@ -176,7 +176,7 @@ func TestListChannelsReturnsEmptyBandsForReservedChannel(t *testing.T) {
 		t.Fatalf("i18n.New() error = %v", err)
 	}
 
-	svc := NewService(store.NewMemoryStore(10, 10, 10), tr, []ChannelDefinition{
+	svc := NewService(store.NewMemoryStore(10, 10), tr, []ChannelDefinition{
 		{ID: "io4", Label: "IO4", Pin: 62, Reserved: true},
 	}, nil)
 

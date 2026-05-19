@@ -76,7 +76,7 @@ func TestStartSendsQGPSCommandToControlPort(t *testing.T) {
 	if err != nil {
 		t.Fatalf("i18n.New() error = %v", err)
 	}
-	st := store.NewMemoryStore(10, 10, 10)
+	st := store.NewMemoryStore(10, 10)
 	svc := NewService(st, tr, settings.NewStore(filepath.Join(t.TempDir(), "settings.json")), Options{})
 
 	opened := map[string]*fakeSerialPort{}
@@ -115,7 +115,7 @@ func TestIngestLineParsesGGAAndRMC(t *testing.T) {
 	if err != nil {
 		t.Fatalf("i18n.New() error = %v", err)
 	}
-	st := store.NewMemoryStore(10, 10, 10)
+	st := store.NewMemoryStore(10, 10)
 	svc := NewService(st, tr, settings.NewStore(filepath.Join(t.TempDir(), "settings.json")), Options{})
 
 	svc.IngestLine("gps-1", "/dev/ttyUSB1", "$GPGGA,092750.000,5321.6802,N,00630.3372,W,1,8,1.03,61.7,M,55.2,M,,*76")

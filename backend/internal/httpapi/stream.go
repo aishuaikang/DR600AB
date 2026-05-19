@@ -52,6 +52,45 @@ func (s *Server) handleStream(c *fiber.Ctx) error {
 	return nil
 }
 
+// handleScreenStream 保持大屏公开只读事件流开启，只推送大屏相关事件。
+func (s *Server) handleScreenStream(c *fiber.Ctx) error {
+	ctx := c.Context()
+
+	c.Set(fiber.HeaderContentType, "text/event-stream")
+	c.Set(fiber.HeaderCacheControl, "no-cache")
+	c.Set(fiber.HeaderConnection, "keep-alive")
+	c.Context().SetBodyStreamWriter(func(w *bufio.Writer) {
+		events, unsubscribe := s.detection.Subscribe(s.cfg.EventBufferSize)
+		defer unsubscribe()
+
+		_ = writeComment(w, "connected")
+		ticker := time.NewTicker(15 * time.Second)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case evt, ok := <-events:
+				if !ok {
+					return
+				}
+				if evt.Type != "screen.detection.updated" && evt.Type != "screen.position.updated" {
+					continue
+				}
+				if err := writeEvent(w, evt); err != nil {
+					return
+				}
+			case <-ticker.C:
+				if err := writeComment(w, "ping"); err != nil {
+					return
+				}
+			case <-ctx.Done():
+				return
+			}
+		}
+	})
+	return nil
+}
+
 // writeEvent 写入一个命名 SSE 事件，并携带 JSON 格式的 model.Event。
 func writeEvent(w *bufio.Writer, evt model.Event) error {
 	payload, err := json.Marshal(evt)

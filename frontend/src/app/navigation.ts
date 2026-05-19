@@ -4,11 +4,8 @@ import { MESSAGE_PAGE_CONFIG } from "./message-pages";
 import type { NavItem, Page } from "./types";
 
 export const debugPageItems: NavItem[] = [
-  { id: "heartbeat", icon: MESSAGE_PAGE_CONFIG.heartbeat.icon, labelKey: MESSAGE_PAGE_CONFIG.heartbeat.navLabelKey },
-  { id: "detect", icon: MESSAGE_PAGE_CONFIG.detect.icon, labelKey: MESSAGE_PAGE_CONFIG.detect.navLabelKey },
-  { id: "did_encrypted", icon: MESSAGE_PAGE_CONFIG.did_encrypted.icon, labelKey: MESSAGE_PAGE_CONFIG.did_encrypted.navLabelKey },
-  { id: "did_plain", icon: MESSAGE_PAGE_CONFIG.did_plain.icon, labelKey: MESSAGE_PAGE_CONFIG.did_plain.navLabelKey },
-  { id: "rid", icon: MESSAGE_PAGE_CONFIG.rid.icon, labelKey: MESSAGE_PAGE_CONFIG.rid.navLabelKey },
+  { id: "detection-records", icon: MESSAGE_PAGE_CONFIG["detection-records"].icon, labelKey: MESSAGE_PAGE_CONFIG["detection-records"].navLabelKey },
+  { id: "parsed-records", icon: MESSAGE_PAGE_CONFIG["parsed-records"].icon, labelKey: MESSAGE_PAGE_CONFIG["parsed-records"].navLabelKey },
   { id: "gps-records", icon: Satellite, labelKey: "gpsRecords" },
   { id: "interference", icon: Zap, labelKey: "interference" },
   { id: "network-settings", icon: Network, labelKey: "networkSettings" },

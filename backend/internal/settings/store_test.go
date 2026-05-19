@@ -9,7 +9,7 @@ import (
 	"dr600ab-api/internal/model"
 )
 
-func TestStoreKeepsDetectionGPSAndNetwork(t *testing.T) {
+func TestStoreKeepsDetectionGPSNetworkAndUserSettings(t *testing.T) {
 	store := NewStore(filepath.Join(t.TempDir(), "settings.json"))
 	detectionReq := model.DetectionSessionRequest{
 		RxPortName: "/dev/rx",
@@ -33,6 +33,9 @@ func TestStoreKeepsDetectionGPSAndNetwork(t *testing.T) {
 			{InterfaceName: "wlan0", ConnectionName: "Office", RouteMetric: 300},
 		},
 	}
+	userReq := model.UserSettings{
+		ManualDeviceLocation: &model.GeoPoint{Latitude: 23.12911, Longitude: 113.264385},
+	}
 
 	if err := store.Save(detectionReq); err != nil {
 		t.Fatalf("Save() error = %v", err)
@@ -42,6 +45,9 @@ func TestStoreKeepsDetectionGPSAndNetwork(t *testing.T) {
 	}
 	if err := store.SaveNetwork(networkReq); err != nil {
 		t.Fatalf("SaveNetwork() error = %v", err)
+	}
+	if err := store.SaveUser(userReq); err != nil {
+		t.Fatalf("SaveUser() error = %v", err)
 	}
 
 	gotDetection, ok, err := store.Load()
@@ -56,6 +62,10 @@ func TestStoreKeepsDetectionGPSAndNetwork(t *testing.T) {
 	if err != nil || !ok {
 		t.Fatalf("LoadNetwork() = %+v, %v, %v", gotNetwork, ok, err)
 	}
+	gotUser, ok, err := store.LoadUser()
+	if err != nil || !ok {
+		t.Fatalf("LoadUser() = %+v, %v, %v", gotUser, ok, err)
+	}
 	if gotDetection.RxPortName != detectionReq.RxPortName || gotDetection.TxPortName != detectionReq.TxPortName {
 		t.Fatalf("detection settings = %+v, want %+v", gotDetection, detectionReq)
 	}
@@ -64,6 +74,51 @@ func TestStoreKeepsDetectionGPSAndNetwork(t *testing.T) {
 	}
 	if len(gotNetwork.Priorities) != 2 || gotNetwork.Priorities[0].RouteMetric != 100 {
 		t.Fatalf("network settings = %+v, want %+v", gotNetwork, networkReq)
+	}
+	if gotUser.ManualDeviceLocation == nil ||
+		gotUser.ManualDeviceLocation.Latitude != userReq.ManualDeviceLocation.Latitude ||
+		gotUser.ManualDeviceLocation.Longitude != userReq.ManualDeviceLocation.Longitude {
+		t.Fatalf("user settings = %+v, want %+v", gotUser, userReq)
+	}
+}
+
+func TestStoreClearsUserSettingsWithoutOverwritingOtherSettings(t *testing.T) {
+	store := NewStore(filepath.Join(t.TempDir(), "settings.json"))
+	detectionReq := model.DetectionSessionRequest{
+		RxPortName: "/dev/rx",
+		TxPortName: "/dev/tx",
+		BaudRate:   115200,
+		DataBits:   8,
+		StopBits:   1,
+		Parity:     "none",
+	}
+	userReq := model.UserSettings{
+		ManualDeviceLocation: &model.GeoPoint{Latitude: 23.12911, Longitude: 113.264385},
+	}
+
+	if err := store.Save(detectionReq); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	if err := store.SaveUser(userReq); err != nil {
+		t.Fatalf("SaveUser() error = %v", err)
+	}
+	if err := store.SaveUser(model.UserSettings{}); err != nil {
+		t.Fatalf("SaveUser(clear) error = %v", err)
+	}
+
+	gotUser, ok, err := store.LoadUser()
+	if err != nil {
+		t.Fatalf("LoadUser() error = %v", err)
+	}
+	if ok || gotUser.ManualDeviceLocation != nil {
+		t.Fatalf("LoadUser() = %+v, %v, want cleared", gotUser, ok)
+	}
+	gotDetection, ok, err := store.Load()
+	if err != nil || !ok {
+		t.Fatalf("Load() = %+v, %v, %v", gotDetection, ok, err)
+	}
+	if gotDetection.RxPortName != detectionReq.RxPortName || gotDetection.TxPortName != detectionReq.TxPortName {
+		t.Fatalf("detection settings = %+v, want %+v", gotDetection, detectionReq)
 	}
 }
 

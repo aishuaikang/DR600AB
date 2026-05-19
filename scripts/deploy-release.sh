@@ -15,7 +15,7 @@ Options:
   --binary PATH       Local binary path. Default: dist/packages/dr600ab-linux-arm64/dr600ab
   --install-dir PATH  Remote install directory. Default: /opt/dr600ab
   --service-user USER Remote user running backend service. Default: root
-  --kiosk-user USER   Remote user running Chromium kiosk. Default: SSH user, or auto-detect when SSH user is root
+  --kiosk-user USER   Remote user running Chromium kiosk. Default: SSH user, auto-detect, or dr600ab-kiosk when SSH user is root
   --host HOST         API bind host. Default: 0.0.0.0
   --port PORT         API bind port. Default: 18080
   --display DISPLAY   X display used by Chromium. Default: :0
@@ -145,20 +145,45 @@ if ! id "$SERVICE_USER" >/dev/null 2>&1; then
   echo "Service user not found: $SERVICE_USER" >&2
   exit 1
 fi
-if [[ "$KIOSK_USER" == "root" && "$KIOSK_USER_EXPLICIT" != "true" ]]; then
+
+detect_kiosk_user() {
+  local candidate detected
   for candidate in ask peite orangepi pi ubuntu debian; do
     if id "$candidate" >/dev/null 2>&1; then
-      KIOSK_USER="$candidate"
-      break
+      echo "$candidate"
+      return 0
     fi
   done
+  detected="$(getent passwd | awk -F: '($3 >= 1000 && $3 < 60000 && $7 !~ /(nologin|false)$/) { print $1; exit }')"
+  if [[ -n "$detected" ]]; then
+    echo "$detected"
+    return 0
+  fi
+  return 1
+}
+
+if [[ "$KIOSK_USER" == "root" ]]; then
+  if detected_kiosk_user="$(detect_kiosk_user)"; then
+    if [[ "$KIOSK_USER_EXPLICIT" == "true" ]]; then
+      echo "Chromium kiosk cannot use root; detected kiosk user: $detected_kiosk_user"
+    fi
+    KIOSK_USER="$detected_kiosk_user"
+  else
+    KIOSK_USER="dr600ab-kiosk"
+    if [[ "$KIOSK_USER_EXPLICIT" == "true" ]]; then
+      echo "Chromium kiosk cannot use root; creating kiosk user: $KIOSK_USER"
+    fi
+  fi
+fi
+if ! id "$KIOSK_USER" >/dev/null 2>&1 && [[ "$KIOSK_USER" == "dr600ab-kiosk" ]]; then
+  "${SUDO[@]}" useradd -m -s /usr/sbin/nologin "$KIOSK_USER"
 fi
 if ! id "$KIOSK_USER" >/dev/null 2>&1; then
   echo "Kiosk user not found: $KIOSK_USER. Pass --kiosk-user USER." >&2
   exit 1
 fi
 if [[ "$KIOSK_USER" == "root" ]]; then
-  echo "Chromium kiosk should not run as root. Pass --kiosk-user USER." >&2
+  echo "Chromium kiosk cannot use root. Pass --kiosk-user USER for a non-root desktop user." >&2
   exit 1
 fi
 
@@ -167,6 +192,29 @@ if [[ -z "$KIOSK_HOME" ]]; then
   KIOSK_HOME="/home/$KIOSK_USER"
 fi
 CHROMIUM_USER_DATA_DIR="$KIOSK_HOME/.chromium-kiosk"
+
+prepare_kiosk_xauthority() {
+  local xauth_source=""
+  for candidate in \
+    "$KIOSK_HOME/.Xauthority" \
+    "/var/run/lightdm/root/${DISPLAY_VALUE}" \
+    "/root/.Xauthority"; do
+    if [[ -f "$candidate" ]]; then
+      xauth_source="$candidate"
+      break
+    fi
+  done
+  if [[ -z "$xauth_source" ]]; then
+    echo "Xauthority not found for display $DISPLAY_VALUE. Kiosk service may need manual X access setup." >&2
+    return 0
+  fi
+  if [[ "$xauth_source" != "$KIOSK_HOME/.Xauthority" ]]; then
+    "${SUDO[@]}" install -D -m 0600 -o "$KIOSK_USER" -g "$KIOSK_USER" "$xauth_source" "$KIOSK_HOME/.Xauthority"
+  else
+    "${SUDO[@]}" chown "$KIOSK_USER:" "$KIOSK_HOME/.Xauthority"
+    "${SUDO[@]}" chmod 0600 "$KIOSK_HOME/.Xauthority"
+  fi
+}
 
 clear_chromium_cache() {
   local profile="$1"
@@ -194,6 +242,8 @@ clear_chromium_cache() {
 "${SUDO[@]}" install -m 0755 "$REMOTE_TMP/dr600ab" "$INSTALL_DIR/dr600ab"
 "${SUDO[@]}" install -d -m 0755 "$INSTALL_DIR/data"
 "${SUDO[@]}" chown -R "$SERVICE_USER:" "$INSTALL_DIR"
+"${SUDO[@]}" install -d -m 0755 -o "$KIOSK_USER" -g "$KIOSK_USER" "$CHROMIUM_USER_DATA_DIR"
+prepare_kiosk_xauthority
 
 "${SUDO[@]}" tee /etc/systemd/system/dr600ab.service >/dev/null <<EOF
 [Unit]

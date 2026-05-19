@@ -11,6 +11,8 @@ export type ParsedMessageType =
   | "detect"
   | "heartbeat";
 
+export type DebugRecordPage = "detection-records" | "parsed-records";
+
 export interface PortInfo {
   name: string;
   active: boolean;
@@ -82,6 +84,22 @@ export interface GPSRecord {
   fix?: GPSFix;
 }
 
+export interface GeoPoint {
+  latitude: number;
+  longitude: number;
+}
+
+export interface UserSettings {
+  manualDeviceLocation?: GeoPoint;
+}
+
+export interface ScreenDeviceLocationResponse {
+  source: "gps" | "manual" | "none";
+  point?: GeoPoint;
+  updatedAt?: string;
+  valid: boolean;
+}
+
 export interface GPSSessionResponse {
   active: boolean;
   sessionId?: string;
@@ -122,23 +140,69 @@ export interface DetectionRecord {
   rssi?: number;
   summary: string;
   parsed: ParsedMessage;
-  isFpv: boolean;
-  fpvBand?: string;
 }
 
-export interface FpvRecord {
+export interface ScreenDetectionLastRecord {
   id: string;
-  detectionId: string;
-  band: string;
-  label: string;
-  portName: string;
+  kind: string;
+  receivedAt: string;
   device?: string;
   model?: string;
+  frequency?: number;
+  rssi?: number;
+  summary: string;
+}
+
+export interface ScreenDetectionTarget {
+  id: string;
+  model: string;
   frequency: number;
   rssi: number;
-  receivedAt: string;
-  sourceKind: string;
+  devices: string[];
+  firstSeen: string;
+  lastSeen: string;
+  hitCount: number;
+  lastRecord: ScreenDetectionLastRecord;
 }
+
+export interface ScreenPositionPoint {
+  latitude: number;
+  longitude: number;
+}
+
+export interface ScreenPositionLastRecord {
+  type: string;
+  receivedAt: string;
+  device?: string;
+  serial?: string;
+  model?: string;
+  frequency?: number;
+  rssi?: number;
+  cracked?: boolean;
+}
+
+export interface ScreenPositionTarget {
+  id: string;
+  serial: string;
+  model: string;
+  source: string;
+  frequency?: number;
+  rssi?: number;
+  devices: string[];
+  drone?: ScreenPositionPoint;
+  pilot?: ScreenPositionPoint;
+  home?: ScreenPositionPoint;
+  height?: number;
+  altitude?: number;
+  speed?: number;
+  cracked?: boolean;
+  firstSeen: string;
+  lastSeen: string;
+  hitCount: number;
+  lastRecord: ScreenPositionLastRecord;
+}
+
+export type DebugRecord = DetectionRecord | ParsedMessage;
 
 export interface GpioChannel {
   id: string;
@@ -233,10 +297,6 @@ export interface NetworkInterfaceUpdateResponse {
   message: string;
 }
 
-export interface NetworkPriorityRequest {
-  routeMetric: number;
-}
-
 export interface NetworkPriorityBatchItem {
   interfaceName: string;
   routeMetric: number;
@@ -303,7 +363,12 @@ export interface StreamHandlers {
   onGPSRecord?: (event: EventMessage<GPSRecord>) => void;
   onParsed?: (event: EventMessage<ParsedMessage>) => void;
   onDetection?: (event: EventMessage<DetectionRecord>) => void;
-  onFpv?: (event: EventMessage<FpvRecord>) => void;
   onChannelUpdated?: (event: EventMessage<GpioChannel>) => void;
+  onError?: (error: Error) => void;
+}
+
+export interface ScreenStreamHandlers {
+  onDetectionUpdated?: (event: EventMessage<ScreenDetectionTarget>) => void;
+  onPositionUpdated?: (event: EventMessage<ScreenPositionTarget>) => void;
   onError?: (error: Error) => void;
 }

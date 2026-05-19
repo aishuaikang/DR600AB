@@ -1,10 +1,7 @@
 {
   "screen": "Situation Screen",
-  "didEncrypted": "DID Encrypted",
-  "rid": "Remote ID",
-  "didPlain": "DID Plain",
-  "detect": "Detection",
-  "heartbeat": "Heartbeat",
+  "detectionRecords": "Detection Data",
+  "parsedRecords": "Parsed Data",
   "gpsRecords": "GPS Records",
   "interference": "GPIO Control",
   "networkSettings": "Network Settings",

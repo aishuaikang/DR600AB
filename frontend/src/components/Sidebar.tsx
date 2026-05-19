@@ -107,18 +107,48 @@ export function Sidebar({
 
   return (
     <>
-      {mobileOpen ? (
+      <div className="admin-sidebar__mobile-topbar flex min-w-0 items-center gap-2 border-b border-base-300 bg-base-200/95 p-2 shadow-lg shadow-black/20 xl:hidden">
+        <a
+          href="#/screen"
+          aria-label={t("screen", { ns: "nav" })}
+          title={t("screen", { ns: "nav" })}
+          className="grid h-9 w-9 shrink-0 place-items-center rounded-2xl border border-primary/30 bg-primary/10 text-primary hover:border-primary/45 hover:bg-primary/15"
+          onClick={() => handleNavigate("screen")}
+        >
+          <Monitor size={18} />
+        </a>
+        <div className="min-w-0 flex-1">
+          <strong className="block truncate text-[13px] font-semibold leading-5">{appTitle}</strong>
+          {developerActive ? (
+            <span className="mt-0.5 inline-flex items-center gap-1 rounded-full border border-success/25 bg-success/10 px-2 py-0.5 text-[10px] font-semibold text-success">
+              <ShieldCheck size={11} />
+              {t("developerActive", { ns: "nav" })} {developerExpiryLabel}
+            </span>
+          ) : null}
+        </div>
         <button
-          className="admin-sidebar__scrim xl:hidden"
+          className="btn btn-ghost btn-sm h-9 min-h-9 w-9 shrink-0 rounded-2xl px-0"
           type="button"
-          aria-label={t("close", { ns: "common" })}
-          onClick={onMobileClose}
-        />
-      ) : null}
+          aria-label={t("openMenu", { ns: "nav" })}
+          aria-expanded={mobileOpen}
+          onClick={onMobileOpen}
+        >
+          <Menu size={18} />
+        </button>
+      </div>
+
+      <button
+        className={cx("admin-sidebar__scrim xl:hidden", mobileOpen && "admin-sidebar__scrim--open")}
+        type="button"
+        aria-label={t("close", { ns: "common" })}
+        aria-hidden={!mobileOpen}
+        tabIndex={mobileOpen ? 0 : -1}
+        onClick={onMobileClose}
+      />
 
       <aside
         className={cx(
-          "admin-sidebar min-h-0 overflow-hidden border-b border-base-300 bg-base-200/95 xl:rounded-2xl xl:border xl:border-base-300/80 xl:bg-base-200/85 xl:shadow-xl xl:shadow-black/20",
+          "admin-sidebar hidden min-h-0 overflow-hidden border-b border-base-300 bg-base-200/95 xl:block xl:rounded-2xl xl:border xl:border-base-300/80 xl:bg-base-200/85 xl:shadow-xl xl:shadow-black/20",
           mobileOpen && "admin-sidebar--open",
         )}
       >

@@ -28,7 +28,7 @@ func New(cfg config.Config) (*App, error) {
 		return nil, err
 	}
 
-	state := store.NewMemoryStore(cfg.MaxDetectionRecords, cfg.MaxParsedMessages, cfg.MaxFPVRecords)
+	state := store.NewMemoryStore(cfg.MaxDetectionRecords, cfg.MaxParsedMessages)
 	settingsStore := settings.NewStore(cfg.SettingsPath)
 	detectionSvc := detection.NewService(state, translator, settingsStore, detection.Options{
 		DefaultBaudRate:       cfg.DefaultBaudRate,
@@ -38,6 +38,15 @@ func New(cfg config.Config) (*App, error) {
 		DefaultReadTimeout:    cfg.DefaultReadTimeout,
 		ReconnectInitialDelay: cfg.ReconnectInitialDelay,
 		ReconnectMaxDelay:     cfg.ReconnectMaxDelay,
+		O3Decrypt: detection.O3DecryptOptions{
+			Enabled:        cfg.O3Decrypt.Enabled,
+			Broker:         cfg.O3Decrypt.Broker,
+			Port:           cfg.O3Decrypt.Port,
+			Username:       cfg.O3Decrypt.Username,
+			Password:       cfg.O3Decrypt.Password,
+			Timeout:        cfg.O3Decrypt.Timeout,
+			ConnectTimeout: cfg.O3Decrypt.ConnectTimeout,
+		},
 	})
 	interferenceSvc := interference.NewService(state, translator, interference.DefaultChannels(), nil)
 	developerSvc, err := developer.NewService(cfg.DeveloperTOTPSecret, cfg.DeveloperSessionTTL)
@@ -60,7 +69,16 @@ func New(cfg config.Config) (*App, error) {
 	_ = networkSvc.RestoreSavedSettings(context.Background())
 
 	return &App{
-		server: httpapi.New(cfg, translator, detectionSvc, interferenceSvc, developerSvc, gpsSvc, networkSvc),
+		server: httpapi.New(
+			cfg,
+			translator,
+			detectionSvc,
+			interferenceSvc,
+			developerSvc,
+			gpsSvc,
+			networkSvc,
+			settingsStore,
+		),
 	}, nil
 }
 

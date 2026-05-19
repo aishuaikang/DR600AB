@@ -13,19 +13,14 @@ func (s *Server) registerDetectionRoutes(api fiber.Router) {
 	api.Get("/serial/ports", s.handlePorts)
 	api.Get("/detection/settings", s.handleDetectionSettings)
 	api.Get("/detection/session", s.handleCurrentSession)
-	api.Post("/detection/session", s.handleStartSession)
 	api.Put("/detection/settings", s.handleUpdateDetectionSettings)
-	api.Delete("/detection/session", s.handleStopSession)
 	api.Get("/gps/settings", s.handleGPSSettings)
 	api.Get("/gps/session", s.handleCurrentGPSSession)
-	api.Post("/gps/session", s.handleStartGPSSession)
 	api.Put("/gps/settings", s.handleUpdateGPSSettings)
-	api.Delete("/gps/session", s.handleStopGPSSession)
 	api.Get("/gps/records", s.handleGPSRecords)
 	api.Get("/detection/stream", s.handleStream)
 	api.Get("/detection/records", s.handleDetectionRecords)
 	api.Get("/parsed/records", s.handleParsedRecords)
-	api.Get("/fpv/records", s.handleFPVRecords)
 }
 
 // handleCurrentGPSSession 返回当前 GPS 会话响应。
@@ -35,11 +30,6 @@ func (s *Server) handleCurrentGPSSession(c *fiber.Ctx) error {
 		return err
 	}
 	return c.JSON(s.gps.Current(locale))
-}
-
-// handleStartGPSSession 使用与设置更新相同的请求体启动 GPS。
-func (s *Server) handleStartGPSSession(c *fiber.Ctx) error {
-	return s.handleUpdateGPSSettings(c)
 }
 
 // handleGPSSettings 在存在持久化设置时返回 GPS 设置。
@@ -112,15 +102,6 @@ func (s *Server) handleUpdateGPSSettings(c *fiber.Ctx) error {
 	return c.JSON(response)
 }
 
-// handleStopGPSSession 停止当前 GPS 会话。
-func (s *Server) handleStopGPSSession(c *fiber.Ctx) error {
-	locale := s.resolveLocale(c)
-	if err := s.requireDeveloper(c, locale); err != nil {
-		return err
-	}
-	return c.JSON(s.gps.Stop(locale))
-}
-
 // handleGPSRecords 返回最新 GPS NMEA 记录。
 func (s *Server) handleGPSRecords(c *fiber.Ctx) error {
 	locale := s.resolveLocale(c)
@@ -171,11 +152,6 @@ func (s *Server) handleCurrentSession(c *fiber.Ctx) error {
 		return err
 	}
 	return c.JSON(s.detection.Current(locale))
-}
-
-// handleStartSession 使用与设置更新相同的请求体启动侦测。
-func (s *Server) handleStartSession(c *fiber.Ctx) error {
-	return s.handleUpdateDetectionSettings(c)
 }
 
 // handleDetectionSettings 在存在持久化设置时返回侦测设置。
@@ -239,15 +215,6 @@ func (s *Server) handleUpdateDetectionSettings(c *fiber.Ctx) error {
 	return c.JSON(response)
 }
 
-// handleStopSession 停止当前侦测会话。
-func (s *Server) handleStopSession(c *fiber.Ctx) error {
-	locale := s.resolveLocale(c)
-	if err := s.requireDeveloper(c, locale); err != nil {
-		return err
-	}
-	return c.JSON(s.detection.Stop(locale))
-}
-
 // handleDetectionRecords 返回标准化侦测列表行。
 func (s *Server) handleDetectionRecords(c *fiber.Ctx) error {
 	locale := s.resolveLocale(c)
@@ -269,19 +236,6 @@ func (s *Server) handleParsedRecords(c *fiber.Ctx) error {
 	}
 	items := s.detection.Parsed(parseLimit(c, 200))
 	return c.JSON(model.ListResponse[model.ParsedMessage]{
-		Items: items,
-		Count: len(items),
-	})
-}
-
-// handleFPVRecords 返回已归类到图传频段的侦测记录。
-func (s *Server) handleFPVRecords(c *fiber.Ctx) error {
-	locale := s.resolveLocale(c)
-	if err := s.requireDeveloper(c, locale); err != nil {
-		return err
-	}
-	items := s.detection.FPV(parseLimit(c, 100))
-	return c.JSON(model.ListResponse[model.FpvRecord]{
 		Items: items,
 		Count: len(items),
 	})

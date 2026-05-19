@@ -22,13 +22,28 @@
         z-index: 9999;
         display: grid;
         place-items: center;
+        overflow: hidden;
         color: #e8fbff;
-        background: radial-gradient(circle at 50% 40%, rgba(38, 201, 255, 0.16), transparent 28rem), #03070d;
+        background:
+          radial-gradient(circle at 50% 40%, rgba(38, 201, 255, 0.16), transparent 28rem),
+          linear-gradient(180deg, #06101b 0%, #03070d 100%);
         font-family: "Noto Sans SC", system-ui, sans-serif;
       }
 
+      .app-boot-loader::before {
+        position: absolute;
+        inset: 0;
+        content: "";
+        background:
+          linear-gradient(90deg, transparent, rgba(38, 201, 255, 0.22), transparent),
+          repeating-linear-gradient(180deg, rgba(255, 255, 255, 0.035) 0 1px, transparent 1px 8px);
+        opacity: 0.52;
+      }
+
       .app-boot-loader__frame {
+        position: relative;
         display: grid;
+        min-width: min(72vw, 440px);
         justify-items: center;
         gap: 14px;
         border: 1px solid rgba(38, 201, 255, 0.28);
@@ -37,14 +52,17 @@
         background: rgba(5, 13, 24, 0.72);
         box-shadow: 0 24px 80px rgba(0, 0, 0, 0.36), inset 0 0 36px rgba(38, 201, 255, 0.08);
         text-align: center;
+        backdrop-filter: blur(8px);
       }
 
       .app-boot-loader__ring {
+        display: block;
         width: 54px;
         height: 54px;
         border: 2px solid rgba(38, 201, 255, 0.18);
         border-top-color: #26c9ff;
         border-radius: 999px;
+        box-shadow: 0 0 22px rgba(38, 201, 255, 0.35);
         animation: app-boot-spin 0.9s linear infinite;
       }
 
@@ -52,17 +70,36 @@
         color: #ffffff;
         font-size: 18px;
         font-weight: 800;
+        letter-spacing: 0;
       }
 
       .app-boot-loader__frame span:last-child {
         color: rgba(184, 235, 248, 0.76);
         font-size: 13px;
         font-weight: 700;
+        letter-spacing: 0;
+      }
+
+      .app-hydrated .app-boot-loader {
+        visibility: hidden;
+        opacity: 0;
+        pointer-events: none;
+        transition: opacity 0.18s ease, visibility 0.18s ease;
       }
 
       @keyframes app-boot-spin {
         to {
           transform: rotate(360deg);
+        }
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        .app-boot-loader__ring {
+          animation: none !important;
+        }
+
+        .app-hydrated .app-boot-loader {
+          transition: none !important;
         }
       }
 
