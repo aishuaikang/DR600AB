@@ -1120,6 +1120,7 @@ function DeceptionDeviceStatusModal({
 }) {
 	const rawEntries = Object.entries(status?.rawDescriptions ?? {});
 	const queryErrorEntries = Object.entries(status?.queryErrors ?? {});
+	const [rawDescriptionsOpen, setRawDescriptionsOpen] = useState(rawEntries.length > 0);
 	const tone = getDeceptionDeviceStatusTone(status, loading);
 	const transmitMask = typeof status?.transmitMask === "number"
 		? `0x${status.transmitMask.toString(16).toUpperCase().padStart(4, "0")}`
@@ -1132,6 +1133,12 @@ function DeceptionDeviceStatusModal({
 		: status?.deviceSignal
 			? [status.deviceSignal]
 			: [];
+
+	useEffect(() => {
+		if (rawEntries.length > 0) {
+			setRawDescriptionsOpen(true);
+		}
+	}, [rawEntries.length]);
 
 	return (
 		<div className="screen-navigation-modal app-modal-backdrop" role="presentation" onClick={onClose}>
@@ -1284,15 +1291,22 @@ function DeceptionDeviceStatusModal({
 					</details>
 				) : null}
 
-				<details className="screen-device-status-modal__raw">
-					<summary>{t("deceptionStatusRawDescriptions", { ns: "screen" })}</summary>
-					{rawEntries.length > 0 ? rawEntries.map(([key, value]) => (
-						<code key={key}>
-							<strong>{t(`deceptionStatusRaw.${key}`, { ns: "screen", defaultValue: key })}</strong>
-							<span>{value}</span>
-						</code>
-					)) : <span>{t("noData", { ns: "screen" })}</span>}
-				</details>
+					<details
+						className="screen-device-status-modal__raw"
+						open={rawDescriptionsOpen}
+						onToggle={(event) => setRawDescriptionsOpen(event.currentTarget.open)}
+					>
+						<summary>
+							<span>{t("deceptionStatusRawDescriptions", { ns: "screen" })}</span>
+							<em>{rawEntries.length}</em>
+						</summary>
+						{rawEntries.length > 0 ? rawEntries.map(([key, value]) => (
+							<code key={key}>
+								<strong>{t(`deceptionStatusRaw.${key}`, { ns: "screen", defaultValue: key })}</strong>
+								<pre>{value}</pre>
+							</code>
+						)) : <span>{t("noData", { ns: "screen" })}</span>}
+					</details>
 
 				<span className={cx("screen-device-status-modal__tone", `screen-device-status-modal__tone--${tone}`)} aria-hidden="true" />
 			</section>

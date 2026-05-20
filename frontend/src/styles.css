@@ -3970,10 +3970,27 @@ body.virtual-keyboard-open .app-loading-overlay {
 }
 
 .screen-device-status-modal__raw summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.8em;
   color: rgba(226, 241, 246, 0.82);
   font-size: 0.66em;
   font-weight: 880;
   cursor: pointer;
+}
+
+.screen-device-status-modal__raw summary em {
+  min-width: 1.8em;
+  border: 1px solid rgba(122, 203, 255, 0.16);
+  border-radius: 999px;
+  padding: 0.08em 0.52em;
+  color: rgba(146, 232, 255, 0.92);
+  background: rgba(59, 130, 246, 0.12);
+  font-family: var(--font-mono);
+  font-style: normal;
+  font-weight: 900;
+  text-align: center;
 }
 
 .screen-device-status-modal__raw code {
@@ -3991,6 +4008,25 @@ body.virtual-keyboard-open .app-loading-overlay {
 .screen-device-status-modal__raw code strong {
   color: rgba(146, 232, 255, 0.92);
   font-family: inherit;
+}
+
+.screen-device-status-modal__raw code pre {
+  max-height: 13em;
+  overflow: auto;
+  margin: 0;
+  border: 1px solid rgba(122, 203, 255, 0.1);
+  border-radius: var(--screen-panel-radius-xs);
+  padding: 0.62em;
+  color: rgba(202, 224, 232, 0.82);
+  background: rgba(2, 8, 15, 0.42);
+  font: inherit;
+  line-height: 1.42;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.screen-device-status-modal__raw code span {
+  white-space: pre-wrap;
 }
 
 .screen-device-status-modal__raw > span {
