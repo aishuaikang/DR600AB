@@ -139,6 +139,14 @@ func (s *Server) handlePorts(c *fiber.Ctx) error {
 			}
 		}
 	}
+	deceptionSession := s.deception.Current(locale)
+	if deceptionSession.Active {
+		for index := range ports {
+			if ports[index].Name == deceptionSession.PortName {
+				ports[index].Active = true
+			}
+		}
+	}
 	return c.JSON(fiber.Map{
 		"ports":         ports,
 		"activeSession": s.detection.Current(locale),

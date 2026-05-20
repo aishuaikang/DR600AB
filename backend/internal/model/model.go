@@ -94,6 +94,7 @@ type GeoPoint struct {
 
 // UserSettings 保存公开用户设置。
 type UserSettings struct {
+	DeviceSN                  string    `json:"deviceSn,omitempty"`
 	ManualDeviceLocation      *GeoPoint `json:"manualDeviceLocation,omitempty"`
 	ScreenStrikeChannelLabels []string  `json:"screenStrikeChannelLabels,omitempty"`
 }
@@ -126,6 +127,53 @@ type GPSSessionResponse struct {
 	LastFix         *GPSFix    `json:"lastFix,omitempty"`
 	LastRecord      *GPSRecord `json:"lastRecord,omitempty"`
 	Message         string     `json:"message"`
+}
+
+// DeceptionSessionRequest 配置 GNSS 诱骗设备串口会话。
+type DeceptionSessionRequest struct {
+	PortName      string `json:"portName,omitempty"`
+	BaudRate      int    `json:"baudRate"`
+	DataBits      int    `json:"dataBits"`
+	StopBits      int    `json:"stopBits"`
+	Parity        string `json:"parity"`
+	ReadTimeoutMs int    `json:"readTimeoutMs,omitempty"`
+	AutoConnect   bool   `json:"autoConnect,omitempty"`
+}
+
+// DeceptionSessionResponse 返回当前 GNSS 诱骗设备串口会话状态。
+type DeceptionSessionResponse struct {
+	Active        bool      `json:"active"`
+	SessionID     string    `json:"sessionId,omitempty"`
+	PortName      string    `json:"portName,omitempty"`
+	BaudRate      int       `json:"baudRate,omitempty"`
+	DataBits      int       `json:"dataBits,omitempty"`
+	StopBits      int       `json:"stopBits,omitempty"`
+	Parity        string    `json:"parity,omitempty"`
+	StartedAt     time.Time `json:"startedAt,omitempty"`
+	State         string    `json:"state,omitempty"`
+	AutoReconnect bool      `json:"autoReconnect,omitempty"`
+	LastError     string    `json:"lastError,omitempty"`
+	Message       string    `json:"message"`
+}
+
+// DeceptionRecord 保存一条 GNSS 诱骗设备协议交互记录。
+type DeceptionRecord struct {
+	Time        time.Time `json:"time"`
+	Direction   string    `json:"direction"`
+	Command     string    `json:"command,omitempty"`
+	Control     string    `json:"control,omitempty"`
+	RawHex      string    `json:"rawHex,omitempty"`
+	Description string    `json:"description,omitempty"`
+	Error       string    `json:"error,omitempty"`
+}
+
+// DeceptionQueryResponse 返回 GNSS 诱骗设备调试查询结果。
+type DeceptionQueryResponse struct {
+	Item        string `json:"item"`
+	Command     string `json:"command"`
+	RawHex      string `json:"rawHex,omitempty"`
+	Description string `json:"description,omitempty"`
+	Message     string `json:"message"`
 }
 
 // ParsedMessage 保存单行串口数据的解析结果。
@@ -264,6 +312,221 @@ type ScreenStrikeState struct {
 type ScreenStrikeResponse struct {
 	State   ScreenStrikeState `json:"state"`
 	Message string            `json:"message"`
+}
+
+// ScreenDeceptionRequest 控制大屏诱骗面板绑定的 GNSS 诱骗设备。
+type ScreenDeceptionRequest struct {
+	Enabled        bool                         `json:"enabled"`
+	TargetID       string                       `json:"targetId,omitempty"`
+	Mode           string                       `json:"mode,omitempty"`
+	Longitude      *float64                     `json:"longitude,omitempty"`
+	Latitude       *float64                     `json:"latitude,omitempty"`
+	AltitudeM      *float64                     `json:"altitudeM,omitempty"`
+	SignalMask     *uint16                      `json:"signalMask,omitempty"`
+	StrengthPreset string                       `json:"strengthPreset,omitempty"`
+	AttenuationDB  *int                         `json:"attenuationDB,omitempty"`
+	DelayMode      string                       `json:"delayMode,omitempty"`
+	DelayNS        *float64                     `json:"delayNS,omitempty"`
+	Circle         *ScreenDeceptionCircleParams `json:"circle,omitempty"`
+	Linear         *ScreenDeceptionLinearParams `json:"linear,omitempty"`
+	Random         *ScreenDeceptionRandomParams `json:"random,omitempty"`
+}
+
+// ScreenDeceptionCircleParams 描述圆周诱骗参数。
+type ScreenDeceptionCircleParams struct {
+	RadiusM       float64 `json:"radiusM,omitempty"`
+	PeriodSeconds float64 `json:"periodSeconds,omitempty"`
+	Direction     string  `json:"direction,omitempty"`
+}
+
+// ScreenDeceptionLinearParams 描述线性诱骗参数。
+type ScreenDeceptionLinearParams struct {
+	SpeedMPS     float64  `json:"speedMps,omitempty"`
+	DirectionDeg *float64 `json:"directionDeg,omitempty"`
+	MaxSpeedMPS  float64  `json:"maxSpeedMps,omitempty"`
+}
+
+// ScreenDeceptionRandomParams 描述固定位置模式下的随机坐标开关。
+type ScreenDeceptionRandomParams struct {
+	Enabled        bool   `json:"enabled"`
+	RadiusM        uint32 `json:"radiusM,omitempty"`
+	RefreshSeconds uint32 `json:"refreshSeconds,omitempty"`
+}
+
+// ScreenDeceptionState 描述大屏诱骗控制当前状态。
+type ScreenDeceptionState struct {
+	Active            bool                         `json:"active"`
+	TargetID          string                       `json:"targetId,omitempty"`
+	Mode              string                       `json:"mode,omitempty"`
+	Point             *GeoPoint                    `json:"point,omitempty"`
+	AltitudeM         float64                      `json:"altitudeM,omitempty"`
+	SignalMask        uint16                       `json:"signalMask,omitempty"`
+	StrengthPreset    string                       `json:"strengthPreset,omitempty"`
+	AttenuationDB     int                          `json:"attenuationDB,omitempty"`
+	DelayMode         string                       `json:"delayMode,omitempty"`
+	DelayNS           float64                      `json:"delayNS,omitempty"`
+	DistanceM         float64                      `json:"distanceM,omitempty"`
+	Summary           string                       `json:"summary,omitempty"`
+	UnsupportedReason string                       `json:"unsupportedReason,omitempty"`
+	Circle            *ScreenDeceptionCircleParams `json:"circle,omitempty"`
+	Linear            *ScreenDeceptionLinearParams `json:"linear,omitempty"`
+	Random            *ScreenDeceptionRandomParams `json:"random,omitempty"`
+	SerialActive      bool                         `json:"serialActive"`
+	LastAck           string                       `json:"lastAck,omitempty"`
+	LastError         string                       `json:"lastError,omitempty"`
+}
+
+// ScreenDeceptionStatusPoint 描述诱骗设备状态中的经纬高坐标。
+type ScreenDeceptionStatusPoint struct {
+	Latitude  float64 `json:"latitude"`
+	Longitude float64 `json:"longitude"`
+	AltitudeM float64 `json:"altitudeM"`
+}
+
+// ScreenDeceptionVersionStatus 描述诱骗设备版本信息。
+type ScreenDeceptionVersionStatus struct {
+	Software string `json:"software,omitempty"`
+	FPGA     string `json:"fpga,omitempty"`
+	Protocol string `json:"protocol,omitempty"`
+}
+
+// ScreenDeceptionTargetStatus 描述目标位置查询状态。
+type ScreenDeceptionTargetStatus struct {
+	DistanceM    int32   `json:"distanceM"`
+	HeightM      int32   `json:"heightM"`
+	DirectionDeg float64 `json:"directionDeg"`
+	HeadingDeg   float64 `json:"headingDeg"`
+}
+
+// ScreenDeceptionSpoofCircleStatus 描述诱骗圆周运动查询状态。
+type ScreenDeceptionSpoofCircleStatus struct {
+	DistanceM     int32   `json:"distanceM"`
+	HeightM       int32   `json:"heightM"`
+	DirectionDeg  float64 `json:"directionDeg"`
+	HeadingDeg    float64 `json:"headingDeg"`
+	RadiusM       float64 `json:"radiusM"`
+	PeriodSeconds float64 `json:"periodSeconds"`
+	Direction     string  `json:"direction,omitempty"`
+}
+
+// ScreenDeceptionSuppressionStatus 描述压制/干扰发射查询状态。
+type ScreenDeceptionSuppressionStatus struct {
+	WaveformMask int32 `json:"waveformMask"`
+	TransmitOn   bool  `json:"transmitOn"`
+}
+
+// ScreenDeceptionRandomStatus 描述随机坐标查询状态。
+type ScreenDeceptionRandomStatus struct {
+	Enabled        bool   `json:"enabled"`
+	RadiusM        uint32 `json:"radiusM"`
+	RefreshSeconds uint32 `json:"refreshSeconds"`
+}
+
+// ScreenDeceptionSyncStatus 描述诱骗设备授时同步状态 bit。
+type ScreenDeceptionSyncStatus struct {
+	ReceiverWorking    bool `json:"receiverWorking"`
+	ReceiverPositioned bool `json:"receiverPositioned"`
+	LeapSecondValid    bool `json:"leapSecondValid"`
+	TimeSynced         bool `json:"timeSynced"`
+	AntennaOK          bool `json:"antennaOk"`
+}
+
+// ScreenDeceptionMotionStatus 描述诱骗设备当前运动参数。
+type ScreenDeceptionMotionStatus struct {
+	MaxSpeedMPS              *float64 `json:"maxSpeedMps,omitempty"`
+	InitialSpeedMPS          *float64 `json:"initialSpeedMps,omitempty"`
+	InitialDirectionDeg      *float64 `json:"initialDirectionDeg,omitempty"`
+	AccelerationMPS2         *float64 `json:"accelerationMps2,omitempty"`
+	AccelerationDirectionDeg *float64 `json:"accelerationDirectionDeg,omitempty"`
+	CircleRadiusM            *float64 `json:"circleRadiusM,omitempty"`
+	CirclePeriodSeconds      *float64 `json:"circlePeriodSeconds,omitempty"`
+	CircleDirection          string   `json:"circleDirection,omitempty"`
+}
+
+// ScreenDeceptionAttenuationStatus 描述各星座功率衰减。
+type ScreenDeceptionAttenuationStatus struct {
+	GPS int `json:"gps"`
+	BDS int `json:"bds"`
+	GLO int `json:"glo"`
+	GAL int `json:"gal"`
+}
+
+// ScreenDeceptionDelayStatus 描述各星座信号时延。
+type ScreenDeceptionDelayStatus struct {
+	GPS *float64 `json:"gps,omitempty"`
+	BDS *float64 `json:"bds,omitempty"`
+	GLO *float64 `json:"glo,omitempty"`
+	GAL *float64 `json:"gal,omitempty"`
+}
+
+// ScreenDeceptionSignalWorkStatus 描述设备伪卫星信号工作状态 bit。
+type ScreenDeceptionSignalWorkStatus struct {
+	ClockOK         bool `json:"clockOk"`
+	EphemerisValid  bool `json:"ephemerisValid"`
+	RFModuleOK      bool `json:"rfModuleOk"`
+	SignalTransmit  bool `json:"signalTransmit"`
+	TransmitChannel bool `json:"transmitChannel"`
+	FPGAOK          bool `json:"fpgaOk"`
+	Raw             byte `json:"raw"`
+}
+
+// ScreenDeceptionDeviceSignalStatus 描述查询 0x5D 返回的设备伪卫星状态。
+type ScreenDeceptionDeviceSignalStatus struct {
+	SystemTime             *time.Time                      `json:"systemTime,omitempty"`
+	SignalMask             uint16                          `json:"signalMask"`
+	SignalNames            []string                        `json:"signalNames,omitempty"`
+	DelayNS                float64                         `json:"delayNs"`
+	WorkStatus             ScreenDeceptionSignalWorkStatus `json:"workStatus"`
+	TransmitSwitch         bool                            `json:"transmitSwitch"`
+	AttenuationDB          int                             `json:"attenuationDb"`
+	ReceivedSatelliteCount int                             `json:"receivedSatelliteCount"`
+	ReceivedPRNs           []int                           `json:"receivedPrns,omitempty"`
+	ReceivedCN0            []int                           `json:"receivedCn0,omitempty"`
+	TransmittedCount       int                             `json:"transmittedCount"`
+	TransmittedPRNs        []int                           `json:"transmittedPrns,omitempty"`
+}
+
+// ScreenDeceptionDeviceStatus 返回大屏诱骗设备完整只读状态。
+type ScreenDeceptionDeviceStatus struct {
+	SerialActive             bool                                `json:"serialActive"`
+	UpdatedAt                *time.Time                          `json:"updatedAt,omitempty"`
+	SystemTime               *time.Time                          `json:"systemTime,omitempty"`
+	ReportedSystemTime       *time.Time                          `json:"reportedSystemTime,omitempty"`
+	Version                  *ScreenDeceptionVersionStatus       `json:"version,omitempty"`
+	TransmitMask             *uint16                             `json:"transmitMask,omitempty"`
+	TransmitSignals          []string                            `json:"transmitSignals,omitempty"`
+	AmplifierOn              *bool                               `json:"amplifierOn,omitempty"`
+	AutoTransmit             *bool                               `json:"autoTransmit,omitempty"`
+	FirstTimeSynced          *bool                               `json:"firstTimeSynced,omitempty"`
+	OscillatorState          string                              `json:"oscillatorState,omitempty"`
+	SyncStatus               *ScreenDeceptionSyncStatus          `json:"syncStatus,omitempty"`
+	CurrentPosition          *ScreenDeceptionStatusPoint         `json:"currentPosition,omitempty"`
+	SimulatedPosition        *ScreenDeceptionStatusPoint         `json:"simulatedPosition,omitempty"`
+	QueriedDevicePosition    *ScreenDeceptionStatusPoint         `json:"queriedDevicePosition,omitempty"`
+	QueriedSimulatedPosition *ScreenDeceptionStatusPoint         `json:"queriedSimulatedPosition,omitempty"`
+	TargetPosition           *ScreenDeceptionTargetStatus        `json:"targetPosition,omitempty"`
+	TemperatureC             *float64                            `json:"temperatureC,omitempty"`
+	TimePrecisionNS          *float64                            `json:"timePrecisionNs,omitempty"`
+	UptimeSeconds            *uint32                             `json:"uptimeSeconds,omitempty"`
+	Motion                   *ScreenDeceptionMotionStatus        `json:"motion,omitempty"`
+	Attenuation              *ScreenDeceptionAttenuationStatus   `json:"attenuation,omitempty"`
+	DelayNS                  *float64                            `json:"delayNS,omitempty"`
+	DelayBySignalNS          *ScreenDeceptionDelayStatus         `json:"delayBySignalNs,omitempty"`
+	SpoofCircle              *ScreenDeceptionSpoofCircleStatus   `json:"spoofCircle,omitempty"`
+	Suppression              *ScreenDeceptionSuppressionStatus   `json:"suppression,omitempty"`
+	Random                   *ScreenDeceptionRandomStatus        `json:"random,omitempty"`
+	TimedSearch              *bool                               `json:"timedSearch,omitempty"`
+	DeviceSignal             *ScreenDeceptionDeviceSignalStatus  `json:"deviceSignal,omitempty"`
+	DeviceSignals            []ScreenDeceptionDeviceSignalStatus `json:"deviceSignals,omitempty"`
+	RawDescriptions          map[string]string                   `json:"rawDescriptions"`
+	QueryErrors              map[string]string                   `json:"queryErrors,omitempty"`
+	LastError                string                              `json:"lastError,omitempty"`
+}
+
+// ScreenDeceptionResponse 返回大屏诱骗控制状态和用户提示。
+type ScreenDeceptionResponse struct {
+	State   ScreenDeceptionState `json:"state"`
+	Message string               `json:"message"`
 }
 
 // DeveloperLoginRequest 使用动态码换取短时开发者会话。

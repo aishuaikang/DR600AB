@@ -18,5 +18,12 @@
   "developer.login": "Developer login is active",
   "network.updated": "Network interface configuration updated",
   "network.priority_updated": "Network priority updated",
-  "wifi.connected": "Wi-Fi connection request submitted"
+  "wifi.connected": "Wi-Fi connection request submitted",
+  "deception.session.connecting": "Spoofing serial session is connecting",
+  "deception.session.started": "Spoofing serial session started",
+  "deception.session.stopped": "Spoofing serial session stopped",
+  "deception.session.inactive": "No active spoofing serial session",
+  "deception.started": "Spoofing started",
+  "deception.stopped": "Spoofing stopped",
+  "deception.query.ok": "Spoofing device query succeeded"
 }

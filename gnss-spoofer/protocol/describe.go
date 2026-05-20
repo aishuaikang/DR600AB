@@ -127,19 +127,7 @@ func Hex(data []byte) string {
 }
 
 func FormatSignals(mask uint16) string {
-	names := []string{}
-	if mask&SignalGPSL1CA != 0 {
-		names = append(names, "GPS_L1CA")
-	}
-	if mask&SignalBDSB1I != 0 {
-		names = append(names, "BDS_B1I")
-	}
-	if mask&SignalGLOL1 != 0 {
-		names = append(names, "GLO_L1")
-	}
-	if mask&SignalGALE1 != 0 {
-		names = append(names, "GAL_E1")
-	}
+	names := SignalNames(mask)
 	if len(names) == 0 {
 		return "无"
 	}
@@ -162,8 +150,10 @@ var setCommandNames = map[byte]string{
 	CmdCoordinateControl: "设置诱骗坐标控制",
 	CmdNoFlyZone:         "设置禁飞区",
 	CmdSpoofCircle:       "设置诱骗圆周运动",
+	CmdSuppression:       "设置压制信号发射",
 	CmdRandomPosition:    "设置生成随机坐标",
 	CmdSignalDelay:       "设置信号时延",
+	CmdTimedSearch:       "设置定时搜星使能",
 }
 
 var queryCommandNames = map[byte]string{
@@ -176,10 +166,12 @@ var queryCommandNames = map[byte]string{
 	QueryTargetPosition:    "目标位置",
 	QueryNoFlyZone:         "禁飞区",
 	QuerySpoofCircle:       "诱骗圆周运动",
+	QuerySuppression:       "压制信号发射状态",
 	QueryDeviceSignal:      "设备信号状态",
 	QueryDevicePosition:    "设备位置",
 	QueryRandomPosition:    "随机坐标设置",
 	QuerySignalDelay:       "信号时延",
+	QueryTimedSearch:       "定时搜星开关状态",
 }
 
 func describeReport(cmd byte, body []byte) string {
@@ -203,6 +195,8 @@ func describeReport(cmd byte, body []byte) string {
 		return describeTargetPosition(body)
 	case QuerySpoofCircle:
 		return describeSpoofCircle(body)
+	case QuerySuppression:
+		return describeSuppression(body)
 	case QueryDeviceSignal:
 		return describeSignalStatus(body)
 	case QueryDevicePosition:
@@ -211,6 +205,8 @@ func describeReport(cmd byte, body []byte) string {
 		return describeRandomPosition(body)
 	case QuerySignalDelay:
 		return describeSignalDelay(body)
+	case QueryTimedSearch:
+		return describeTimedSearch(body)
 	}
 	return ""
 }
@@ -252,10 +248,10 @@ func describeVersion(body []byte) string {
 }
 
 func describePowerAttenuation(body []byte) string {
-	if len(body) < 9 {
+	if len(body) < 17 {
 		return ""
 	}
-	return fmt.Sprintf("GPS=%ddB BDS=%ddB GLO=%ddB GAL=%ddB", body[2], body[3], body[4], body[8])
+	return fmt.Sprintf("GPS=%ddB BDS=%ddB GLO=%ddB GAL=%ddB", body[1], body[2], body[3], body[7])
 }
 
 func describeTargetPosition(body []byte) string {
@@ -285,18 +281,31 @@ func describeSpoofCircle(body []byte) string {
 	)
 }
 
+func describeSuppression(body []byte) string {
+	if len(body) < 10 {
+		return ""
+	}
+	return fmt.Sprintf("波形使能=0x%08X 发射=%d",
+		binary.LittleEndian.Uint32(body[2:6]),
+		binary.LittleEndian.Uint32(body[6:10]),
+	)
+}
+
 func describeSignalStatus(body []byte) string {
-	if len(body) < 18 {
+	if len(body) < 90 {
 		return ""
 	}
 	mask := binary.LittleEndian.Uint16(body[8:10])
-	return fmt.Sprintf("%s，时延=%.2fns，工作状态=0x%02X，发射=%d，衰减=%ddB，接收星数=%d",
+	return fmt.Sprintf("%s，时延=%.2fns，工作状态=0x%02X，发射=%d，衰减=%ddB，接收星数=%d，接收PRN=%v，发射星数=%d，发射PRN=%v",
 		describeTime(body, 2),
 		readFloat32(body, 10),
 		body[14],
 		body[15],
 		body[16],
 		body[17],
+		compactPRNs(body[18:42]),
+		body[66],
+		compactPRNs(body[67:91]),
 	) + fmt.Sprintf("，信号=%s", FormatSignals(mask))
 }
 
@@ -321,6 +330,13 @@ func describeSignalDelay(body []byte) string {
 		readFloat32(body, 10),
 		readFloat32(body, 26),
 	)
+}
+
+func describeTimedSearch(body []byte) string {
+	if len(body) < 2 {
+		return ""
+	}
+	return fmt.Sprintf("定时搜星=%d", body[1])
 }
 
 func describeLatLonAlt(body []byte, offset int, latFirst bool) string {

@@ -21,5 +21,19 @@
   "wifi_unavailable": "No available Wi-Fi device was detected, so the feature is disabled",
   "wifi_invalid_config": "Wi-Fi configuration is invalid",
   "user_invalid_location": "Manual device coordinates are invalid",
-  "internal": "Service is temporarily unavailable"
+  "internal": "Service is temporarily unavailable",
+  "deception_port_required": "Select a spoofing serial port",
+  "deception_port_open_failed": "Failed to open spoofing serial port",
+  "deception_serial_inactive": "Spoofing serial port is not connected",
+  "deception_location_required": "Select valid spoofing coordinates",
+  "deception_device_location_required": "Device location is unavailable. Connect GPS or set manual coordinates first",
+  "deception_invalid_attenuation": "Power attenuation must be between 0 and 80 dB",
+  "deception_invalid_mode": "Unsupported spoofing mode",
+  "deception_unsupported_mode": "This spoofing feature is not supported by the current serial protocol",
+  "deception_invalid_signal": "Select at least one valid satellite signal",
+  "deception_invalid_delay": "Signal delay settings are invalid",
+  "deception_invalid_circle": "Circle motion settings are invalid",
+  "deception_invalid_linear": "Linear motion settings are invalid",
+  "deception_invalid_random": "Random coordinate settings are invalid",
+  "deception_invalid_query": "Unsupported spoofing device query item"
 }

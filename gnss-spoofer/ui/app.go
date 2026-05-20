@@ -136,6 +136,10 @@ func (a *App) handleLine(w io.Writer, line string) bool {
 		a.handleSpoofCircle(w, args)
 	case "/random":
 		a.handleRandom(w, args)
+	case "/suppression":
+		a.handleSuppression(w, args)
+	case "/timedsearch":
+		a.handleTimedSearch(w, args)
 	case "/reboot":
 		a.handleReboot(w, args)
 	case "/hex":
@@ -148,21 +152,23 @@ func (a *App) handleLine(w io.Writer, line string) bool {
 
 func (a *App) handleQuery(w io.Writer, args []string) {
 	if len(args) != 1 {
-		fmt.Fprintln(w, "用法: /query status|tx|version|time|power|target|circle|signals|location|random|delay")
+		fmt.Fprintln(w, "用法: /query status|tx|version|time|power|target|circle|suppression|signals|location|random|delay|timedsearch")
 		return
 	}
 	queryMap := map[string]byte{
-		"status":   protocol.QueryDeviceStatus,
-		"tx":       protocol.QueryTransmitSwitch,
-		"version":  protocol.QueryFirmwareVersion,
-		"time":     protocol.QuerySystemTime,
-		"power":    protocol.QueryPowerAttenuation,
-		"target":   protocol.QueryTargetPosition,
-		"circle":   protocol.QuerySpoofCircle,
-		"signals":  protocol.QueryDeviceSignal,
-		"location": protocol.QueryDevicePosition,
-		"random":   protocol.QueryRandomPosition,
-		"delay":    protocol.QuerySignalDelay,
+		"status":      protocol.QueryDeviceStatus,
+		"tx":          protocol.QueryTransmitSwitch,
+		"version":     protocol.QueryFirmwareVersion,
+		"time":        protocol.QuerySystemTime,
+		"power":       protocol.QueryPowerAttenuation,
+		"target":      protocol.QueryTargetPosition,
+		"circle":      protocol.QuerySpoofCircle,
+		"suppression": protocol.QuerySuppression,
+		"signals":     protocol.QueryDeviceSignal,
+		"location":    protocol.QueryDevicePosition,
+		"random":      protocol.QueryRandomPosition,
+		"delay":       protocol.QuerySignalDelay,
+		"timedsearch": protocol.QueryTimedSearch,
 	}
 	query, ok := queryMap[strings.ToLower(args[0])]
 	if !ok {
@@ -368,6 +374,41 @@ func (a *App) handleRandom(w io.Writer, args []string) {
 	})
 }
 
+func (a *App) handleSuppression(w io.Writer, args []string) {
+	if len(args) != 2 {
+		fmt.Fprintln(w, "用法: /suppression <波形掩码> on|off")
+		return
+	}
+	waveformMask, err := parseInt32(args[0])
+	if err != nil {
+		fmt.Fprintln(w, err)
+		return
+	}
+	enabled, err := parseOnOff(args[1])
+	if err != nil {
+		fmt.Fprintln(w, err)
+		return
+	}
+	a.sendAckCommand(w, protocol.CmdSuppression, func() ([]byte, error) {
+		return protocol.BuildSetSuppression(waveformMask, enabled)
+	})
+}
+
+func (a *App) handleTimedSearch(w io.Writer, args []string) {
+	if len(args) != 1 {
+		fmt.Fprintln(w, "用法: /timedsearch on|off")
+		return
+	}
+	enabled, err := parseOnOff(args[0])
+	if err != nil {
+		fmt.Fprintln(w, err)
+		return
+	}
+	a.sendAckCommand(w, protocol.CmdTimedSearch, func() ([]byte, error) {
+		return protocol.BuildSetTimedSearch(enabled)
+	})
+}
+
 func (a *App) handleReboot(w io.Writer, args []string) {
 	if len(args) != 1 || strings.ToLower(args[0]) != "confirm" {
 		fmt.Fprintln(w, "设备重启需要确认: /reboot confirm")
@@ -550,7 +591,7 @@ func parseFloat32(value string) (float32, error) {
 func printHelp(w io.Writer) {
 	fmt.Fprintln(w, "可用命令:")
 	fmt.Fprintln(w, "  /status                                      查询设备状态")
-	fmt.Fprintln(w, "  /query status|tx|version|time|power|target|circle|signals|location|random|delay")
+	fmt.Fprintln(w, "  /query status|tx|version|time|power|target|circle|suppression|signals|location|random|delay|timedsearch")
 	fmt.Fprintln(w, "  /time                                        同步 UTC 系统时间")
 	fmt.Fprintln(w, "  /tx on|off [all|gps,bds,glo,gal]             设置发射开关")
 	fmt.Fprintln(w, "  /atten <0-80dB> [all|gps,bds,glo,gal]        设置功率衰减")
@@ -561,6 +602,8 @@ func printHelp(w io.Writer) {
 	fmt.Fprintln(w, "  /coord <水平步进> <水平方向> <垂直步进> <垂直方向> <持续秒>")
 	fmt.Fprintln(w, "  /circle <距离> <高度> <方向角> <航向角> <半径> <周期> <cw|ccw>")
 	fmt.Fprintln(w, "  /random on|off <半径m> <刷新周期s>            设置随机坐标")
+	fmt.Fprintln(w, "  /suppression <波形掩码> on|off               设置压制信号发射")
+	fmt.Fprintln(w, "  /timedsearch on|off                          设置定时搜星使能")
 	fmt.Fprintln(w, "  /reboot confirm                              重启设备")
 	fmt.Fprintln(w, "  /hex EB 90 ...                               发送原始十六进制帧")
 	fmt.Fprintln(w, "  exit                                         退出")

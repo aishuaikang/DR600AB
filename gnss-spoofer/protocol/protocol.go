@@ -13,7 +13,7 @@ const (
 	HeaderSecond byte = 0x90
 
 	HostAddress   byte = 0x63
-	DeviceAddress byte = 0x67
+	DeviceAddress byte = 0x44
 	ReservedByte  byte = 0xFF
 )
 

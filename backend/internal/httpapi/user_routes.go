@@ -61,10 +61,12 @@ func (s *Server) handleUpdateUserSettings(c *fiber.Ctx) error {
 		)
 	}
 	req.ScreenStrikeChannelLabels = normalizeScreenStrikeChannelLabels(req.ScreenStrikeChannelLabels)
+	req.DeviceSN = ""
 	if s.userSettings == nil {
 		return c.JSON(req)
 	}
-	if err := s.userSettings.SaveUser(req); err != nil {
+	saved, err := s.userSettings.SaveEditableUser(req)
+	if err != nil {
 		return s.respondError(
 			c,
 			fiber.StatusInternalServerError,
@@ -73,7 +75,7 @@ func (s *Server) handleUpdateUserSettings(c *fiber.Ctx) error {
 			err.Error(),
 		)
 	}
-	return c.JSON(req)
+	return c.JSON(saved)
 }
 
 func validGeoPoint(point *model.GeoPoint) bool {

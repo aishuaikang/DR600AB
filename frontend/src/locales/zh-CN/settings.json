@@ -7,6 +7,9 @@
   "customTitleHint": "留空或恢复默认后，将使用当前语言的默认系统标题。",
   "preview": "预览",
   "restoreDefault": "恢复默认",
+  "deviceSnTitle": "设备唯一 SN",
+  "deviceSnDescription": "由侦测板卡报文中的 device 字段自动获取；首次出现后保存，后续变化会自动更新。",
+  "deviceSnField": "当前 SN",
   "manualDeviceLocationTitle": "设备手动坐标",
   "manualDeviceLocationDescription": "GPS 无有效定位时，大屏地图使用这里保存的设备经纬度；GPS 有效时仍优先使用 GPS。",
   "manualDeviceLocationHint": "坐标按 WGS84 经纬度填写。纬度范围 -90 到 90，经度范围 -180 到 180。",
@@ -119,5 +122,11 @@
   "wifiSignalWeak": "较弱",
   "wifiSignalNone": "无信号",
   "wifiOpen": "开放网络",
-  "wifiConnect": "连接 Wi-Fi"
+  "wifiConnect": "连接 Wi-Fi",
+  "deceptionSerialTitle": "诱骗设备串口",
+  "deceptionSerialDescription": "配置 GNSS 信号源串口，用于大屏诱骗启动、停止和状态反显。",
+  "deceptionSessionTitle": "诱骗会话",
+  "deceptionPort": "诱骗串口",
+  "selectDeceptionPort": "选择诱骗串口",
+  "deceptionLastError": "最近错误"
 }

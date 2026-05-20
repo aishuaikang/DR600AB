@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 
 	"dr600ab-api/internal/model"
@@ -20,6 +21,7 @@ type Store struct {
 type savedSettings struct {
 	Detection model.DetectionSessionRequest `json:"detection"`
 	GPS       model.GPSSessionRequest       `json:"gps"`
+	Deception model.DeceptionSessionRequest `json:"deception"`
 	Network   model.NetworkSettings         `json:"network"`
 	User      model.UserSettings            `json:"user"`
 }
@@ -95,6 +97,39 @@ func (s *Store) SaveGPS(req model.GPSSessionRequest) error {
 	return s.save(settings)
 }
 
+// LoadDeception 在文件存在时读取已持久化的 GNSS 诱骗串口设置。
+func (s *Store) LoadDeception() (model.DeceptionSessionRequest, bool, error) {
+	if s == nil || s.path == "" {
+		return model.DeceptionSessionRequest{}, false, nil
+	}
+
+	settings, ok, err := s.load()
+	if err != nil || !ok {
+		return model.DeceptionSessionRequest{}, false, err
+	}
+	if isEmptyDeceptionSettings(settings.Deception) {
+		return model.DeceptionSessionRequest{}, false, nil
+	}
+	return settings.Deception, true, nil
+}
+
+// SaveDeception 以原子方式将 GNSS 诱骗串口设置写入磁盘。
+func (s *Store) SaveDeception(req model.DeceptionSessionRequest) error {
+	if s == nil || s.path == "" {
+		return nil
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	settings, _, err := s.load()
+	if err != nil {
+		return err
+	}
+	settings.Deception = req
+	return s.save(settings)
+}
+
 // LoadNetwork 在文件存在时读取已持久化的网络设置。
 func (s *Store) LoadNetwork() (model.NetworkSettings, bool, error) {
 	if s == nil || s.path == "" {
@@ -161,6 +196,50 @@ func (s *Store) SaveUser(req model.UserSettings) error {
 	return s.save(settings)
 }
 
+// SaveEditableUser 保存前端可编辑的公开用户设置，并保留后端自动维护的字段。
+func (s *Store) SaveEditableUser(req model.UserSettings) (model.UserSettings, error) {
+	req.DeviceSN = ""
+	if s == nil || s.path == "" {
+		return req, nil
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	settings, _, err := s.load()
+	if err != nil {
+		return model.UserSettings{}, err
+	}
+	req.DeviceSN = settings.User.DeviceSN
+	settings.User = req
+	settings = normalizeSavedSettings(settings)
+	if err := s.save(settings); err != nil {
+		return model.UserSettings{}, err
+	}
+	return settings.User, nil
+}
+
+// SaveUserDeviceSN 保存侦测板卡上报的设备唯一 SN，并保留其他用户设置。
+func (s *Store) SaveUserDeviceSN(deviceSN string) error {
+	deviceSN = strings.TrimSpace(deviceSN)
+	if s == nil || s.path == "" || deviceSN == "" {
+		return nil
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	settings, _, err := s.load()
+	if err != nil {
+		return err
+	}
+	if settings.User.DeviceSN == deviceSN {
+		return nil
+	}
+	settings.User.DeviceSN = deviceSN
+	return s.save(settings)
+}
+
 func (s *Store) load() (savedSettings, bool, error) {
 	data, err := os.ReadFile(s.path)
 	if err != nil {
@@ -174,6 +253,7 @@ func (s *Store) load() (savedSettings, bool, error) {
 	if err := json.Unmarshal(data, &settings); err == nil {
 		if !isEmptyDetectionSettings(settings.Detection) ||
 			!isEmptyGPSSettings(settings.GPS) ||
+			!isEmptyDeceptionSettings(settings.Deception) ||
 			!isEmptyNetworkSettings(settings.Network) ||
 			!isEmptyUserSettings(settings.User) {
 			return settings, true, nil
@@ -233,12 +313,23 @@ func isEmptyGPSSettings(req model.GPSSessionRequest) bool {
 		!req.AutoConnect
 }
 
+func isEmptyDeceptionSettings(req model.DeceptionSessionRequest) bool {
+	return req.PortName == "" &&
+		req.BaudRate == 0 &&
+		req.DataBits == 0 &&
+		req.StopBits == 0 &&
+		req.Parity == "" &&
+		req.ReadTimeoutMs == 0 &&
+		!req.AutoConnect
+}
+
 func isEmptyNetworkSettings(req model.NetworkSettings) bool {
 	return len(req.Priorities) == 0
 }
 
 func isEmptyUserSettings(req model.UserSettings) bool {
-	return req.ManualDeviceLocation == nil &&
+	return req.DeviceSN == "" &&
+		req.ManualDeviceLocation == nil &&
 		len(req.ScreenStrikeChannelLabels) == 0
 }
 

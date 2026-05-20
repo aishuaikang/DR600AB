@@ -2,6 +2,10 @@ import type {
   ApiErrorPayload,
   ChannelsResponse,
   DetectionRecord,
+  DeceptionSessionRequest,
+  DeceptionSessionResponse,
+  DeceptionQueryResponse,
+  DeceptionSettings,
   DetectionSessionRequest,
   DetectionSessionResponse,
   DetectionSettings,
@@ -26,6 +30,10 @@ import type {
   PortsResponse,
   ScreenDetectionTarget,
   ScreenDeviceLocationResponse,
+  ScreenDeceptionDeviceStatus,
+  ScreenDeceptionRequest,
+  ScreenDeceptionResponse,
+  ScreenDeceptionState,
   ScreenPositionTarget,
   ScreenStrikeRequest,
   ScreenStrikeResponse,
@@ -176,6 +184,40 @@ export function updateGPSSettings(
   }, locale);
 }
 
+export function getDeceptionSession(locale: string, developerToken: string): Promise<DeceptionSessionResponse> {
+  return requestJson<DeceptionSessionResponse>("/deception/session", {
+    headers: developerHeaders(developerToken),
+  }, locale);
+}
+
+export function getDeceptionSettings(locale: string, developerToken: string): Promise<DeceptionSettings> {
+  return requestJson<DeceptionSettings>("/deception/settings", {
+    headers: developerHeaders(developerToken),
+  }, locale);
+}
+
+export function updateDeceptionSettings(
+  payload: DeceptionSessionRequest,
+  locale: string,
+  developerToken: string,
+): Promise<DeceptionSessionResponse> {
+  return requestJson<DeceptionSessionResponse>("/deception/settings", {
+    method: "PUT",
+    headers: developerHeaders(developerToken),
+    body: JSON.stringify(payload),
+  }, locale);
+}
+
+export function queryDeceptionDevice(
+  item: string,
+  locale: string,
+  developerToken: string,
+): Promise<DeceptionQueryResponse> {
+  return requestJson<DeceptionQueryResponse>(`/deception/query/${encodeURIComponent(item)}`, {
+    headers: developerHeaders(developerToken),
+  }, locale);
+}
+
 export function getDetections(
   locale: string,
   developerToken: string,
@@ -225,14 +267,30 @@ export function getScreenStrike(locale?: string): Promise<ScreenStrikeState> {
   return requestJson<ScreenStrikeState>("/screen/strike", {}, locale);
 }
 
+export function getScreenDeception(locale?: string): Promise<ScreenDeceptionState> {
+  return requestJson<ScreenDeceptionState>("/screen/deception", {}, locale);
+}
+
+export function getScreenDeceptionStatus(locale?: string): Promise<ScreenDeceptionDeviceStatus> {
+  return requestJson<ScreenDeceptionDeviceStatus>("/screen/deception/status", {}, locale);
+}
+
 export function updateScreenStrike(
   payload: ScreenStrikeRequest,
   locale: string,
-  developerToken: string,
 ): Promise<ScreenStrikeResponse> {
   return requestJson<ScreenStrikeResponse>("/screen/strike", {
     method: "POST",
-    headers: developerHeaders(developerToken),
+    body: JSON.stringify(payload),
+  }, locale);
+}
+
+export function updateScreenDeception(
+  payload: ScreenDeceptionRequest,
+  locale: string,
+): Promise<ScreenDeceptionResponse> {
+  return requestJson<ScreenDeceptionResponse>("/screen/deception", {
+    method: "POST",
     body: JSON.stringify(payload),
   }, locale);
 }
@@ -357,6 +415,9 @@ export function openDetectionStream(locale: string, developerToken: string, hand
   bind("gps.session.stopped", handlers.onGPSSessionStopped);
   bind("gps.session.connecting", handlers.onGPSSessionState);
   bind("gps.session.reconnecting", handlers.onGPSSessionState);
+  bind("deception.session.started", handlers.onDeceptionSessionStarted);
+  bind("deception.session.stopped", handlers.onDeceptionSessionStopped);
+  bind("deception.session.connecting", handlers.onDeceptionSessionState);
   bind("gps.record", handlers.onGPSRecord);
   bind("detection.parsed", handlers.onParsed);
   bind("detection.record", handlers.onDetection);
@@ -393,6 +454,13 @@ export function openScreenStream(handlers: ScreenStreamHandlers): () => void {
     const event = parseStreamEvent<ScreenStrikeState>((message as MessageEvent<string>).data);
     if (event) {
       handlers.onStrikeUpdated?.(event);
+    }
+  });
+
+  source.addEventListener("screen.deception.updated", (message) => {
+    const event = parseStreamEvent<ScreenDeceptionState>((message as MessageEvent<string>).data);
+    if (event) {
+      handlers.onDeceptionUpdated?.(event);
     }
   });
 

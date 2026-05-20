@@ -7,6 +7,9 @@
   "customTitleHint": "Leave empty or restore the default to use the localized system title.",
   "preview": "Preview",
   "restoreDefault": "Restore Default",
+  "deviceSnTitle": "Device Unique SN",
+  "deviceSnDescription": "Automatically captured from the detection board message device field. It is saved after first appearance and updates when the value changes.",
+  "deviceSnField": "Current SN",
   "manualDeviceLocationTitle": "Manual Device Coordinates",
   "manualDeviceLocationDescription": "When GPS has no valid fix, the situation screen map uses this saved device coordinate. Valid GPS still takes priority.",
   "manualDeviceLocationHint": "Use WGS84 latitude and longitude. Latitude range is -90 to 90; longitude range is -180 to 180.",
@@ -119,5 +122,11 @@
   "wifiSignalWeak": "Weak",
   "wifiSignalNone": "No signal",
   "wifiOpen": "Open network",
-  "wifiConnect": "Connect Wi-Fi"
+  "wifiConnect": "Connect Wi-Fi",
+  "deceptionSerialTitle": "Spoofing Serial Port",
+  "deceptionSerialDescription": "Configure the GNSS signal-source serial port for screen spoofing control and status.",
+  "deceptionSessionTitle": "Spoofing Session",
+  "deceptionPort": "Spoofing Port",
+  "selectDeceptionPort": "Select spoofing port",
+  "deceptionLastError": "Last Error"
 }

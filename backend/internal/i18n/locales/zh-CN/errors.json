@@ -21,5 +21,19 @@
   "wifi_unavailable": "未检测到可用 Wi-Fi 设备，功能已禁用",
   "wifi_invalid_config": "Wi-Fi 配置参数不合法",
   "user_invalid_location": "设备手动坐标不合法",
-  "internal": "服务暂时不可用"
+  "internal": "服务暂时不可用",
+  "deception_port_required": "请选择诱骗设备串口",
+  "deception_port_open_failed": "打开诱骗设备串口失败",
+  "deception_serial_inactive": "诱骗设备串口未连接",
+  "deception_location_required": "请选择有效的诱骗坐标",
+  "deception_device_location_required": "设备位置不可用，请先接入 GPS 或在用户设置中填写手动坐标",
+  "deception_invalid_attenuation": "功率衰减必须在 0 到 80 dB 之间",
+  "deception_invalid_mode": "不支持的诱骗模式",
+  "deception_unsupported_mode": "当前串口协议暂未支持该诱骗功能",
+  "deception_invalid_signal": "请选择至少一种有效卫星信号",
+  "deception_invalid_delay": "信号时延参数不合法",
+  "deception_invalid_circle": "圆周运动参数不合法",
+  "deception_invalid_linear": "匀速/加速运动参数不合法",
+  "deception_invalid_random": "随机坐标参数不合法",
+  "deception_invalid_query": "不支持的诱骗设备查询项"
 }

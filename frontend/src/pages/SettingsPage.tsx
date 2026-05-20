@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import type { TFunction } from "i18next";
-import { Check, Globe2, Map as MapIcon, RefreshCw, Satellite } from "lucide-react";
+import { Check, Globe2, Map as MapIcon, RefreshCw, Satellite, SatelliteDish } from "lucide-react";
 
 import { BannerAlert } from "../components/BannerAlert";
 import { InfoTile } from "../components/InfoTile";
@@ -8,7 +8,7 @@ import { Panel, PanelBody } from "../components/Panel";
 import { PortSelect } from "../components/PortSelect";
 import { SectionHeader } from "../components/SectionHeader";
 import type { Banner } from "../app/types";
-import type { GPSSessionResponse, PortInfo, UserSettings } from "../types";
+import type { DeceptionSessionResponse, GPSSessionResponse, PortInfo, UserSettings } from "../types";
 import { cx } from "../utils/classnames";
 import { fullLocaleName } from "../utils/locales";
 import { extractErrorMessage } from "../utils/session";
@@ -27,6 +27,7 @@ export function SettingsPage({
   selectedSendPort,
   selectedGPSDataPort,
   selectedGPSControlPort,
+  selectedDeceptionPort,
   sessionStateLabel,
   currentReceivePort,
   currentSendPort,
@@ -35,6 +36,9 @@ export function SettingsPage({
   gpsSessionStateLabel,
   currentGPSDataPort,
   currentGPSControlPort,
+  deceptionSession,
+  deceptionSessionStateLabel,
+  currentDeceptionPort,
   allLocaleOptions,
   visibleLocales,
   currentLocale,
@@ -47,6 +51,7 @@ export function SettingsPage({
   onSendPortChange,
   onGPSDataPortChange,
   onGPSControlPortChange,
+  onDeceptionPortChange,
   onUserSettingsChange,
   onVisibleLocalesChange,
   onVisibleMapLayersChange,
@@ -57,6 +62,7 @@ export function SettingsPage({
   selectedSendPort: string;
   selectedGPSDataPort: string;
   selectedGPSControlPort: string;
+  selectedDeceptionPort: string;
   sessionStateLabel: string;
   currentReceivePort: string;
   currentSendPort: string;
@@ -65,6 +71,9 @@ export function SettingsPage({
   gpsSessionStateLabel: string;
   currentGPSDataPort: string;
   currentGPSControlPort: string;
+  deceptionSession: DeceptionSessionResponse | null;
+  deceptionSessionStateLabel: string;
+  currentDeceptionPort: string;
   allLocaleOptions: string[];
   visibleLocales: string[];
   currentLocale: string;
@@ -77,6 +86,7 @@ export function SettingsPage({
   onSendPortChange: (value: string) => void;
   onGPSDataPortChange: (value: string) => void;
   onGPSControlPortChange: (value: string) => void;
+  onDeceptionPortChange: (value: string) => void;
   onUserSettingsChange: (settings: UserSettings) => Promise<UserSettings>;
   onVisibleLocalesChange: (locales: string[]) => void;
   onVisibleMapLayersChange: (layers: ReferenceMapLayer[]) => void;
@@ -178,6 +188,38 @@ export function SettingsPage({
             </div>
           </div>
           {banner.kind === "error" ? <BannerAlert banner={banner} /> : null}
+        </PanelBody>
+      </Panel>
+
+      <Panel>
+        <PanelBody>
+          <SectionHeader
+            title={t("deceptionSerialTitle", { ns: "settings" })}
+            description={t("deceptionSerialDescription", { ns: "settings" })}
+            action={
+              <span className="inline-flex h-8 items-center gap-2 rounded-xl border border-info/25 bg-info/10 px-3 text-xs font-semibold text-info">
+                <SatelliteDish size={15} />
+                GNSS
+              </span>
+            }
+          />
+
+          <div className="grid gap-3 md:grid-cols-3">
+            <InfoTile label={t("deceptionSessionTitle", { ns: "settings" })}>
+              {deceptionSessionStateLabel}
+            </InfoTile>
+            <InfoTile label={t("deceptionPort", { ns: "settings" })} value={currentDeceptionPort || t("unknown", { ns: "common" })} />
+            <InfoTile label={t("deceptionLastError", { ns: "settings" })} value={deceptionSession?.lastError || "-"} />
+          </div>
+
+          <PortSelect
+            label={t("deceptionPort", { ns: "settings" })}
+            placeholder={t("selectDeceptionPort", { ns: "settings" })}
+            value={selectedDeceptionPort}
+            ports={ports}
+            activeText={t("active", { ns: "common" })}
+            onChange={onDeceptionPortChange}
+          />
         </PanelBody>
       </Panel>
 

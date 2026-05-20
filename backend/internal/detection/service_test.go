@@ -630,7 +630,8 @@ func TestIngestLineStoresHeartbeatAsParsedOnly(t *testing.T) {
 		t.Fatalf("i18n.New() error = %v", err)
 	}
 	st := store.NewMemoryStore(10, 10)
-	svc := NewService(st, tr, settings.NewStore(filepath.Join(t.TempDir(), "settings.json")), Options{})
+	settingsStore := settings.NewStore(filepath.Join(t.TempDir(), "settings.json"))
+	svc := NewService(st, tr, settingsStore, Options{})
 
 	svc.IngestLine("session-1", "/dev/ttyUSB0", "#=84, device=10125, Heart Beat, 879,  0")
 
@@ -640,6 +641,103 @@ func TestIngestLineStoresHeartbeatAsParsedOnly(t *testing.T) {
 	records := svc.Records(10)
 	if got := len(records); got != 0 {
 		t.Fatalf("detection count = %d, want 0", got)
+	}
+	userSettings, ok, err := settingsStore.LoadUser()
+	if err != nil || !ok {
+		t.Fatalf("LoadUser() = %+v, %v, %v", userSettings, ok, err)
+	}
+	if userSettings.DeviceSN != "10125" {
+		t.Fatalf("device SN = %q, want 10125", userSettings.DeviceSN)
+	}
+}
+
+func TestIngestLineUpdatesDeviceSNFromDeviceMessages(t *testing.T) {
+	tr, err := i18n.New("zh-CN")
+	if err != nil {
+		t.Fatalf("i18n.New() error = %v", err)
+	}
+	settingsStore := settings.NewStore(filepath.Join(t.TempDir(), "settings.json"))
+	initial := model.UserSettings{
+		DeviceSN:                  "old-sn",
+		ManualDeviceLocation:      &model.GeoPoint{Latitude: 23.12911, Longitude: 113.264385},
+		ScreenStrikeChannelLabels: []string{"2.4G", "5.2G"},
+	}
+	if err := settingsStore.SaveUser(initial); err != nil {
+		t.Fatalf("SaveUser() error = %v", err)
+	}
+	svc := NewService(store.NewMemoryStore(10, 10), tr, settingsStore, Options{})
+
+	tests := []struct {
+		name string
+		line string
+		want string
+	}{
+		{
+			name: "detect",
+			line: "device=10125, model=PAL Analog, freq=5865.0, rssi=-56.9",
+			want: "10125",
+		},
+		{
+			name: "did plain",
+			line: "num=672/3/1, device=20250, serial=0M6CH6AR0A100L, model=41-Mavic 2, uuid=176344372408408473, drone_GPS=31.200000,121.400000, home_GPS=31.190000,121.390000, pilot_GPS=31.210000,121.410000, Height=50, Altitude=110.0,EastV=3.0, NothV=4.0,UpV=0.0, freq=5796.5, rssi=-78, distance=0.0km,",
+			want: "20250",
+		},
+		{
+			name: "did encrypted",
+			line: "#=632/3/1, device=30375, Encypted Mavic_O4_ID=875bb45f, freq=2429.5, rssi=-64, byte,15,1b,9b,58,f0,d9",
+			want: "30375",
+		},
+		{
+			name: "heartbeat",
+			line: "#=84, device=40400, Heart Beat, 879,  0",
+			want: "40400",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			svc.IngestLine("session-1", "/dev/ttyUSB0", tt.line)
+
+			got, ok, err := settingsStore.LoadUser()
+			if err != nil || !ok {
+				t.Fatalf("LoadUser() = %+v, %v, %v", got, ok, err)
+			}
+			if got.DeviceSN != tt.want {
+				t.Fatalf("device SN = %q, want %q", got.DeviceSN, tt.want)
+			}
+			if got.ManualDeviceLocation == nil ||
+				got.ManualDeviceLocation.Latitude != initial.ManualDeviceLocation.Latitude ||
+				got.ManualDeviceLocation.Longitude != initial.ManualDeviceLocation.Longitude {
+				t.Fatalf("manual location = %+v, want preserved", got.ManualDeviceLocation)
+			}
+			if len(got.ScreenStrikeChannelLabels) != len(initial.ScreenStrikeChannelLabels) ||
+				got.ScreenStrikeChannelLabels[0] != initial.ScreenStrikeChannelLabels[0] ||
+				got.ScreenStrikeChannelLabels[1] != initial.ScreenStrikeChannelLabels[1] {
+				t.Fatalf("strike labels = %+v, want preserved", got.ScreenStrikeChannelLabels)
+			}
+		})
+	}
+}
+
+func TestIngestLineDoesNotClearDeviceSNFromEmptyDevice(t *testing.T) {
+	tr, err := i18n.New("zh-CN")
+	if err != nil {
+		t.Fatalf("i18n.New() error = %v", err)
+	}
+	settingsStore := settings.NewStore(filepath.Join(t.TempDir(), "settings.json"))
+	if err := settingsStore.SaveUser(model.UserSettings{DeviceSN: "10125"}); err != nil {
+		t.Fatalf("SaveUser() error = %v", err)
+	}
+	svc := NewService(store.NewMemoryStore(10, 10), tr, settingsStore, Options{})
+
+	svc.IngestLine("session-1", "/dev/ttyUSB0", "model=PAL Analog, freq=5865.0, rssi=-56.9")
+
+	got, ok, err := settingsStore.LoadUser()
+	if err != nil || !ok {
+		t.Fatalf("LoadUser() = %+v, %v, %v", got, ok, err)
+	}
+	if got.DeviceSN != "10125" {
+		t.Fatalf("device SN = %q, want preserved 10125", got.DeviceSN)
 	}
 }
 

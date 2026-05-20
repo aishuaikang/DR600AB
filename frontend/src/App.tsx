@@ -4,6 +4,8 @@ import { useTranslation } from "react-i18next";
 import {
   createDeveloperSessionRequest,
   deleteDeveloperSessionRequest,
+  getDeceptionSession,
+  getDeceptionSettings,
   getChannels,
   getDetectionSettings,
   getDetections,
@@ -19,6 +21,7 @@ import {
   setChannelState,
   setUnauthorizedHandler,
   updateDetectionSettings,
+  updateDeceptionSettings,
   updateGPSSettings,
   updateUserSettings,
 } from "./api";
@@ -43,6 +46,7 @@ import { referenceMapLayers } from "./pages/screenData";
 import type {
   DetectionSessionResponse,
   DetectionRecord,
+  DeceptionSessionResponse,
   DebugRecordPage,
   GpioChannel,
   GPSRecord,
@@ -98,6 +102,7 @@ function App() {
   const [ports, setPorts] = useState<PortInfo[]>([]);
   const [session, setSession] = useState<DetectionSessionResponse | null>(null);
   const [gpsSession, setGPSSession] = useState<GPSSessionResponse | null>(null);
+  const [deceptionSession, setDeceptionSession] = useState<DeceptionSessionResponse | null>(null);
   const [detections, setDetections] = useState<DetectionRecord[]>([]);
   const [messages, setMessages] = useState<ParsedMessage[]>([]);
   const [gpsRecords, setGPSRecords] = useState<GPSRecord[]>([]);
@@ -107,6 +112,7 @@ function App() {
   const [selectedSendPort, setSelectedSendPort] = useState("");
   const [selectedGPSDataPort, setSelectedGPSDataPort] = useState("");
   const [selectedGPSControlPort, setSelectedGPSControlPort] = useState("");
+  const [selectedDeceptionPort, setSelectedDeceptionPort] = useState("");
   const [messageSearch, setMessageSearch] = useState("");
   const [banner, setBanner] = useState<Banner>({ kind: "idle", message: "" });
   const [gpsBanner, setGPSBanner] = useState<Banner>({ kind: "idle", message: "" });
@@ -116,6 +122,7 @@ function App() {
   const [channelBusyId, setChannelBusyId] = useState("");
   const lastAppliedSerialRef = useRef("");
   const lastAppliedGPSRef = useRef("");
+  const lastAppliedDeceptionRef = useRef("");
   const developerActive = Boolean(developerSession);
   const developerToken = developerSession?.token ?? "";
   const debugAccessBlocked = !developerActive && isDebugPage(page);
@@ -137,11 +144,18 @@ function App() {
     setSelectedGPSControlPort(nextControlPort);
   }, []);
 
+  const syncDeceptionSelection = useCallback((port: string) => {
+    const nextPort = port.trim();
+    lastAppliedDeceptionRef.current = nextPort;
+    setSelectedDeceptionPort(nextPort);
+  }, []);
+
   const handleUnauthorized = useCallback((error: Error) => {
     clearDeveloperSession();
     setDeveloperSession(null);
     setSession(null);
     setGPSSession(null);
+    setDeceptionSession(null);
     setDetections([]);
     setMessages([]);
     setGPSRecords([]);
@@ -172,13 +186,15 @@ function App() {
       const channelsPromise = developerActive
         ? getChannels(locale, developerToken)
         : Promise.resolve({ channels: [] as GpioChannel[], count: 0 });
-      const [metaRes, portsRes, sessionRes, gpsSessionRes, settingsRes, gpsSettingsRes, parsedRes, detectionsRes, channelsRes] = await Promise.all([
+      const [metaRes, portsRes, sessionRes, gpsSessionRes, deceptionSessionRes, settingsRes, gpsSettingsRes, deceptionSettingsRes, parsedRes, detectionsRes, channelsRes] = await Promise.all([
         getLocales(),
         getPorts(locale, developerToken),
         getSession(locale, developerToken),
         getGPSSession(locale, developerToken),
+        getDeceptionSession(locale, developerToken),
         getDetectionSettings(locale, developerToken),
         getGPSSettings(locale, developerToken),
+        getDeceptionSettings(locale, developerToken),
         parsedPromise,
         detectionsPromise,
         channelsPromise,
@@ -188,6 +204,7 @@ function App() {
       setPorts(portsRes.ports);
       setSession(sessionRes);
       setGPSSession(gpsSessionRes);
+      setDeceptionSession(deceptionSessionRes);
       setMessages(parsedRes.items);
       setDetections(detectionsRes.items);
       setChannels(normalizeGpioChannels(channelsRes.channels));
@@ -196,6 +213,7 @@ function App() {
       syncSerialSelection(receivePort, sendPort);
       const { dataPort, controlPort } = resolveInitialGPSPorts(gpsSessionRes, gpsSettingsRes, portsRes.ports);
       syncGPSSelection(dataPort, controlPort);
+      syncDeceptionSelection(deceptionSessionRes.portName || deceptionSettingsRes.portName || "");
       setBanner({
         kind: sessionBannerKind(sessionRes),
         message: sessionBannerText(sessionRes, sessionRes.active ? t("active", { ns: "common" }) : t("idle", { ns: "common" })),
@@ -209,7 +227,7 @@ function App() {
     } finally {
       setRuntimeLoading(false);
     }
-  }, [developerActive, developerToken, locale, syncGPSSelection, syncSerialSelection, t]);
+  }, [developerActive, developerToken, locale, syncDeceptionSelection, syncGPSSelection, syncSerialSelection, t]);
 
   const loadGPSRecords = useCallback(async () => {
     if (!developerActive) {
@@ -255,6 +273,17 @@ function App() {
   useEffect(() => {
     void loadUserSettings();
   }, [loadUserSettings]);
+
+  useEffect(() => {
+    if (page !== "settings") {
+      return;
+    }
+    void loadUserSettings();
+    const timer = window.setInterval(() => {
+      void loadUserSettings();
+    }, 3000);
+    return () => window.clearInterval(timer);
+  }, [loadUserSettings, page]);
 
   useEffect(() => {
     if (!needsRuntimeData) {
@@ -411,6 +440,48 @@ function App() {
     if (!needsRuntimeData) {
       return;
     }
+    const portName = selectedDeceptionPort.trim();
+    if (!portName) {
+      return;
+    }
+    if (portName === lastAppliedDeceptionRef.current) {
+      return;
+    }
+
+    const timer = window.setTimeout(() => {
+      void (async () => {
+        try {
+          setBanner({ kind: "loading", message: t("loading", { ns: "common" }) });
+          const response = await updateDeceptionSettings(
+            {
+              portName,
+              baudRate: FIXED_SERIAL_PROFILE.baudRate,
+              dataBits: FIXED_SERIAL_PROFILE.dataBits,
+              stopBits: FIXED_SERIAL_PROFILE.stopBits,
+              parity: FIXED_SERIAL_PROFILE.parity,
+              readTimeoutMs: FIXED_SERIAL_PROFILE.readTimeoutMs,
+              autoConnect: true,
+            },
+            locale,
+            developerToken,
+          );
+          lastAppliedDeceptionRef.current = portName;
+          setDeceptionSession(response);
+          setBanner({ kind: response.active ? "success" : "idle", message: response.message || t("active", { ns: "common" }) });
+          await bootstrap();
+        } catch (error) {
+          setBanner({ kind: "error", message: extractErrorMessage(error, t("unexpectedError", { ns: "common" })) });
+        }
+      })();
+    }, 350);
+
+    return () => window.clearTimeout(timer);
+  }, [bootstrap, developerToken, locale, needsRuntimeData, selectedDeceptionPort, t]);
+
+  useEffect(() => {
+    if (!needsRuntimeData) {
+      return;
+    }
     const close = openDetectionStream(locale, developerToken, {
       onSessionStarted: (event) => {
         if (event.payload) {
@@ -496,6 +567,24 @@ function App() {
           });
         }
       },
+      onDeceptionSessionStarted: (event) => {
+        if (event.payload) {
+          setDeceptionSession(event.payload);
+          syncDeceptionSelection(event.payload.portName || "");
+        }
+      },
+      onDeceptionSessionStopped: (event) => {
+        if (event.payload) {
+          setDeceptionSession(event.payload);
+          syncDeceptionSelection(event.payload.portName || "");
+        }
+      },
+      onDeceptionSessionState: (event) => {
+        if (event.payload) {
+          setDeceptionSession(event.payload);
+          syncDeceptionSelection(event.payload.portName || "");
+        }
+      },
       onGPSRecord: (event) => {
         if (event.payload) {
           setGPSSession((current) => current ? {
@@ -530,7 +619,7 @@ function App() {
     });
 
     return close;
-  }, [developerActive, developerToken, locale, needsRuntimeData, syncGPSSelection, syncSerialSelection, t]);
+  }, [developerActive, developerToken, locale, needsRuntimeData, syncDeceptionSelection, syncGPSSelection, syncSerialSelection, t]);
 
   const sessionActive = Boolean(session?.active);
   const sessionStateLabel = session
@@ -544,6 +633,11 @@ function App() {
     : t("idle", { ns: "common" });
   const currentGPSDataPort = gpsSession?.dataPortName || gpsSession?.portName || selectedGPSDataPort;
   const currentGPSControlPort = gpsSession?.controlPortName || selectedGPSControlPort;
+  const deceptionActive = Boolean(deceptionSession?.active);
+  const deceptionSessionStateLabel = deceptionSession
+    ? deceptionSession.message || (deceptionActive ? t("active", { ns: "common" }) : t("idle", { ns: "common" }))
+    : t("idle", { ns: "common" });
+  const currentDeceptionPort = deceptionSession?.portName || selectedDeceptionPort;
   const defaultAppTitle = t("app.title", { ns: "common" });
   const appTitle = storedSettings.appTitle.trim() || defaultAppTitle;
   const allLocaleOptions = meta?.supportedLocales.length ? meta.supportedLocales : supportedLocales;
@@ -770,6 +864,7 @@ function App() {
                     selectedSendPort={selectedSendPort}
                     selectedGPSDataPort={selectedGPSDataPort}
                     selectedGPSControlPort={selectedGPSControlPort}
+                    selectedDeceptionPort={selectedDeceptionPort}
                     sessionStateLabel={sessionStateLabel}
                     currentReceivePort={currentReceivePort}
                     currentSendPort={currentSendPort}
@@ -778,6 +873,9 @@ function App() {
                     gpsSessionStateLabel={gpsSessionStateLabel}
                     currentGPSDataPort={currentGPSDataPort}
                     currentGPSControlPort={currentGPSControlPort}
+                    deceptionSession={deceptionSession}
+                    deceptionSessionStateLabel={deceptionSessionStateLabel}
+                    currentDeceptionPort={currentDeceptionPort}
                     allLocaleOptions={allLocaleOptions}
                     visibleLocales={localeOptions}
                     currentLocale={locale}
@@ -790,6 +888,7 @@ function App() {
                     onSendPortChange={setSelectedSendPort}
                     onGPSDataPortChange={setSelectedGPSDataPort}
                     onGPSControlPortChange={setSelectedGPSControlPort}
+                    onDeceptionPortChange={setSelectedDeceptionPort}
                     onUserSettingsChange={handleUserSettingsChange}
                     onVisibleLocalesChange={handleVisibleLocalesChange}
                     onVisibleMapLayersChange={handleVisibleMapLayersChange}

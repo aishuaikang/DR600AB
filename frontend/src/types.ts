@@ -64,6 +64,41 @@ export interface GPSSessionRequest {
 
 export interface GPSSettings extends GPSSessionRequest {}
 
+export interface DeceptionSessionRequest {
+  portName?: string;
+  baudRate: number;
+  dataBits: number;
+  stopBits: number;
+  parity: string;
+  readTimeoutMs?: number;
+  autoConnect?: boolean;
+}
+
+export interface DeceptionSettings extends DeceptionSessionRequest {}
+
+export interface DeceptionSessionResponse {
+  active: boolean;
+  sessionId?: string;
+  portName?: string;
+  baudRate?: number;
+  dataBits?: number;
+  stopBits?: number;
+  parity?: string;
+  startedAt?: string;
+  state?: "inactive" | "connecting" | "connected";
+  autoReconnect?: boolean;
+  lastError?: string;
+  message: string;
+}
+
+export interface DeceptionQueryResponse {
+  item: string;
+  command: string;
+  rawHex?: string;
+  description?: string;
+  message: string;
+}
+
 export interface GPSFix {
   latitude: number;
   longitude: number;
@@ -90,6 +125,7 @@ export interface GeoPoint {
 }
 
 export interface UserSettings {
+  deviceSn?: string;
   manualDeviceLocation?: GeoPoint;
   screenStrikeChannelLabels?: string[];
 }
@@ -133,6 +169,211 @@ export interface ScreenStrikeRequest {
   enabled: boolean;
   channelIds: string[];
   durationSeconds: number;
+}
+
+export interface ScreenDeceptionRequest {
+  enabled: boolean;
+  targetId?: string;
+  mode?: ScreenDeceptionMode;
+  longitude?: number;
+  latitude?: number;
+  altitudeM?: number;
+  signalMask?: number;
+  strengthPreset?: ScreenDeceptionStrengthPreset;
+  attenuationDB?: number;
+  delayMode?: ScreenDeceptionDelayMode;
+  delayNS?: number;
+  circle?: ScreenDeceptionCircleParams;
+  linear?: ScreenDeceptionLinearParams;
+  random?: ScreenDeceptionRandomParams;
+}
+
+export type ScreenDeceptionMode =
+  | "fixed_point"
+  | "circle"
+  | "linear";
+
+export type ScreenDeceptionStrengthPreset = "strong" | "standard" | "weak" | "custom";
+
+export type ScreenDeceptionDelayMode = "auto" | "manual" | "off";
+
+export interface ScreenDeceptionCircleParams {
+  radiusM?: number;
+  periodSeconds?: number;
+  direction?: "cw" | "ccw";
+}
+
+export interface ScreenDeceptionLinearParams {
+  speedMps?: number;
+  directionDeg?: number;
+  maxSpeedMps?: number;
+}
+
+export interface ScreenDeceptionRandomParams {
+  enabled: boolean;
+  radiusM?: number;
+  refreshSeconds?: number;
+}
+
+export interface ScreenDeceptionState {
+  active: boolean;
+  targetId?: string;
+  mode?: ScreenDeceptionMode;
+  point?: GeoPoint;
+  altitudeM?: number;
+  signalMask?: number;
+  strengthPreset?: ScreenDeceptionStrengthPreset;
+  attenuationDB?: number;
+  delayMode?: ScreenDeceptionDelayMode;
+  delayNS?: number;
+  distanceM?: number;
+  summary?: string;
+  unsupportedReason?: string;
+  circle?: ScreenDeceptionCircleParams;
+  linear?: ScreenDeceptionLinearParams;
+  random?: ScreenDeceptionRandomParams;
+  serialActive: boolean;
+  lastAck?: string;
+  lastError?: string;
+}
+
+export interface ScreenDeceptionStatusPoint {
+  latitude: number;
+  longitude: number;
+  altitudeM: number;
+}
+
+export interface ScreenDeceptionVersionStatus {
+  software?: string;
+  fpga?: string;
+  protocol?: string;
+}
+
+export interface ScreenDeceptionTargetStatus {
+  distanceM: number;
+  heightM: number;
+  directionDeg: number;
+  headingDeg: number;
+}
+
+export interface ScreenDeceptionSpoofCircleStatus {
+  distanceM: number;
+  heightM: number;
+  directionDeg: number;
+  headingDeg: number;
+  radiusM: number;
+  periodSeconds: number;
+  direction?: "cw" | "ccw" | "unknown";
+}
+
+export interface ScreenDeceptionSuppressionStatus {
+  waveformMask: number;
+  transmitOn: boolean;
+}
+
+export interface ScreenDeceptionRandomStatus {
+  enabled: boolean;
+  radiusM: number;
+  refreshSeconds: number;
+}
+
+export interface ScreenDeceptionSyncStatus {
+  receiverWorking: boolean;
+  receiverPositioned: boolean;
+  leapSecondValid: boolean;
+  timeSynced: boolean;
+  antennaOk: boolean;
+}
+
+export interface ScreenDeceptionMotionStatus {
+  maxSpeedMps?: number;
+  initialSpeedMps?: number;
+  initialDirectionDeg?: number;
+  accelerationMps2?: number;
+  accelerationDirectionDeg?: number;
+  circleRadiusM?: number;
+  circlePeriodSeconds?: number;
+  circleDirection?: "cw" | "ccw" | "unknown";
+}
+
+export interface ScreenDeceptionAttenuationStatus {
+  gps: number;
+  bds: number;
+  glo: number;
+  gal: number;
+}
+
+export interface ScreenDeceptionDelayStatus {
+  gps?: number;
+  bds?: number;
+  glo?: number;
+  gal?: number;
+}
+
+export interface ScreenDeceptionSignalWorkStatus {
+  clockOk: boolean;
+  ephemerisValid: boolean;
+  rfModuleOk: boolean;
+  signalTransmit: boolean;
+  transmitChannel: boolean;
+  fpgaOk: boolean;
+  raw: number;
+}
+
+export interface ScreenDeceptionDeviceSignalStatus {
+  systemTime?: string;
+  signalMask: number;
+  signalNames?: string[];
+  delayNs: number;
+  workStatus: ScreenDeceptionSignalWorkStatus;
+  transmitSwitch: boolean;
+  attenuationDb: number;
+  receivedSatelliteCount: number;
+  receivedPrns?: number[];
+  receivedCn0?: number[];
+  transmittedCount: number;
+  transmittedPrns?: number[];
+}
+
+export interface ScreenDeceptionDeviceStatus {
+  serialActive: boolean;
+  updatedAt?: string;
+  systemTime?: string;
+  reportedSystemTime?: string;
+  version?: ScreenDeceptionVersionStatus;
+  transmitMask?: number;
+  transmitSignals?: string[];
+  amplifierOn?: boolean;
+  autoTransmit?: boolean;
+  firstTimeSynced?: boolean;
+  oscillatorState?: "warming" | "unlocked" | "tracking" | "locked" | "hold" | "unknown";
+  syncStatus?: ScreenDeceptionSyncStatus;
+  currentPosition?: ScreenDeceptionStatusPoint;
+  simulatedPosition?: ScreenDeceptionStatusPoint;
+  queriedDevicePosition?: ScreenDeceptionStatusPoint;
+  queriedSimulatedPosition?: ScreenDeceptionStatusPoint;
+  targetPosition?: ScreenDeceptionTargetStatus;
+  temperatureC?: number;
+  timePrecisionNs?: number;
+  uptimeSeconds?: number;
+  motion?: ScreenDeceptionMotionStatus;
+  attenuation?: ScreenDeceptionAttenuationStatus;
+  delayNS?: number;
+  delayBySignalNs?: ScreenDeceptionDelayStatus;
+  spoofCircle?: ScreenDeceptionSpoofCircleStatus;
+  suppression?: ScreenDeceptionSuppressionStatus;
+  random?: ScreenDeceptionRandomStatus;
+  timedSearch?: boolean;
+  deviceSignal?: ScreenDeceptionDeviceSignalStatus;
+  deviceSignals?: ScreenDeceptionDeviceSignalStatus[];
+  rawDescriptions: Record<string, string>;
+  queryErrors?: Record<string, string>;
+  lastError?: string;
+}
+
+export interface ScreenDeceptionResponse {
+  state: ScreenDeceptionState;
+  message: string;
 }
 
 export interface GPSSessionResponse {
@@ -396,6 +637,9 @@ export interface StreamHandlers {
   onGPSSessionStarted?: (event: EventMessage<GPSSessionResponse>) => void;
   onGPSSessionStopped?: (event: EventMessage<GPSSessionResponse>) => void;
   onGPSSessionState?: (event: EventMessage<GPSSessionResponse>) => void;
+  onDeceptionSessionStarted?: (event: EventMessage<DeceptionSessionResponse>) => void;
+  onDeceptionSessionStopped?: (event: EventMessage<DeceptionSessionResponse>) => void;
+  onDeceptionSessionState?: (event: EventMessage<DeceptionSessionResponse>) => void;
   onGPSRecord?: (event: EventMessage<GPSRecord>) => void;
   onParsed?: (event: EventMessage<ParsedMessage>) => void;
   onDetection?: (event: EventMessage<DetectionRecord>) => void;
@@ -407,5 +651,6 @@ export interface ScreenStreamHandlers {
   onDetectionUpdated?: (event: EventMessage<ScreenDetectionTarget>) => void;
   onPositionUpdated?: (event: EventMessage<ScreenPositionTarget>) => void;
   onStrikeUpdated?: (event: EventMessage<ScreenStrikeState>) => void;
+  onDeceptionUpdated?: (event: EventMessage<ScreenDeceptionState>) => void;
   onError?: (error: Error) => void;
 }

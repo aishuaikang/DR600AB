@@ -123,6 +123,24 @@ export function UserSettingsPage({
       <Panel>
         <PanelBody>
           <SectionHeader
+            title={t("deviceSnTitle", { ns: "settings" })}
+            description={t("deviceSnDescription", { ns: "settings" })}
+          />
+
+          <div className="rounded-2xl border border-primary/20 bg-primary/10 px-4 py-3">
+            <span className="text-[11px] font-semibold uppercase tracking-wide text-primary/70">
+              {t("deviceSnField", { ns: "settings" })}
+            </span>
+            <strong className="mt-2 block min-w-0 break-words font-mono text-lg font-semibold text-base-content">
+              {userSettings.deviceSn || t("unknown", { ns: "common" })}
+            </strong>
+          </div>
+        </PanelBody>
+      </Panel>
+
+      <Panel>
+        <PanelBody>
+          <SectionHeader
             title={t("displayTitle", { ns: "settings" })}
             description={t("displayDescription", { ns: "settings" })}
           />

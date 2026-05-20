@@ -22,8 +22,10 @@ const (
 	CmdCoordinateControl byte = 0x5E
 	CmdNoFlyZone         byte = 0x5F
 	CmdSpoofCircle       byte = 0x60
+	CmdSuppression       byte = 0x63
 	CmdRandomPosition    byte = 0x64
 	CmdSignalDelay       byte = 0x65
+	CmdTimedSearch       byte = 0x66
 )
 
 const (
@@ -36,23 +38,41 @@ const (
 	QueryTargetPosition    byte = 0x57
 	QueryNoFlyZone         byte = 0x58
 	QuerySpoofCircle       byte = 0x59
+	QuerySuppression       byte = 0x5C
 	QueryDeviceSignal      byte = 0x5D
 	QueryDevicePosition    byte = 0x5E
 	QueryRandomPosition    byte = 0x5F
 	QuerySignalDelay       byte = 0x60
+	QueryTimedSearch       byte = 0x66
 )
 
 const (
 	SignalGPSL1CA uint16 = 1 << 0
 	SignalBDSB1I  uint16 = 1 << 1
 	SignalGLOL1   uint16 = 1 << 2
+	SignalBDSB2I  uint16 = 1 << 3
+	SignalBDSB3I  uint16 = 1 << 4
+	SignalBDSB1C  uint16 = 1 << 5
 	SignalGALE1   uint16 = 1 << 6
+	SignalGLOL2   uint16 = 1 << 7
+	SignalGPSL2C  uint16 = 1 << 8
+	SignalGPSL5   uint16 = 1 << 9
+	SignalGALE5A  uint16 = 1 << 10
+	SignalGALE5B  uint16 = 1 << 11
+	SignalGALE6   uint16 = 1 << 12
 
-	SignalAllSupported = SignalGPSL1CA | SignalBDSB1I | SignalGLOL1 | SignalGALE1
+	SignalFourBandSupported = SignalGPSL1CA | SignalBDSB1I | SignalGLOL1 | SignalGALE1
+	SignalAllSupported      = SignalFourBandSupported
+	SignalAllProtocol       = SignalGPSL1CA | SignalBDSB1I | SignalGLOL1 | SignalBDSB2I |
+		SignalBDSB3I | SignalBDSB1C | SignalGALE1 | SignalGLOL2 | SignalGPSL2C |
+		SignalGPSL5 | SignalGALE5A | SignalGALE5B | SignalGALE6
 )
 
 // BuildQuery builds a C0 query frame.
 func BuildQuery(command byte) ([]byte, error) {
+	if command == QueryDeviceSignal {
+		return BuildFrame(ControlQuery, HostAddress, DeviceAddress, []byte{command, ReservedByte, 0xFF, 0x1F, ReservedByte})
+	}
 	return BuildFrame(ControlQuery, HostAddress, DeviceAddress, []byte{command, ReservedByte})
 }
 
@@ -181,6 +201,17 @@ func BuildSetSpoofCircle(distanceM int32, heightM int32, directionDeg float32, h
 	return BuildFrame(ControlSet, HostAddress, DeviceAddress, body)
 }
 
+func BuildSetSuppression(waveformMask int32, transmitEnabled bool) ([]byte, error) {
+	var transmit int32
+	if transmitEnabled {
+		transmit = 1
+	}
+	body := []byte{CmdSuppression, ReservedByte}
+	body = appendInt32(body, waveformMask)
+	body = appendInt32(body, transmit)
+	return BuildFrame(ControlSet, HostAddress, DeviceAddress, body)
+}
+
 func BuildSetRandomPosition(enabled bool, radiusM uint32, refreshPeriodS uint32) ([]byte, error) {
 	var enabledValue uint32
 	if enabled {
@@ -197,6 +228,15 @@ func BuildSetSignalDelay(mask uint16, delayNS float32) ([]byte, error) {
 	body := []byte{CmdSignalDelay, ReservedByte}
 	body = appendUint16(body, mask)
 	body = appendFloat32(body, delayNS)
+	return BuildFrame(ControlSet, HostAddress, DeviceAddress, body)
+}
+
+func BuildSetTimedSearch(enabled bool) ([]byte, error) {
+	var value byte
+	if enabled {
+		value = 1
+	}
+	body := []byte{CmdTimedSearch, value}
 	return BuildFrame(ControlSet, HostAddress, DeviceAddress, body)
 }
 

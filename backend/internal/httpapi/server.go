@@ -5,6 +5,7 @@ import (
 	"github.com/gofiber/fiber/v2"
 
 	"dr600ab-api/internal/config"
+	"dr600ab-api/internal/deception"
 	"dr600ab-api/internal/detection"
 	"dr600ab-api/internal/developer"
 	"dr600ab-api/internal/gps"
@@ -18,6 +19,7 @@ import (
 type UserSettingsStore interface {
 	LoadUser() (model.UserSettings, bool, error)
 	SaveUser(model.UserSettings) error
+	SaveEditableUser(model.UserSettings) (model.UserSettings, error)
 }
 
 // Server 持有 Fiber 应用以及对外暴露的后端服务。
@@ -30,6 +32,7 @@ type Server struct {
 	developer    *developer.Service
 	gps          *gps.Service
 	network      *network.Service
+	deception    *deception.Service
 	userSettings UserSettingsStore
 }
 
@@ -42,6 +45,7 @@ func New(
 	developerSvc *developer.Service,
 	gpsSvc *gps.Service,
 	networkSvc *network.Service,
+	deceptionSvc *deception.Service,
 	userSettingsStore UserSettingsStore,
 ) *Server {
 	s := &Server{
@@ -52,6 +56,7 @@ func New(
 		developer:    developerSvc,
 		gps:          gpsSvc,
 		network:      networkSvc,
+		deception:    deceptionSvc,
 		userSettings: userSettingsStore,
 	}
 	s.app = fiber.New(fiber.Config{
@@ -71,5 +76,6 @@ func (s *Server) Shutdown() error {
 	s.detection.Stop("")
 	s.gps.Stop("")
 	s.interference.Shutdown()
+	s.deception.Shutdown()
 	return s.app.Shutdown()
 }

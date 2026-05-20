@@ -5,6 +5,7 @@ import (
 	"context"
 
 	"dr600ab-api/internal/config"
+	"dr600ab-api/internal/deception"
 	"dr600ab-api/internal/detection"
 	"dr600ab-api/internal/developer"
 	"dr600ab-api/internal/gps"
@@ -63,9 +64,19 @@ func New(cfg config.Config) (*App, error) {
 		ReconnectMaxDelay:     cfg.ReconnectMaxDelay,
 	})
 	networkSvc := network.NewService(nil, settingsStore)
+	deceptionSvc := deception.NewService(state, translator, settingsStore, deception.Options{
+		DefaultBaudRate:       cfg.DefaultBaudRate,
+		DefaultDataBits:       cfg.DefaultDataBits,
+		DefaultStopBits:       cfg.DefaultStopBits,
+		DefaultParity:         cfg.DefaultParity,
+		DefaultReadTimeout:    cfg.DefaultReadTimeout,
+		ReconnectInitialDelay: cfg.ReconnectInitialDelay,
+		ReconnectMaxDelay:     cfg.ReconnectMaxDelay,
+	})
 
 	detectionSvc.RestoreSavedSettings(cfg.DefaultLocale)
 	gpsSvc.RestoreSavedSettings(cfg.DefaultLocale)
+	deceptionSvc.RestoreSavedSettings(cfg.DefaultLocale)
 	_ = networkSvc.RestoreSavedSettings(context.Background())
 
 	return &App{
@@ -77,6 +88,7 @@ func New(cfg config.Config) (*App, error) {
 			developerSvc,
 			gpsSvc,
 			networkSvc,
+			deceptionSvc,
 			settingsStore,
 		),
 	}, nil
