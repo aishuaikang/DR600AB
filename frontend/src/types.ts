@@ -446,6 +446,12 @@ export interface ScreenPositionPoint {
   longitude: number;
 }
 
+export interface ScreenPositionTrackPoint extends ScreenPositionPoint {
+  speed?: number;
+  height?: number;
+  time: string;
+}
+
 export interface ScreenPositionLastRecord {
   type: string;
   receivedAt: string;
@@ -469,6 +475,8 @@ export interface ScreenPositionTarget {
   drone?: ScreenPositionPoint;
   pilot?: ScreenPositionPoint;
   home?: ScreenPositionPoint;
+  droneTrajectory?: ScreenPositionTrackPoint[];
+  pilotTrajectory?: ScreenPositionTrackPoint[];
   height?: number;
   altitude?: number;
   speed?: number;

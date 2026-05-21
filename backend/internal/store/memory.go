@@ -16,6 +16,7 @@ const (
 	screenDetectionBaseThresholdMHz = 15.0
 	screenDetectionTTL              = 60 * time.Second
 	screenPositionTTL               = 60 * time.Second
+	screenPositionTrajectoryLimit   = 120
 	screenDetectionEventType        = "screen.detection.updated"
 	screenPositionEventType         = "screen.position.updated"
 )
@@ -287,6 +288,20 @@ func (s *MemoryStore) addScreenPositionLocked(target model.ScreenPositionTarget)
 		target.FirstSeen = target.LastSeen
 	}
 	target.Device = stringsTrim(target.Device)
+	target.DroneTrajectory = appendScreenPositionTrajectory(
+		target.DroneTrajectory,
+		target.Drone,
+		target.LastSeen,
+		screenPositionTrajectoryValue(target.TrajectorySpeed, target.Speed),
+		screenPositionTrajectoryValue(target.TrajectoryHeight, target.Height),
+	)
+	target.PilotTrajectory = appendScreenPositionTrajectory(
+		target.PilotTrajectory,
+		target.Pilot,
+		target.LastSeen,
+		screenPositionTrajectoryValue(target.TrajectorySpeed, target.Speed),
+		screenPositionTrajectoryValue(target.TrajectoryHeight, target.Height),
+	)
 
 	now := target.LastSeen
 	s.pruneExpiredScreenPositionsLocked(now)
@@ -321,6 +336,14 @@ func (s *MemoryStore) addScreenPositionLocked(target model.ScreenPositionTarget)
 		if s.positions[matchIndex].FirstSeen.Before(merged.FirstSeen) {
 			merged.FirstSeen = s.positions[matchIndex].FirstSeen
 		}
+		merged.DroneTrajectory = mergeScreenPositionTrajectories(
+			merged.DroneTrajectory,
+			s.positions[matchIndex].DroneTrajectory,
+		)
+		merged.PilotTrajectory = mergeScreenPositionTrajectories(
+			merged.PilotTrajectory,
+			s.positions[matchIndex].PilotTrajectory,
+		)
 		merged.HitCount += s.positions[matchIndex].HitCount
 	}
 	if target.CorrelationID != "" {
@@ -337,6 +360,8 @@ func (s *MemoryStore) addScreenPositionLocked(target model.ScreenPositionTarget)
 	if target.Device != "" {
 		merged.Device = target.Device
 	}
+	merged.DroneTrajectory = mergeScreenPositionTrajectories(merged.DroneTrajectory, target.DroneTrajectory)
+	merged.PilotTrajectory = mergeScreenPositionTrajectories(merged.PilotTrajectory, target.PilotTrajectory)
 	if !keepDecodedFields {
 		merged.Drone = cloneScreenPositionPoint(target.Drone)
 		merged.Pilot = cloneScreenPositionPoint(target.Pilot)
@@ -363,6 +388,141 @@ func (s *MemoryStore) addScreenPositionLocked(target model.ScreenPositionTarget)
 	next = append(next, merged)
 	s.positions = next
 	return cloneScreenPositionTarget(merged), true
+}
+
+func appendScreenPositionTrajectory(
+	trajectory []model.ScreenPositionTrackPoint,
+	point *model.ScreenPositionPoint,
+	seenAt time.Time,
+	speed *float64,
+	height *float64,
+) []model.ScreenPositionTrackPoint {
+	result := normalizedScreenPositionTrajectory(trajectory)
+	if !validScreenPositionTrackCoordinate(point) || seenAt.IsZero() {
+		return trimScreenPositionTrajectory(result)
+	}
+
+	next := model.ScreenPositionTrackPoint{
+		Latitude:  point.Latitude,
+		Longitude: point.Longitude,
+		Speed:     cloneFloat64Ptr(speed),
+		Height:    cloneFloat64Ptr(height),
+		Time:      seenAt,
+	}
+	result = append(result, next)
+	return trimScreenPositionTrajectory(deduplicateScreenPositionTrajectory(result))
+}
+
+func screenPositionTrajectoryValue(primary, fallback *float64) *float64 {
+	if primary != nil {
+		return primary
+	}
+	return fallback
+}
+
+func mergeScreenPositionTrajectories(
+	current []model.ScreenPositionTrackPoint,
+	incoming []model.ScreenPositionTrackPoint,
+) []model.ScreenPositionTrackPoint {
+	if len(current) == 0 {
+		return trimScreenPositionTrajectory(normalizedScreenPositionTrajectory(incoming))
+	}
+	if len(incoming) == 0 {
+		return trimScreenPositionTrajectory(normalizedScreenPositionTrajectory(current))
+	}
+
+	merged := append(normalizedScreenPositionTrajectory(current), normalizedScreenPositionTrajectory(incoming)...)
+	return trimScreenPositionTrajectory(deduplicateScreenPositionTrajectory(merged))
+}
+
+func normalizedScreenPositionTrajectory(points []model.ScreenPositionTrackPoint) []model.ScreenPositionTrackPoint {
+	if len(points) == 0 {
+		return nil
+	}
+	out := make([]model.ScreenPositionTrackPoint, 0, len(points))
+	for _, point := range points {
+		if !validTrackPointCoordinate(point.Latitude, point.Longitude) || point.Time.IsZero() {
+			continue
+		}
+		point.Speed = cloneFloat64Ptr(point.Speed)
+		point.Height = cloneFloat64Ptr(point.Height)
+		out = append(out, point)
+	}
+	return out
+}
+
+func deduplicateScreenPositionTrajectory(points []model.ScreenPositionTrackPoint) []model.ScreenPositionTrackPoint {
+	if len(points) <= 1 {
+		return points
+	}
+	slices.SortFunc(points, func(a, b model.ScreenPositionTrackPoint) int {
+		if result := a.Time.Compare(b.Time); result != 0 {
+			return result
+		}
+		if a.Latitude < b.Latitude {
+			return -1
+		}
+		if a.Latitude > b.Latitude {
+			return 1
+		}
+		if a.Longitude < b.Longitude {
+			return -1
+		}
+		if a.Longitude > b.Longitude {
+			return 1
+		}
+		return 0
+	})
+
+	out := points[:0]
+	for _, point := range points {
+		if len(out) > 0 && sameScreenPositionTrackPoint(out[len(out)-1], point) {
+			continue
+		}
+		out = append(out, point)
+	}
+	clear(points[len(out):])
+	return out
+}
+
+func trimScreenPositionTrajectory(points []model.ScreenPositionTrackPoint) []model.ScreenPositionTrackPoint {
+	if len(points) <= screenPositionTrajectoryLimit {
+		return points
+	}
+	return points[len(points)-screenPositionTrajectoryLimit:]
+}
+
+func sameScreenPositionTrackPoint(a, b model.ScreenPositionTrackPoint) bool {
+	return a.Latitude == b.Latitude &&
+		a.Longitude == b.Longitude &&
+		float64PtrEqual(a.Speed, b.Speed) &&
+		float64PtrEqual(a.Height, b.Height) &&
+		a.Time.Equal(b.Time)
+}
+
+func float64PtrEqual(a, b *float64) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	return *a == *b
+}
+
+func validScreenPositionTrackCoordinate(point *model.ScreenPositionPoint) bool {
+	return point != nil && validTrackPointCoordinate(point.Latitude, point.Longitude)
+}
+
+func validTrackPointCoordinate(latitude, longitude float64) bool {
+	return finiteFloat64(latitude) &&
+		finiteFloat64(longitude) &&
+		latitude >= -90 &&
+		latitude <= 90 &&
+		longitude >= -180 &&
+		longitude <= 180 &&
+		!(latitude == 0 && longitude == 0)
+}
+
+func finiteFloat64(value float64) bool {
+	return !math.IsNaN(value) && !math.IsInf(value, 0)
 }
 
 func (s *MemoryStore) pruneExpiredScreenPositionsLocked(now time.Time) {
@@ -641,10 +801,27 @@ func cloneScreenPositionTarget(target model.ScreenPositionTarget) model.ScreenPo
 	target.Drone = cloneScreenPositionPoint(target.Drone)
 	target.Pilot = cloneScreenPositionPoint(target.Pilot)
 	target.Home = cloneScreenPositionPoint(target.Home)
+	target.DroneTrajectory = cloneScreenPositionTrajectory(target.DroneTrajectory)
+	target.PilotTrajectory = cloneScreenPositionTrajectory(target.PilotTrajectory)
+	target.TrajectorySpeed = cloneFloat64Ptr(target.TrajectorySpeed)
+	target.TrajectoryHeight = cloneFloat64Ptr(target.TrajectoryHeight)
 	target.Height = cloneFloat64Ptr(target.Height)
 	target.Altitude = cloneFloat64Ptr(target.Altitude)
 	target.Speed = cloneFloat64Ptr(target.Speed)
 	return target
+}
+
+func cloneScreenPositionTrajectory(points []model.ScreenPositionTrackPoint) []model.ScreenPositionTrackPoint {
+	if len(points) == 0 {
+		return nil
+	}
+	cloned := make([]model.ScreenPositionTrackPoint, len(points))
+	for index, point := range points {
+		point.Speed = cloneFloat64Ptr(point.Speed)
+		point.Height = cloneFloat64Ptr(point.Height)
+		cloned[index] = point
+	}
+	return cloned
 }
 
 func cloneScreenPositionPoint(point *model.ScreenPositionPoint) *model.ScreenPositionPoint {

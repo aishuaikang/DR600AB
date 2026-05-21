@@ -6,7 +6,12 @@ import "leaflet/dist/leaflet.css";
 import centerPointIcon from "../assets/images/centerPoint.svg";
 import compassIcon from "../assets/images/compass.png";
 import i18n from "../i18n";
-import type { ScreenDeviceLocationResponse, ScreenPositionPoint, ScreenPositionTarget } from "../types";
+import type {
+  ScreenDeviceLocationResponse,
+  ScreenPositionPoint,
+  ScreenPositionTarget,
+  ScreenPositionTrackPoint,
+} from "../types";
 import { createDrawControlButtonGroup } from "../utils/leafletControls";
 import { installLeafletCoordConverter } from "../utils/leafletCoordConverter";
 import {
@@ -22,9 +27,12 @@ import {
 installLeafletCoordConverter();
 
 const markerPane = "screenMarkers";
+const trajectoryPane = "screenTrajectories";
 const selectedPane = "screenSelectedMarkers";
 const deviceIconSize: [number, number] = [198 / 5, 256 / 5];
 const targetIconSize: [number, number] = [160 / 5, 256 / 5];
+const droneTrajectoryColor = "#26c9ff";
+const pilotTrajectoryColor = "#f4c95d";
 
 type RealMapData = {
   deviceLocation: ScreenDeviceLocationResponse | null;
@@ -150,6 +158,13 @@ function formatMapRSSI(value?: number) {
   return `${Math.round(value)}dBm`;
 }
 
+function formatMapOptionalNumber(value: number | undefined, unit: string, digits: number) {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return "-";
+  }
+  return `${value.toFixed(digits)}${unit}`;
+}
+
 function validMapPoint(point?: ScreenPositionPoint | null): point is ScreenPositionPoint {
   return Boolean(
     point &&
@@ -163,8 +178,19 @@ function validMapPoint(point?: ScreenPositionPoint | null): point is ScreenPosit
   );
 }
 
+function validMapTrackPoint(point?: ScreenPositionTrackPoint | null): point is ScreenPositionTrackPoint {
+  return Boolean(point && validMapPoint(point));
+}
+
 function toLatLng(point: ScreenPositionPoint) {
   return L.latLng(point.latitude, point.longitude);
+}
+
+function toTrackLatLngs(points?: ScreenPositionTrackPoint[]) {
+  if (!points?.length) {
+    return [];
+  }
+  return points.filter(validMapTrackPoint).map(toLatLng);
 }
 
 function collectRealMapPoints(deviceLocation: ScreenDeviceLocationResponse | null, positions: ScreenPositionTarget[]) {
@@ -180,6 +206,8 @@ function collectRealMapPoints(deviceLocation: ScreenDeviceLocationResponse | nul
     if (validMapPoint(target.pilot)) {
       points.push(toLatLng(target.pilot));
     }
+    points.push(...toTrackLatLngs(target.droneTrajectory));
+    points.push(...toTrackLatLngs(target.pilotTrajectory));
   });
   return points;
 }
@@ -232,6 +260,25 @@ function positionTooltipContent(target: ScreenPositionTarget, kind: "drone" | "p
   ].join("<br>");
 }
 
+function trajectoryTooltipContent(
+  target: ScreenPositionTarget,
+  kind: "drone" | "pilot",
+  point: ScreenPositionTrackPoint,
+  t: TFunction,
+) {
+  const title = target.model || t("unknownTarget", { ns: "screen" });
+  const kindLabel = kind === "drone" ? t("positionDrone", { ns: "screen" }) : t("positionPilot", { ns: "screen" });
+  return [
+    `<strong>${escapeHtml(kindLabel)}</strong>`,
+    escapeHtml(title),
+    escapeHtml(target.serial || target.id),
+    escapeHtml(formatCoordinate(point)),
+    `${escapeHtml(t("speed", { ns: "screen" }))}: ${escapeHtml(formatMapOptionalNumber(point.speed, "m/s", 1))}`,
+    `${escapeHtml(t("height", { ns: "screen" }))}: ${escapeHtml(formatMapOptionalNumber(point.height, "m", 0))}`,
+    `${escapeHtml(t("time", { ns: "screen" }))}: ${escapeHtml(formatMapTime(point.time))}`,
+  ].join("<br>");
+}
+
 function renderDeviceLayer(map: L.Map, deviceLocation: ScreenDeviceLocationResponse | null, t: TFunction) {
   const group = L.layerGroup().addTo(map);
   if (!deviceLocation?.valid || !validMapPoint(deviceLocation.point)) {
@@ -258,6 +305,55 @@ function renderDeviceLayer(map: L.Map, deviceLocation: ScreenDeviceLocationRespo
   return group;
 }
 
+function renderTrajectoryLayer(
+  group: L.LayerGroup,
+  target: ScreenPositionTarget,
+  kind: "drone" | "pilot",
+  selected: boolean,
+  onSelectPosition: (target: ScreenPositionTarget) => void,
+  t: TFunction,
+) {
+  const trajectory = kind === "drone" ? target.droneTrajectory : target.pilotTrajectory;
+  const points = toTrackLatLngs(trajectory);
+  if (points.length < 2) {
+    return;
+  }
+
+  const color = kind === "drone" ? droneTrajectoryColor : pilotTrajectoryColor;
+  L.polyline(points, {
+    color,
+    weight: selected ? 4 : 2.5,
+    opacity: selected ? 0.92 : 0.55,
+    pane: trajectoryPane,
+    className: selected ? "screen-map-trajectory screen-map-trajectory--selected" : "screen-map-trajectory",
+  })
+    .on("click", () => onSelectPosition(target))
+    .addTo(group);
+
+  const lastPoint = trajectory?.filter(validMapTrackPoint).at(-1);
+  if (!lastPoint) {
+    return;
+  }
+
+  L.circleMarker([lastPoint.latitude, lastPoint.longitude], {
+    radius: selected ? 4.5 : 3,
+    color,
+    weight: 1,
+    fillColor: color,
+    fillOpacity: selected ? 0.9 : 0.58,
+    opacity: selected ? 0.95 : 0.65,
+    pane: trajectoryPane,
+    className: "screen-map-trajectory-point",
+  })
+    .on("click", () => onSelectPosition(target))
+    .bindTooltip(trajectoryTooltipContent(target, kind, lastPoint, t), {
+      direction: "top",
+      className: "screen-map-tooltip",
+      opacity: 0.92,
+    })
+    .addTo(group);
+}
+
 function renderPositionLayers(
   map: L.Map,
   positions: ScreenPositionTarget[],
@@ -269,6 +365,9 @@ function renderPositionLayers(
 
   positions.forEach((target) => {
     const selected = selectedId === target.id;
+    renderTrajectoryLayer(group, target, "pilot", selected, onSelectPosition, t);
+    renderTrajectoryLayer(group, target, "drone", selected, onSelectPosition, t);
+
     if (validMapPoint(target.pilot)) {
       L.marker([target.pilot.latitude, target.pilot.longitude], {
         icon: createIcon(
@@ -385,9 +484,14 @@ export function ScreenMap({
     });
 
     map.createPane(markerPane);
+    map.createPane(trajectoryPane);
     map.createPane(selectedPane);
     const markerPaneElement = map.getPane(markerPane);
+    const trajectoryPaneElement = map.getPane(trajectoryPane);
     const selectedPaneElement = map.getPane(selectedPane);
+    if (trajectoryPaneElement) {
+      trajectoryPaneElement.style.zIndex = "580";
+    }
     if (markerPaneElement) {
       markerPaneElement.style.zIndex = "610";
     }

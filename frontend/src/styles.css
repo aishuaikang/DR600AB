@@ -1189,6 +1189,20 @@ body.virtual-keyboard-open .app-loading-overlay {
   filter: drop-shadow(0 0 0.55em rgba(38, 201, 255, 0.88));
 }
 
+.screen-map-trajectory {
+  filter: drop-shadow(0 0 0.28em rgba(0, 0, 0, 0.62));
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.screen-map-trajectory--selected {
+  filter: drop-shadow(0 0 0.45em rgba(38, 201, 255, 0.5));
+}
+
+.screen-map-trajectory-point {
+  filter: drop-shadow(0 0 0.36em rgba(0, 0, 0, 0.62));
+}
+
 .tip-text {
   border-radius: 4px;
   padding: 2px 4px;

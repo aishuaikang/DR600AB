@@ -853,19 +853,21 @@ func screenPositionFromRID(parsed model.ParsedMessage, data *parser.RID) (model.
 		return model.ScreenPositionTarget{}, false
 	}
 	target := model.ScreenPositionTarget{
-		Serial:    strings.TrimSpace(data.Serial),
-		Model:     strings.TrimSpace(data.Model),
-		Source:    string(parser.TypeRID),
-		Frequency: data.Freq,
-		RSSI:      data.RSSI,
-		Device:    strings.TrimSpace(data.SSID),
-		Drone:     screenPointFromGPS(data.DroneGPS),
-		Pilot:     screenPointFromGPS(data.PilotGPS),
-		Speed:     nonZeroFloatPtr(data.Speed),
-		Altitude:  nonZeroFloatPtr(data.AltitudeG),
-		Height:    nonZeroFloatPtr(data.HeightAGL),
-		FirstSeen: parsed.Time,
-		LastSeen:  parsed.Time,
+		Serial:           strings.TrimSpace(data.Serial),
+		Model:            strings.TrimSpace(data.Model),
+		Source:           string(parser.TypeRID),
+		Frequency:        data.Freq,
+		RSSI:             data.RSSI,
+		Device:           strings.TrimSpace(data.SSID),
+		Drone:            screenPointFromGPS(data.DroneGPS),
+		Pilot:            screenPointFromGPS(data.PilotGPS),
+		Speed:            nonZeroFloatPtr(data.Speed),
+		Altitude:         nonZeroFloatPtr(data.AltitudeG),
+		Height:           nonZeroFloatPtr(data.HeightAGL),
+		TrajectorySpeed:  float64Ptr(data.Speed),
+		TrajectoryHeight: float64Ptr(data.HeightAGL),
+		FirstSeen:        parsed.Time,
+		LastSeen:         parsed.Time,
 		LastRecord: model.ScreenPositionLastRecord{
 			Type:       parsed.Type,
 			ReceivedAt: parsed.Time,
@@ -884,20 +886,22 @@ func screenPositionFromDIDPlain(parsed model.ParsedMessage, data *parser.DIDPlai
 		return model.ScreenPositionTarget{}, false
 	}
 	target := model.ScreenPositionTarget{
-		Serial:    strings.TrimSpace(data.Serial),
-		Model:     strings.TrimSpace(data.Model),
-		Source:    string(parser.TypeDIDPlain),
-		Frequency: data.Freq,
-		RSSI:      data.RSSI,
-		Device:    strings.TrimSpace(data.Device),
-		Drone:     screenPointFromGPS(data.DroneGPS),
-		Pilot:     screenPointFromGPS(data.PilotGPS),
-		Home:      screenPointFromGPS(data.HomeGPS),
-		Speed:     nonZeroFloatPtr(calculateFlightSpeed(data.EastV, data.NothV, data.UpV)),
-		Altitude:  nonZeroFloatPtr(data.Altitude),
-		Height:    nonZeroFloatPtr(data.Height),
-		FirstSeen: parsed.Time,
-		LastSeen:  parsed.Time,
+		Serial:           strings.TrimSpace(data.Serial),
+		Model:            strings.TrimSpace(data.Model),
+		Source:           string(parser.TypeDIDPlain),
+		Frequency:        data.Freq,
+		RSSI:             data.RSSI,
+		Device:           strings.TrimSpace(data.Device),
+		Drone:            screenPointFromGPS(data.DroneGPS),
+		Pilot:            screenPointFromGPS(data.PilotGPS),
+		Home:             screenPointFromGPS(data.HomeGPS),
+		Speed:            nonZeroFloatPtr(calculateFlightSpeed(data.EastV, data.NothV, data.UpV)),
+		Altitude:         nonZeroFloatPtr(data.Altitude),
+		Height:           nonZeroFloatPtr(data.Height),
+		TrajectorySpeed:  float64Ptr(calculateFlightSpeed(data.EastV, data.NothV, data.UpV)),
+		TrajectoryHeight: float64Ptr(data.Height),
+		FirstSeen:        parsed.Time,
+		LastSeen:         parsed.Time,
 		LastRecord: model.ScreenPositionLastRecord{
 			Type:       parsed.Type,
 			ReceivedAt: parsed.Time,
@@ -933,6 +937,10 @@ func nonZeroFloatPtr(value float64) *float64 {
 	if value == 0 {
 		return nil
 	}
+	return &value
+}
+
+func float64Ptr(value float64) *float64 {
 	return &value
 }
 

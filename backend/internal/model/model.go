@@ -230,6 +230,15 @@ type ScreenPositionPoint struct {
 	Longitude float64 `json:"longitude"`
 }
 
+// ScreenPositionTrackPoint 描述定位目标轨迹中的一个历史坐标点。
+type ScreenPositionTrackPoint struct {
+	Latitude  float64   `json:"latitude"`
+	Longitude float64   `json:"longitude"`
+	Speed     *float64  `json:"speed,omitempty"`
+	Height    *float64  `json:"height,omitempty"`
+	Time      time.Time `json:"time"`
+}
+
 // ScreenPositionLastRecord 是大屏公开定位接口可返回的最近解析摘要，不包含原始报文。
 type ScreenPositionLastRecord struct {
 	Type       string    `json:"type"`
@@ -244,25 +253,29 @@ type ScreenPositionLastRecord struct {
 
 // ScreenPositionTarget 是大屏定位列表使用的合并目标。
 type ScreenPositionTarget struct {
-	ID            string                   `json:"id"`
-	CorrelationID string                   `json:"correlationId,omitempty"`
-	Serial        string                   `json:"serial"`
-	Model         string                   `json:"model"`
-	Source        string                   `json:"source"`
-	Frequency     float64                  `json:"frequency,omitempty"`
-	RSSI          float64                  `json:"rssi,omitempty"`
-	Device        string                   `json:"device"`
-	Drone         *ScreenPositionPoint     `json:"drone,omitempty"`
-	Pilot         *ScreenPositionPoint     `json:"pilot,omitempty"`
-	Home          *ScreenPositionPoint     `json:"home,omitempty"`
-	Height        *float64                 `json:"height,omitempty"`
-	Altitude      *float64                 `json:"altitude,omitempty"`
-	Speed         *float64                 `json:"speed,omitempty"`
-	Cracked       bool                     `json:"cracked,omitempty"`
-	FirstSeen     time.Time                `json:"firstSeen"`
-	LastSeen      time.Time                `json:"lastSeen"`
-	HitCount      int                      `json:"hitCount"`
-	LastRecord    ScreenPositionLastRecord `json:"lastRecord"`
+	ID               string                     `json:"id"`
+	CorrelationID    string                     `json:"correlationId,omitempty"`
+	Serial           string                     `json:"serial"`
+	Model            string                     `json:"model"`
+	Source           string                     `json:"source"`
+	Frequency        float64                    `json:"frequency,omitempty"`
+	RSSI             float64                    `json:"rssi,omitempty"`
+	Device           string                     `json:"device"`
+	Drone            *ScreenPositionPoint       `json:"drone,omitempty"`
+	Pilot            *ScreenPositionPoint       `json:"pilot,omitempty"`
+	Home             *ScreenPositionPoint       `json:"home,omitempty"`
+	DroneTrajectory  []ScreenPositionTrackPoint `json:"droneTrajectory,omitempty"`
+	PilotTrajectory  []ScreenPositionTrackPoint `json:"pilotTrajectory,omitempty"`
+	TrajectorySpeed  *float64                   `json:"-"`
+	TrajectoryHeight *float64                   `json:"-"`
+	Height           *float64                   `json:"height,omitempty"`
+	Altitude         *float64                   `json:"altitude,omitempty"`
+	Speed            *float64                   `json:"speed,omitempty"`
+	Cracked          bool                       `json:"cracked,omitempty"`
+	FirstSeen        time.Time                  `json:"firstSeen"`
+	LastSeen         time.Time                  `json:"lastSeen"`
+	HitCount         int                        `json:"hitCount"`
+	LastRecord       ScreenPositionLastRecord   `json:"lastRecord"`
 }
 
 // GpioChannel 描述一个 GPIO 控制通道及其运行状态。
