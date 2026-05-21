@@ -9,5 +9,5 @@ require (
 
 require (
 	github.com/creack/goselect v0.1.2 // indirect
-	golang.org/x/sys v0.19.0 // indirect
+	golang.org/x/sys v0.28.0 // indirect
 )
