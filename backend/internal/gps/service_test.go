@@ -179,6 +179,34 @@ func TestSettingsStoreKeepsDetectionAndGPS(t *testing.T) {
 	}
 }
 
+func TestRestoreSavedSettingsSkipsClearedSettings(t *testing.T) {
+	tr, err := i18n.New("zh-CN")
+	if err != nil {
+		t.Fatalf("i18n.New() error = %v", err)
+	}
+
+	settingsStore := settings.NewStore(filepath.Join(t.TempDir(), "settings.json"))
+	if err := settingsStore.SaveGPS(model.GPSSessionRequest{}); err != nil {
+		t.Fatalf("SaveGPS() error = %v", err)
+	}
+	svc := NewService(store.NewMemoryStore(10, 10), tr, settingsStore, Options{})
+
+	openCount := 0
+	svc.SetSerialOpener(func(cfg *serialport.Config) (serial.Port, error) {
+		openCount++
+		return newFakeSerialPort(), nil
+	})
+
+	svc.RestoreSavedSettings("zh-CN")
+
+	if openCount != 0 {
+		t.Fatalf("open count = %d, want 0", openCount)
+	}
+	if current := svc.Current("zh-CN"); current.Active {
+		t.Fatalf("restored session active = true, want inactive: %+v", current)
+	}
+}
+
 func assertPortWrites(t *testing.T, port *fakeSerialPort, want ...string) {
 	t.Helper()
 	if port == nil {

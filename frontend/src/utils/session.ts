@@ -10,28 +10,23 @@ import type {
   PortInfo,
 } from "../types";
 
-export function serialKey(receivePort: string, sendPort: string) {
-  return `${receivePort.trim()}|${sendPort.trim()}`;
+export function serialKey(receivePort: string, sendPort: string, baudRate?: number) {
+  const baudRatePart = typeof baudRate === "number" ? `|${baudRate}` : "";
+  return `${receivePort.trim()}|${sendPort.trim()}${baudRatePart}`;
 }
 
 export function resolveInitialPorts(
   session: DetectionSessionResponse | null,
   settings: DetectionSettings | null,
-  ports: PortInfo[],
+  _ports: PortInfo[],
 ) {
-  const activePorts = ports.filter((item) => item.active).map((item) => item.name);
   const sessionReceive = session?.rxPortName || session?.portName || "";
   const sessionSend = session?.txPortName || sessionReceive || "";
   const savedReceive = settings?.rxPortName || settings?.portName || "";
   const savedSend = settings?.txPortName || savedReceive || "";
 
-  const receivePort = sessionReceive || savedReceive || activePorts[0] || ports[0]?.name || "";
-  const sendPort =
-    sessionSend
-    || settings?.txPortName
-    || activePorts.find((item) => item !== receivePort)
-    || savedSend
-    || receivePort;
+  const receivePort = sessionReceive || savedReceive;
+  const sendPort = sessionSend || settings?.txPortName || savedSend || receivePort;
 
   return { receivePort, sendPort };
 }
@@ -39,20 +34,15 @@ export function resolveInitialPorts(
 export function resolveInitialGPSPorts(
   session: GPSSessionResponse | null,
   settings: GPSSettings | null,
-  ports: PortInfo[],
+  _ports: PortInfo[],
 ) {
   const sessionDataPort = session?.dataPortName || session?.portName || "";
   const sessionControlPort = session?.controlPortName || "";
   const savedDataPort = settings?.dataPortName || settings?.portName || "";
   const savedControlPort = settings?.controlPortName || "";
-  const firstPort = ports[0]?.name || "";
 
-  const dataPort = sessionDataPort || savedDataPort || firstPort;
-  const controlPort =
-    sessionControlPort
-    || savedControlPort
-    || ports.find((item) => item.name !== dataPort)?.name
-    || dataPort;
+  const dataPort = sessionDataPort || savedDataPort;
+  const controlPort = sessionControlPort || savedControlPort || dataPort;
 
   return { dataPort, controlPort };
 }

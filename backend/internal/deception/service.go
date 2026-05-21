@@ -170,6 +170,14 @@ func (s *Service) Settings() (model.DeceptionSessionRequest, bool, error) {
 	return s.settings.LoadDeception()
 }
 
+// ClearSettings 停止当前 GNSS 诱骗串口会话并清空已保存的串口设置。
+func (s *Service) ClearSettings(locale string) (model.DeceptionSessionResponse, error) {
+	if err := s.saveSettings(model.DeceptionSessionRequest{}); err != nil {
+		return model.DeceptionSessionResponse{}, fmt.Errorf("%s: %w", s.translator.T(locale, "errors", "internal"), err)
+	}
+	return s.Stop(locale), nil
+}
+
 // Start 保存设置、打开串口并启动帧读取循环。
 func (s *Service) Start(req model.DeceptionSessionRequest, locale string) (model.DeceptionSessionResponse, error) {
 	req = s.normalizeRequest(req)

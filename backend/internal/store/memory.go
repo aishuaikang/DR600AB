@@ -424,8 +424,10 @@ func screenPositionIsPendingEncrypted(target model.ScreenPositionTarget) bool {
 }
 
 func screenPositionSerialMatches(existing, incoming string) bool {
-	existing = strings.ToUpper(stringsTrim(existing))
-	incoming = strings.ToUpper(stringsTrim(incoming))
+	existingRaw := strings.ToUpper(stringsTrim(existing))
+	incomingRaw := strings.ToUpper(stringsTrim(incoming))
+	existing = screenPositionCanonicalSerial(existingRaw)
+	incoming = screenPositionCanonicalSerial(incomingRaw)
 	if existing == "" || incoming == "" {
 		return false
 	}
@@ -440,7 +442,24 @@ func screenPositionSerialMatches(existing, incoming string) bool {
 	if screenPositionTrimRIDSerialPrefix(incoming) == existing {
 		return true
 	}
+	if screenPositionSerialSuffixMatches(existing, incoming, existingRaw, incomingRaw) {
+		return true
+	}
 	return false
+}
+
+func screenPositionCanonicalSerial(serial string) string {
+	var builder strings.Builder
+	builder.Grow(len(serial))
+	for _, r := range serial {
+		switch {
+		case r >= '0' && r <= '9':
+			builder.WriteRune(r)
+		case r >= 'A' && r <= 'Z':
+			builder.WriteRune(r)
+		}
+	}
+	return builder.String()
 }
 
 func screenPositionTrimRIDSerialPrefix(serial string) string {
@@ -449,6 +468,51 @@ func screenPositionTrimRIDSerialPrefix(serial string) string {
 		return serial
 	}
 	return strings.TrimPrefix(serial, ridSerialPrefix)
+}
+
+func screenPositionSerialSuffixMatches(existing, incoming, existingRaw, incomingRaw string) bool {
+	const minSuffixLength = 10
+	shorter, longer := existing, incoming
+	if len(shorter) > len(longer) {
+		shorter, longer = longer, shorter
+	}
+	commonSuffixLength := screenPositionCommonSuffixLength(existing, incoming)
+	if commonSuffixLength < minSuffixLength {
+		return false
+	}
+	if screenPositionSerialHasCorruptedPrefix(existingRaw, existing, commonSuffixLength) ||
+		screenPositionSerialHasCorruptedPrefix(incomingRaw, incoming, commonSuffixLength) {
+		return true
+	}
+	return len(shorter) == commonSuffixLength && len(longer)-len(shorter) >= 4
+}
+
+func screenPositionSerialHasCorruptedPrefix(raw, canonical string, suffixLength int) bool {
+	if suffixLength >= len(canonical) {
+		return false
+	}
+	if len(canonical)-suffixLength > 3 {
+		return false
+	}
+	for _, r := range raw {
+		return !screenPositionSerialRuneIsCanonical(r)
+	}
+	return false
+}
+
+func screenPositionSerialRuneIsCanonical(r rune) bool {
+	return (r >= '0' && r <= '9') || (r >= 'A' && r <= 'Z')
+}
+
+func screenPositionCommonSuffixLength(left, right string) int {
+	count := 0
+	for count < len(left) && count < len(right) {
+		if left[len(left)-1-count] != right[len(right)-1-count] {
+			break
+		}
+		count++
+	}
+	return count
 }
 
 func screenPositionMergeBaseIndex(

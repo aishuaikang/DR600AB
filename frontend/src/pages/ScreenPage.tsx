@@ -35,6 +35,8 @@ import footerBg from "../assets/images/screen/footerBg.svg?raw";
 import headerBg from "../assets/images/screen/headerBg.svg?raw";
 import mini2Image from "../assets/images/uav/mini2.png";
 import i18n from "../i18n";
+import { noFlyZonePresets } from "../data/noFlyZones";
+import type { NoFlyZonePreset } from "../data/noFlyZones";
 import { gps84ToGcj02 } from "../utils/leafletCoordConverter";
 import { compactLocaleName } from "../utils/locales";
 import { readDeveloperSession } from "../utils/developer";
@@ -52,6 +54,7 @@ const screenStrikeDurationPresets = [10, 15, 20, 30, 45, 60];
 const screenDeceptionDefaultMode: ScreenDeceptionMode = "fixed_point";
 const screenDeceptionMinAltitudeM = -500;
 const screenDeceptionMaxAltitudeM = 10000;
+const manualNoFlyZonePresetId = "__manual__";
 const screenDeceptionModeOptions: Array<{
   id: ScreenDeceptionMode;
   labelKey: string;
@@ -84,6 +87,9 @@ type NavigationQRCodeState = {
   point: ScreenPositionPoint;
   convertedPoint: ScreenPositionPoint;
   items: NavigationQRCodeItem[];
+};
+type NoFlyZonePresetWithDistance = NoFlyZonePreset & {
+  distanceM?: number;
 };
 const droneImageModules = import.meta.glob("../assets/images/drone/*.png", {
   eager: true,
@@ -227,6 +233,67 @@ function defaultLinearDirection(deviceLocation: ScreenDeviceLocationResponse | n
   return normalizeDegrees(bearingFromTo(deviceLocation.point, target) + 180);
 }
 
+function distanceMeters(from: ScreenPositionPoint, to: ScreenPositionPoint) {
+  const earthRadiusM = 6_371_000;
+  const lat1 = degreesToRadians(from.latitude);
+  const lat2 = degreesToRadians(to.latitude);
+  const deltaLat = degreesToRadians(to.latitude - from.latitude);
+  const deltaLon = degreesToRadians(to.longitude - from.longitude);
+  const a = Math.sin(deltaLat / 2) ** 2 +
+    Math.cos(lat1) * Math.cos(lat2) * Math.sin(deltaLon / 2) ** 2;
+  return earthRadiusM * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+function formatPresetDistance(distanceM?: number) {
+  if (typeof distanceM !== "number" || !Number.isFinite(distanceM)) {
+    return "-";
+  }
+  if (distanceM >= 1000) {
+    return `${(distanceM / 1000).toFixed(distanceM >= 100_000 ? 0 : 1)}km`;
+  }
+  return `${Math.round(distanceM)}m`;
+}
+
+function getNoFlyZoneDistanceOrigin(
+  deviceLocation: ScreenDeviceLocationResponse | null,
+  deceptionDeviceStatus: ScreenDeceptionDeviceStatus | null,
+): ScreenPositionPoint | null {
+  if (deviceLocation?.valid && deviceLocation.point) {
+    return deviceLocation.point;
+  }
+  const point = deceptionDeviceStatus?.currentPosition;
+  if (point && validDeceptionCoordinate(point.latitude, point.longitude)) {
+    return { latitude: point.latitude, longitude: point.longitude };
+  }
+  const queriedPoint = deceptionDeviceStatus?.queriedDevicePosition;
+  if (queriedPoint && validDeceptionCoordinate(queriedPoint.latitude, queriedPoint.longitude)) {
+    return { latitude: queriedPoint.latitude, longitude: queriedPoint.longitude };
+  }
+  return null;
+}
+
+function getSortedNoFlyZonePresets(origin: ScreenPositionPoint | null): NoFlyZonePresetWithDistance[] {
+  return noFlyZonePresets
+    .map((preset) => ({
+      ...preset,
+      distanceM: origin
+        ? distanceMeters(origin, { latitude: preset.latitude, longitude: preset.longitude })
+        : undefined,
+    }))
+    .sort((left, right) => {
+      if (typeof left.distanceM === "number" && typeof right.distanceM === "number") {
+        return left.distanceM - right.distanceM;
+      }
+      if (typeof left.distanceM === "number") {
+        return -1;
+      }
+      if (typeof right.distanceM === "number") {
+        return 1;
+      }
+      return left.name.localeCompare(right.name, "zh-Hans-CN");
+    });
+}
+
 function normalizeDegrees(value: number) {
   if (!Number.isFinite(value)) {
     return 0;
@@ -307,14 +374,6 @@ function getNavigationCoordinates(point: ScreenPositionPoint) {
       longitude: gcj02.lng,
     } satisfies ScreenPositionPoint,
   };
-}
-
-function formatDevice(device?: string) {
-  const value = device?.trim();
-  if (!value) {
-    return "-";
-  }
-  return value;
 }
 
 function validPositionMapPoint(point?: ScreenPositionPoint | null): point is ScreenPositionPoint {
@@ -756,11 +815,6 @@ function DetectionTargetCard({
             <strong>{formatRSSI(target.rssi)}</strong>
           </span>
         </div>
-
-        <span className="screen-detection-card__device">
-          <em>{t("device", { ns: "screen" })}</em>
-          <strong>{formatDevice(target.device)}</strong>
-        </span>
 
         {freshnessOpen ? (
           <span className={`screen-detection-card__freshness screen-detection-card__freshness--${timeTone}`}>
@@ -1535,6 +1589,7 @@ function ScreenStrikePanel({
   const [deceptionLatitudeInput, setDeceptionLatitudeInput] = useState("");
   const [deceptionLongitudeInput, setDeceptionLongitudeInput] = useState("");
   const [deceptionAltitudeInput, setDeceptionAltitudeInput] = useState("0");
+  const [selectedNoFlyZoneId, setSelectedNoFlyZoneId] = useState(manualNoFlyZonePresetId);
   const [deceptionMode, setDeceptionMode] = useState<ScreenDeceptionMode>(screenDeceptionDefaultMode);
   const [circleRadiusInput, setCircleRadiusInput] = useState("100");
   const [circlePeriodInput, setCirclePeriodInput] = useState("60");
@@ -1556,6 +1611,8 @@ function ScreenStrikePanel({
   const deceptionAltitudeNumber = parseCoordinateInput(deceptionAltitudeInput);
   const hasDeceptionCoordinate = validDeceptionCoordinate(deceptionLatitudeNumber, deceptionLongitudeNumber);
   const deceptionAltitudeValid = validDeceptionAltitude(deceptionAltitudeNumber);
+  const noFlyZoneDistanceOrigin = getNoFlyZoneDistanceOrigin(deviceLocation, deceptionDeviceStatus);
+  const sortedNoFlyZonePresets = getSortedNoFlyZonePresets(noFlyZoneDistanceOrigin);
   const selectedCount = active ? state?.channelIds.length ?? 0 : selectedChannelIds.length;
   const operationTitle = t(operationTab === "interference" ? "strike" : "deception", { ns: "screen" });
   const statusValue = operationTab === "interference"
@@ -1656,6 +1713,29 @@ function ScreenStrikePanel({
       setLinearDirectionInput(String(Math.round(autoDirection)));
     }
   }, [autoDirection, deceptionPoint, linearDirectionInput]);
+
+  const selectNoFlyZonePreset = (presetId: string) => {
+    setSelectedNoFlyZoneId(presetId);
+    if (presetId === manualNoFlyZonePresetId) {
+      return;
+    }
+    const preset = noFlyZonePresets.find((item) => item.id === presetId);
+    if (!preset) {
+      return;
+    }
+    setDeceptionLatitudeInput(formatCoordinateValue(preset.latitude));
+    setDeceptionLongitudeInput(formatCoordinateValue(preset.longitude));
+  };
+
+  const updateManualNoFlyZoneLatitude = (value: string) => {
+    setSelectedNoFlyZoneId(manualNoFlyZonePresetId);
+    setDeceptionLatitudeInput(normalizeCoordinateInput(value));
+  };
+
+  const updateManualNoFlyZoneLongitude = (value: string) => {
+    setSelectedNoFlyZoneId(manualNoFlyZonePresetId);
+    setDeceptionLongitudeInput(normalizeCoordinateInput(value));
+  };
 
 	const toggleChannel = (id: string) => {
     setSelectedChannelIds((items) => (
@@ -1865,6 +1945,21 @@ function ScreenStrikePanel({
               <div className="screen-deception-grid">
                 {deceptionMode === "fixed_point" ? (
                   <>
+                    <label className="screen-deception-field screen-deception-field--wide">
+                      <span>{t("deceptionNoFlyZonePreset", { ns: "screen" })}</span>
+                      <select
+                        value={selectedNoFlyZoneId}
+                        disabled={deceptionActive || busy}
+                        onChange={(event) => selectNoFlyZonePreset(event.target.value)}
+                      >
+                        <option value={manualNoFlyZonePresetId}>{t("deceptionNoFlyZoneManual", { ns: "screen" })}</option>
+                        {sortedNoFlyZonePresets.map((preset) => (
+                          <option key={preset.id} value={preset.id}>
+                            {preset.name}{preset.code ? ` ${preset.code}` : ""} · {formatPresetDistance(preset.distanceM)}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
                     <label className="screen-deception-field">
                       <span>{t("latitudeShort", { ns: "screen" })}</span>
                       <input
@@ -1875,7 +1970,7 @@ function ScreenStrikePanel({
                         value={deceptionLatitudeInput}
                         placeholder="23.129110"
                         disabled={deceptionActive || busy}
-                        onChange={(event) => setDeceptionLatitudeInput(normalizeCoordinateInput(event.target.value))}
+                        onChange={(event) => updateManualNoFlyZoneLatitude(event.target.value)}
                       />
                     </label>
                     <label className="screen-deception-field">
@@ -1888,7 +1983,7 @@ function ScreenStrikePanel({
                         value={deceptionLongitudeInput}
                         placeholder="113.264385"
                         disabled={deceptionActive || busy}
-                        onChange={(event) => setDeceptionLongitudeInput(normalizeCoordinateInput(event.target.value))}
+                        onChange={(event) => updateManualNoFlyZoneLongitude(event.target.value)}
                       />
                     </label>
                     <label className="screen-deception-field">

@@ -1722,6 +1722,7 @@ body.virtual-keyboard-open .app-loading-overlay {
   border-color: rgba(248, 113, 113, 0.48);
   color: #ffe4e6;
   background: rgba(248, 113, 113, 0.14);
+  min-width: 4em;
 }
 
 .screen-strike-panel__tabs {
@@ -2131,6 +2132,10 @@ body.virtual-keyboard-open .app-loading-overlay {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 0.34em;
+}
+
+.screen-deception-field--wide {
+  grid-column: 1 / -1;
 }
 
 .screen-deception-field input,
@@ -3170,31 +3175,6 @@ body.virtual-keyboard-open .app-loading-overlay {
   font-size: 0.7em;
   font-weight: 800;
   line-height: 1.1;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.screen-detection-card__device {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
-  gap: 0.32em;
-  min-width: 0;
-  color: rgba(219, 234, 238, 0.72);
-  font-size: 0.58em;
-  line-height: 1.1;
-}
-
-.screen-detection-card__device em {
-  color: rgba(202, 225, 230, 0.5);
-  font-style: normal;
-}
-
-.screen-detection-card__device strong {
-  min-width: 0;
-  overflow: hidden;
-  color: rgba(247, 251, 252, 0.84);
-  font-family: var(--font-mono);
-  font-weight: 700;
   text-overflow: ellipsis;
   white-space: nowrap;
 }

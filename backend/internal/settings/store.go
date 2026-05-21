@@ -41,9 +41,6 @@ func (s *Store) Load() (model.DetectionSessionRequest, bool, error) {
 	if err != nil || !ok {
 		return model.DetectionSessionRequest{}, false, err
 	}
-	if isEmptyDetectionSettings(settings.Detection) {
-		return model.DetectionSessionRequest{}, false, nil
-	}
 	return settings.Detection, true, nil
 }
 
@@ -74,9 +71,6 @@ func (s *Store) LoadGPS() (model.GPSSessionRequest, bool, error) {
 	if err != nil || !ok {
 		return model.GPSSessionRequest{}, false, err
 	}
-	if isEmptyGPSSettings(settings.GPS) {
-		return model.GPSSessionRequest{}, false, nil
-	}
 	return settings.GPS, true, nil
 }
 
@@ -106,9 +100,6 @@ func (s *Store) LoadDeception() (model.DeceptionSessionRequest, bool, error) {
 	settings, ok, err := s.load()
 	if err != nil || !ok {
 		return model.DeceptionSessionRequest{}, false, err
-	}
-	if isEmptyDeceptionSettings(settings.Deception) {
-		return model.DeceptionSessionRequest{}, false, nil
 	}
 	return settings.Deception, true, nil
 }
@@ -255,7 +246,8 @@ func (s *Store) load() (savedSettings, bool, error) {
 			!isEmptyGPSSettings(settings.GPS) ||
 			!isEmptyDeceptionSettings(settings.Deception) ||
 			!isEmptyNetworkSettings(settings.Network) ||
-			!isEmptyUserSettings(settings.User) {
+			!isEmptyUserSettings(settings.User) ||
+			isStructuredSettings(data) {
 			return settings, true, nil
 		}
 	}
@@ -264,7 +256,23 @@ func (s *Store) load() (savedSettings, bool, error) {
 	if err := json.Unmarshal(data, &legacy); err != nil {
 		return savedSettings{}, false, err
 	}
+	if isEmptyDetectionSettings(legacy) {
+		return savedSettings{}, false, nil
+	}
 	return savedSettings{Detection: legacy}, true, nil
+}
+
+func isStructuredSettings(data []byte) bool {
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return false
+	}
+	for _, key := range []string{"detection", "gps", "deception", "user"} {
+		if _, ok := raw[key]; ok {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *Store) save(settings savedSettings) error {

@@ -22,7 +22,7 @@ func main() {
 	portName := flag.String("port", "", "兼容参数：接收和发送使用同一个串口")
 	rxPortName := flag.String("rx-port", "", "接收数据串口名称，例如 macOS: /dev/tty.usbserial-XXXX")
 	txPortName := flag.String("tx-port", "", "发送命令串口名称，例如 macOS: /dev/tty.usbserial-YYYY")
-	baudRate := flag.Int("baud", 115200, "波特率")
+	baudRate := flag.Int("baud", 460800, "波特率")
 	dataBits := flag.Int("data", 8, "数据位")
 	stopBits := flag.Int("stop", 1, "停止位(1 或 2)")
 	parity := flag.String("parity", "none", "校验位: none/even/odd")

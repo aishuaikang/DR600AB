@@ -54,6 +54,7 @@ type O3PlusO4Decoder interface {
 const (
 	startDetectionCommand     = "start -freq 1"
 	didEncryptedFallbackModel = "DJI-Drone"
+	defaultBaudRate           = 460800
 )
 
 // SettingsStore 持久化最近一次侦测会话请求和公开用户设置。
@@ -141,6 +142,14 @@ func (s *Service) Settings() (model.DetectionSessionRequest, bool, error) {
 		return model.DetectionSessionRequest{}, false, nil
 	}
 	return s.settings.Load()
+}
+
+// ClearSettings 停止当前侦测会话并清空已保存的串口设置。
+func (s *Service) ClearSettings(locale string) (model.DetectionSessionResponse, error) {
+	if err := s.saveSettings(model.DetectionSessionRequest{}); err != nil {
+		return model.DetectionSessionResponse{}, fmt.Errorf("%s: %w", s.translator.T(locale, "errors", "internal"), err)
+	}
+	return s.Stop(locale), nil
 }
 
 // ListPorts 返回串口列表，并标记当前会话占用的串口。
@@ -319,6 +328,10 @@ func (s *Service) RestoreSavedSettings(locale string) {
 	}
 	req, ok, err := s.settings.Load()
 	if err != nil || !ok {
+		return
+	}
+	rxPortName, _ := s.resolvePortNames(req)
+	if !req.AutoConnect || rxPortName == "" {
 		return
 	}
 	_, _ = s.Start(req, locale)
@@ -965,7 +978,7 @@ func toParsedMessage(msg *parser.Message) model.ParsedMessage {
 // normalizeOptions 使用生产默认值补齐未设置的服务参数。
 func normalizeOptions(options Options) Options {
 	if options.DefaultBaudRate == 0 {
-		options.DefaultBaudRate = 115200
+		options.DefaultBaudRate = defaultBaudRate
 	}
 	if options.DefaultDataBits == 0 {
 		options.DefaultDataBits = 8

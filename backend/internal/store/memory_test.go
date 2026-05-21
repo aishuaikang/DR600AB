@@ -336,6 +336,47 @@ func TestMemoryStoreScreenPositionsMergeRIDSerialPrefixDifference(t *testing.T) 
 	}
 }
 
+func TestMemoryStoreScreenPositionsMergeCorruptedSerialPrefix(t *testing.T) {
+	st := NewMemoryStore(10, 10)
+	base := time.Now()
+
+	first := screenPositionTarget("#'iAL320040274", "device-a", "DJI Mavic 3", base)
+	second := screenPositionTarget("3YTBL320040274", "device-b", "DJI Mavic 3", base.Add(time.Second))
+
+	st.AddScreenPosition(first)
+	st.AddScreenPosition(second)
+
+	items := st.ListScreenPositions(10)
+	if len(items) != 1 {
+		t.Fatalf("screen positions count = %d, want 1", len(items))
+	}
+	if items[0].Serial != "3YTBL320040274" {
+		t.Fatalf("serial = %q, want latest valid serial", items[0].Serial)
+	}
+	if items[0].HitCount != 2 {
+		t.Fatalf("hit count = %d, want 2", items[0].HitCount)
+	}
+	if items[0].Device != "device-b" {
+		t.Fatalf("device = %q, want latest device-b", items[0].Device)
+	}
+}
+
+func TestMemoryStoreScreenPositionsDoesNotMergeCorruptedSerialMiddle(t *testing.T) {
+	st := NewMemoryStore(10, 10)
+	base := time.Now()
+
+	first := screenPositionTarget("ABC-1234567890", "device-a", "DJI Mavic 3", base)
+	second := screenPositionTarget("XYZ1234567890", "device-b", "DJI Mavic 3", base.Add(time.Second))
+
+	st.AddScreenPosition(first)
+	st.AddScreenPosition(second)
+
+	items := st.ListScreenPositions(10)
+	if len(items) != 2 {
+		t.Fatalf("screen positions count = %d, want 2", len(items))
+	}
+}
+
 func TestMemoryStoreScreenPositionsMergeByCorrelationID(t *testing.T) {
 	st := NewMemoryStore(10, 10)
 	base := time.Now()

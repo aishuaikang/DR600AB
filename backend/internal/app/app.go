@@ -32,7 +32,7 @@ func New(cfg config.Config) (*App, error) {
 	state := store.NewMemoryStore(cfg.MaxDetectionRecords, cfg.MaxParsedMessages)
 	settingsStore := settings.NewStore(cfg.SettingsPath)
 	detectionSvc := detection.NewService(state, translator, settingsStore, detection.Options{
-		DefaultBaudRate:       cfg.DefaultBaudRate,
+		DefaultBaudRate:       cfg.DetectionDefaultBaud,
 		DefaultDataBits:       cfg.DefaultDataBits,
 		DefaultStopBits:       cfg.DefaultStopBits,
 		DefaultParity:         cfg.DefaultParity,

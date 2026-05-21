@@ -71,22 +71,11 @@ func (s *Server) handleUpdateGPSSettings(c *fiber.Ctx) error {
 		)
 	}
 	if strings.TrimSpace(req.DataPortName) == "" && strings.TrimSpace(req.PortName) == "" {
-		return s.respondError(
-			c,
-			fiber.StatusBadRequest,
-			"gps_data_port_required",
-			s.translator.T(locale, "errors", "gps_data_port_required"),
-			nil,
-		)
-	}
-	if strings.TrimSpace(req.ControlPortName) == "" {
-		return s.respondError(
-			c,
-			fiber.StatusBadRequest,
-			"gps_control_port_required",
-			s.translator.T(locale, "errors", "gps_control_port_required"),
-			nil,
-		)
+		response, err := s.gps.ClearSettings(locale)
+		if err != nil {
+			return s.respondError(c, fiber.StatusInternalServerError, "internal", err.Error(), nil)
+		}
+		return c.JSON(response)
 	}
 
 	response, err := s.gps.Start(req, locale)
@@ -201,13 +190,11 @@ func (s *Server) handleUpdateDetectionSettings(c *fiber.Ctx) error {
 		)
 	}
 	if strings.TrimSpace(req.RxPortName) == "" && strings.TrimSpace(req.PortName) == "" {
-		return s.respondError(
-			c,
-			fiber.StatusBadRequest,
-			"port_required",
-			s.translator.T(locale, "errors", "port_required"),
-			nil,
-		)
+		response, err := s.detection.ClearSettings(locale)
+		if err != nil {
+			return s.respondError(c, fiber.StatusInternalServerError, "internal", err.Error(), nil)
+		}
+		return c.JSON(response)
 	}
 
 	response, err := s.detection.Start(req, locale)

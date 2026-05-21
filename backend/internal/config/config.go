@@ -13,6 +13,7 @@ type Config struct {
 	Addr                  string
 	DefaultLocale         string
 	SettingsPath          string
+	DetectionDefaultBaud  int
 	DefaultBaudRate       int
 	DefaultDataBits       int
 	DefaultStopBits       int
@@ -46,6 +47,7 @@ func Load() Config {
 		Addr:                  envString("API_ADDR", ":18080"),
 		DefaultLocale:         envString("API_DEFAULT_LOCALE", "zh-CN"),
 		SettingsPath:          envString("API_SETTINGS_PATH", "./backend/data/detection-settings.json"),
+		DetectionDefaultBaud:  envInt("API_DETECTION_DEFAULT_BAUD", 460800),
 		DefaultBaudRate:       envInt("API_DEFAULT_BAUD", 115200),
 		DefaultDataBits:       envInt("API_DEFAULT_DATA_BITS", 8),
 		DefaultStopBits:       envInt("API_DEFAULT_STOP_BITS", 1),

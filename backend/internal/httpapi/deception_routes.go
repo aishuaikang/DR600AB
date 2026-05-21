@@ -78,13 +78,11 @@ func (s *Server) startDeceptionFromBody(c *fiber.Ctx) error {
 		)
 	}
 	if strings.TrimSpace(req.PortName) == "" {
-		return s.respondError(
-			c,
-			fiber.StatusBadRequest,
-			"deception_port_required",
-			s.translator.T(locale, "errors", "deception_port_required"),
-			nil,
-		)
+		response, err := s.deception.ClearSettings(locale)
+		if err != nil {
+			return s.respondError(c, fiber.StatusInternalServerError, "internal", err.Error(), nil)
+		}
+		return c.JSON(response)
 	}
 
 	response, err := s.deception.Start(req, locale)

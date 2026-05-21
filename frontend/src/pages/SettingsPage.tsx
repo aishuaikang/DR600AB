@@ -8,6 +8,11 @@ import { Panel, PanelBody } from "../components/Panel";
 import { PortSelect } from "../components/PortSelect";
 import { SectionHeader } from "../components/SectionHeader";
 import type { Banner } from "../app/types";
+import {
+  DETECTION_DEFAULT_BAUD_RATE,
+  SERIAL_BAUD_RATE_LIMITS,
+  normalizeSerialBaudRate,
+} from "../serial-profile";
 import type { DeceptionSessionResponse, GPSSessionResponse, PortInfo, UserSettings } from "../types";
 import { cx } from "../utils/classnames";
 import { fullLocaleName } from "../utils/locales";
@@ -20,17 +25,23 @@ function normalizeStrikeLabel(value: string) {
   return value.trim().slice(0, 24);
 }
 
+function formatBaudRate(value: number) {
+  return String(normalizeSerialBaudRate(value));
+}
+
 export function SettingsPage({
   banner,
   ports,
   selectedReceivePort,
   selectedSendPort,
+  selectedDetectionBaudRate,
   selectedGPSDataPort,
   selectedGPSControlPort,
   selectedDeceptionPort,
   sessionStateLabel,
   currentReceivePort,
   currentSendPort,
+  currentDetectionBaudRate,
   gpsBanner,
   gpsSession,
   gpsSessionStateLabel,
@@ -49,6 +60,7 @@ export function SettingsPage({
   onRefresh,
   onReceivePortChange,
   onSendPortChange,
+  onDetectionBaudRateChange,
   onGPSDataPortChange,
   onGPSControlPortChange,
   onDeceptionPortChange,
@@ -60,12 +72,14 @@ export function SettingsPage({
   ports: PortInfo[];
   selectedReceivePort: string;
   selectedSendPort: string;
+  selectedDetectionBaudRate: number;
   selectedGPSDataPort: string;
   selectedGPSControlPort: string;
   selectedDeceptionPort: string;
   sessionStateLabel: string;
   currentReceivePort: string;
   currentSendPort: string;
+  currentDetectionBaudRate: number;
   gpsBanner: Banner;
   gpsSession: GPSSessionResponse | null;
   gpsSessionStateLabel: string;
@@ -84,6 +98,7 @@ export function SettingsPage({
   onRefresh: () => void;
   onReceivePortChange: (value: string) => void;
   onSendPortChange: (value: string) => void;
+  onDetectionBaudRateChange: (value: number) => void;
   onGPSDataPortChange: (value: string) => void;
   onGPSControlPortChange: (value: string) => void;
   onDeceptionPortChange: (value: string) => void;
@@ -102,12 +117,18 @@ export function SettingsPage({
     kind: "idle",
     text: "",
   });
+  const [detectionBaudRateDraft, setDetectionBaudRateDraft] = useState(() => formatBaudRate(selectedDetectionBaudRate));
   const normalizedStrikeLabels = strikeLabelDrafts.map(normalizeStrikeLabel);
   const strikeLabelsChanged = normalizedStrikeLabels.join("|") !== savedStrikeLabels.map(normalizeStrikeLabel).join("|");
+  const detectionBaudRate = normalizeSerialBaudRate(selectedDetectionBaudRate);
 
   useEffect(() => {
     setStrikeLabelDrafts(savedStrikeLabels);
   }, [savedStrikeLabels.join("|")]);
+
+  useEffect(() => {
+    setDetectionBaudRateDraft(formatBaudRate(selectedDetectionBaudRate));
+  }, [selectedDetectionBaudRate]);
 
   const handleToggleLocale = (locale: string) => {
     if (locale === currentLocale) {
@@ -169,6 +190,14 @@ export function SettingsPage({
     }
   };
 
+  const commitDetectionBaudRate = () => {
+    const nextBaudRate = normalizeSerialBaudRate(Number(detectionBaudRateDraft), detectionBaudRate);
+    setDetectionBaudRateDraft(formatBaudRate(nextBaudRate));
+    if (nextBaudRate !== selectedDetectionBaudRate) {
+      onDetectionBaudRateChange(nextBaudRate);
+    }
+  };
+
   return (
     <section className="grid gap-3">
       <Panel>
@@ -185,77 +214,10 @@ export function SettingsPage({
               </InfoTile>
               <InfoTile label={t("receivePort", { ns: "detection" })} value={currentReceivePort || t("unknown", { ns: "common" })} />
               <InfoTile label={t("sendPort", { ns: "detection" })} value={currentSendPort || t("unknown", { ns: "common" })} />
+              <InfoTile label={t("detectionBaudRate", { ns: "settings" })} value={`${currentDetectionBaudRate || DETECTION_DEFAULT_BAUD_RATE} bps`} />
             </div>
           </div>
           {banner.kind === "error" ? <BannerAlert banner={banner} /> : null}
-        </PanelBody>
-      </Panel>
-
-      <Panel>
-        <PanelBody>
-          <SectionHeader
-            title={t("deceptionSerialTitle", { ns: "settings" })}
-            description={t("deceptionSerialDescription", { ns: "settings" })}
-            action={
-              <span className="inline-flex h-8 items-center gap-2 rounded-xl border border-info/25 bg-info/10 px-3 text-xs font-semibold text-info">
-                <SatelliteDish size={15} />
-                GNSS
-              </span>
-            }
-          />
-
-          <div className="grid gap-3 md:grid-cols-3">
-            <InfoTile label={t("deceptionSessionTitle", { ns: "settings" })}>
-              {deceptionSessionStateLabel}
-            </InfoTile>
-            <InfoTile label={t("deceptionPort", { ns: "settings" })} value={currentDeceptionPort || t("unknown", { ns: "common" })} />
-            <InfoTile label={t("deceptionLastError", { ns: "settings" })} value={deceptionSession?.lastError || "-"} />
-          </div>
-
-          <PortSelect
-            label={t("deceptionPort", { ns: "settings" })}
-            placeholder={t("selectDeceptionPort", { ns: "settings" })}
-            value={selectedDeceptionPort}
-            ports={ports}
-            activeText={t("active", { ns: "common" })}
-            onChange={onDeceptionPortChange}
-          />
-        </PanelBody>
-      </Panel>
-
-      <Panel>
-        <PanelBody>
-          <SectionHeader
-            title={t("detectionSerialTitle", { ns: "settings" })}
-            description={t("detectionSerialDescription", { ns: "settings" })}
-            action={
-              <button className="btn btn-sm btn-outline btn-info" type="button" onClick={onRefresh}>
-                <RefreshCw size={16} />
-                <span>{t("refresh", { ns: "common" })}</span>
-              </button>
-            }
-          />
-
-          <div className="grid gap-3 md:grid-cols-2">
-            <PortSelect
-              label={t("detectionReceivePort", { ns: "settings" })}
-              placeholder={t("selectDetectionReceivePort", { ns: "settings" })}
-              value={selectedReceivePort}
-              ports={ports}
-              activeText={t("active", { ns: "common" })}
-              onChange={onReceivePortChange}
-            />
-            <PortSelect
-              label={t("detectionSendPort", { ns: "settings" })}
-              placeholder={t("selectDetectionSendPort", { ns: "settings" })}
-              value={selectedSendPort}
-              ports={ports}
-              activeText={t("active", { ns: "common" })}
-              onChange={onSendPortChange}
-            />
-          </div>
-
-          {ports.length === 0 ? <span className="text-sm text-base-content/55">{t("noPorts", { ns: "settings" })}</span> : null}
         </PanelBody>
       </Panel>
 
@@ -311,6 +273,98 @@ export function SettingsPage({
           </div>
 
           {gpsBanner.kind === "error" ? <BannerAlert banner={gpsBanner} /> : null}
+        </PanelBody>
+      </Panel>
+
+      <Panel>
+        <PanelBody>
+          <SectionHeader
+            title={t("detectionSerialTitle", { ns: "settings" })}
+            description={t("detectionSerialDescription", { ns: "settings" })}
+            action={
+              <button className="btn btn-sm btn-outline btn-info" type="button" onClick={onRefresh}>
+                <RefreshCw size={16} />
+                <span>{t("refresh", { ns: "common" })}</span>
+              </button>
+            }
+          />
+
+          <div className="grid gap-3 md:grid-cols-3">
+            <PortSelect
+              label={t("detectionReceivePort", { ns: "settings" })}
+              placeholder={t("selectDetectionReceivePort", { ns: "settings" })}
+              value={selectedReceivePort}
+              ports={ports}
+              activeText={t("active", { ns: "common" })}
+              onChange={onReceivePortChange}
+            />
+            <PortSelect
+              label={t("detectionSendPort", { ns: "settings" })}
+              placeholder={t("selectDetectionSendPort", { ns: "settings" })}
+              value={selectedSendPort}
+              ports={ports}
+              activeText={t("active", { ns: "common" })}
+              onChange={onSendPortChange}
+            />
+            <label className="grid gap-1.5">
+              <span className="text-xs font-medium text-base-content/60">{t("detectionBaudRate", { ns: "settings" })}</span>
+              <input
+                className="input input-bordered input-sm w-full bg-base-100"
+                type="number"
+                inputMode="numeric"
+                min={SERIAL_BAUD_RATE_LIMITS.min}
+                max={SERIAL_BAUD_RATE_LIMITS.max}
+                step={100}
+                value={detectionBaudRateDraft}
+                onChange={(event) => {
+                  setDetectionBaudRateDraft(event.target.value);
+                }}
+                onBlur={commitDetectionBaudRate}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") {
+                    event.currentTarget.blur();
+                  }
+                }}
+              />
+              <span className="text-xs leading-5 text-base-content/50">
+                {t("detectionBaudRateHint", { ns: "settings" })}
+              </span>
+            </label>
+          </div>
+
+          {ports.length === 0 ? <span className="text-sm text-base-content/55">{t("noPorts", { ns: "settings" })}</span> : null}
+        </PanelBody>
+      </Panel>
+
+      <Panel>
+        <PanelBody>
+          <SectionHeader
+            title={t("deceptionSerialTitle", { ns: "settings" })}
+            description={t("deceptionSerialDescription", { ns: "settings" })}
+            action={
+              <span className="inline-flex h-8 items-center gap-2 rounded-xl border border-info/25 bg-info/10 px-3 text-xs font-semibold text-info">
+                <SatelliteDish size={15} />
+                GNSS
+              </span>
+            }
+          />
+
+          <div className="grid gap-3 md:grid-cols-3">
+            <InfoTile label={t("deceptionSessionTitle", { ns: "settings" })}>
+              {deceptionSessionStateLabel}
+            </InfoTile>
+            <InfoTile label={t("deceptionPort", { ns: "settings" })} value={currentDeceptionPort || t("unknown", { ns: "common" })} />
+            <InfoTile label={t("deceptionLastError", { ns: "settings" })} value={deceptionSession?.lastError || "-"} />
+          </div>
+
+          <PortSelect
+            label={t("deceptionPort", { ns: "settings" })}
+            placeholder={t("selectDeceptionPort", { ns: "settings" })}
+            value={selectedDeceptionPort}
+            ports={ports}
+            activeText={t("active", { ns: "common" })}
+            onChange={onDeceptionPortChange}
+          />
         </PanelBody>
       </Panel>
 

@@ -106,6 +106,8 @@
   "deceptionLinearSpeed": "Speed (m/s)",
   "deceptionLinearDirection": "Bearing (°)",
   "deceptionLinearMaxSpeed": "Max Speed (m/s)",
+  "deceptionNoFlyZonePreset": "No-Fly Zone Preset",
+  "deceptionNoFlyZoneManual": "Manual Input",
   "deceptionModes.fixedPoint": "Simulated No-Fly Zone",
   "deceptionModes.circle": "Circular Motion",
   "deceptionModes.linear": "Uniform Acceleration",

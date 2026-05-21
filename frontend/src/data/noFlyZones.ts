@@ -1,0 +1,58 @@
+export interface NoFlyZonePreset {
+  id: string;
+  name: string;
+  code?: string;
+  latitude: number;
+  longitude: number;
+}
+
+export const noFlyZonePresets: NoFlyZonePreset[] = [
+  { id: "pek", name: "北京首都", code: "PEK", latitude: 40.0756, longitude: 116.5968 },
+  { id: "pkx", name: "北京大兴", code: "PKX", latitude: 39.5028, longitude: 116.4123 },
+  { id: "tsn", name: "天津滨海", code: "TSN", latitude: 39.1255, longitude: 117.3489 },
+  { id: "sjw", name: "石家庄正定", code: "SJW", latitude: 38.2807, longitude: 114.6973 },
+  { id: "tyn", name: "太原武宿", code: "TYN", latitude: 37.7469, longitude: 112.6292 },
+  { id: "het", name: "呼和浩特", code: "HET", latitude: 40.8479, longitude: 111.8144 },
+  { id: "she", name: "沈阳桃仙", code: "SHE", latitude: 41.6333, longitude: 123.4833 },
+  { id: "dlc", name: "大连周水子", code: "DLC", latitude: 38.9689, longitude: 121.5331 },
+  { id: "cgq", name: "长春龙嘉", code: "CGQ", latitude: 43.9962, longitude: 125.6849 },
+  { id: "hrb", name: "哈尔滨太平", code: "HRB", latitude: 45.6229, longitude: 126.2229 },
+  { id: "ohe", name: "漠河古莲", code: "OHE", latitude: 52.9228, longitude: 122.4292 },
+  { id: "pvg", name: "上海浦东", code: "PVG", latitude: 31.1433, longitude: 121.8058 },
+  { id: "sha", name: "上海虹桥", code: "SHA", latitude: 31.19, longitude: 121.3333 },
+  { id: "nkg", name: "南京禄口", code: "NKG", latitude: 31.7381, longitude: 118.6419 },
+  { id: "hgh", name: "杭州萧山", code: "HGH", latitude: 30.2363, longitude: 120.4246 },
+  { id: "hfe", name: "合肥新桥", code: "HFE", latitude: 31.9883, longitude: 117.2928 },
+  { id: "foc", name: "福州长乐", code: "FOC", latitude: 25.9309, longitude: 119.6629 },
+  { id: "xmn", name: "厦门高崎", code: "XMN", latitude: 24.549, longitude: 118.129 },
+  { id: "khn", name: "南昌昌北", code: "KHN", latitude: 28.8631, longitude: 115.9092 },
+  { id: "tao", name: "青岛胶东", code: "TAO", latitude: 36.3636, longitude: 120.0903 },
+  { id: "tna", name: "济南遥墙", code: "TNA", latitude: 36.8572, longitude: 117.2151 },
+  { id: "can", name: "广州白云", code: "CAN", latitude: 23.3925, longitude: 113.2989 },
+  { id: "szx", name: "深圳宝安", code: "SZX", latitude: 22.6393, longitude: 113.8161 },
+  { id: "zuh", name: "珠海金湾", code: "ZUH", latitude: 22.0117, longitude: 113.3761 },
+  { id: "hak", name: "海口美兰", code: "HAK", latitude: 19.9347, longitude: 110.4589 },
+  { id: "syx", name: "三亚凤凰", code: "SYX", latitude: 18.3002, longitude: 109.4192 },
+  { id: "csx", name: "长沙黄花", code: "CSX", latitude: 28.1892, longitude: 113.2208 },
+  { id: "wuh", name: "武汉天河", code: "WUH", latitude: 30.7722, longitude: 114.9108 },
+  { id: "cgo", name: "郑州新郑", code: "CGO", latitude: 34.5194, longitude: 113.8411 },
+  { id: "nng", name: "南宁吴圩", code: "NNG", latitude: 22.6283, longitude: 108.1722 },
+  { id: "kwl", name: "桂林两江", code: "KWL", latitude: 25.2281, longitude: 110.0309 },
+  { id: "ctu", name: "成都双流", code: "CTU", latitude: 30.5785, longitude: 103.9471 },
+  { id: "tfu", name: "成都天府", code: "TFU", latitude: 30.3214, longitude: 104.4443 },
+  { id: "cqn", name: "重庆江北", code: "CQN", latitude: 29.7192, longitude: 106.6417 },
+  { id: "kmg", name: "昆明长水", code: "KMG", latitude: 25.1019, longitude: 102.9289 },
+  { id: "kwe", name: "贵阳龙洞堡", code: "KWE", latitude: 26.5312, longitude: 106.7939 },
+  { id: "lxa", name: "拉萨贡嘎", code: "LXA", latitude: 29.2978, longitude: 90.9156 },
+  { id: "xiy", name: "西安咸阳", code: "XIY", latitude: 34.4471, longitude: 108.7517 },
+  { id: "lhw", name: "兰州中川", code: "LHW", latitude: 36.5167, longitude: 103.6267 },
+  { id: "xnn", name: "西宁曹家堡", code: "XNN", latitude: 36.53, longitude: 102.04 },
+  { id: "inc", name: "银川河东", code: "INC", latitude: 38.35, longitude: 106.35 },
+  { id: "urc", name: "乌鲁木齐地窝堡", code: "URC", latitude: 43.9071, longitude: 87.4742 },
+  { id: "khg", name: "喀什", code: "KHG", latitude: 39.54, longitude: 76.02 },
+  { id: "kow", name: "赣州黄金", code: "KOW", latitude: 25.7478, longitude: 114.9317 },
+  { id: "jiu", name: "九江庐山", code: "JIU", latitude: 29.4867, longitude: 115.8189 },
+  { id: "yic", name: "宜春明月山", code: "YIC", latitude: 27.8289, longitude: 114.3153 },
+  { id: "sqd", name: "上饶三清山", code: "SQD", latitude: 28.4333, longitude: 118.2167 },
+  { id: "ytlhs", name: "鹰潭龙虎山（规划）", latitude: 28.2345, longitude: 117.0123 },
+];

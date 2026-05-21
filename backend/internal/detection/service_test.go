@@ -439,6 +439,39 @@ func TestStartSessionFallsBackToLegacyPortName(t *testing.T) {
 	_ = svc.Stop("zh-CN")
 }
 
+func TestStartSessionUsesDetectionDefaultBaudRate(t *testing.T) {
+	tr, err := i18n.New("zh-CN")
+	if err != nil {
+		t.Fatalf("i18n.New() error = %v", err)
+	}
+	st := store.NewMemoryStore(10, 10)
+	svc := NewService(st, tr, settings.NewStore(filepath.Join(t.TempDir(), "settings.json")), Options{})
+
+	var openedConfig serialport.Config
+	svc.SetSerialOpener(func(cfg *serialport.Config) (serial.Port, error) {
+		openedConfig = *cfg
+		return newFakeSerialPort(), nil
+	})
+
+	resp, err := svc.Start(model.DetectionSessionRequest{
+		PortName: "/dev/detection",
+		DataBits: 8,
+		StopBits: 1,
+		Parity:   "none",
+	}, "zh-CN")
+	if err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+	if openedConfig.BaudRate != defaultBaudRate {
+		t.Fatalf("opened baud rate = %d, want %d", openedConfig.BaudRate, defaultBaudRate)
+	}
+	if resp.BaudRate != defaultBaudRate {
+		t.Fatalf("response baud rate = %d, want %d", resp.BaudRate, defaultBaudRate)
+	}
+
+	_ = svc.Stop("zh-CN")
+}
+
 func TestStartSessionSendsStartCommandAfterSwitchingTxPort(t *testing.T) {
 	tr, err := i18n.New("zh-CN")
 	if err != nil {
@@ -546,6 +579,34 @@ func TestRestoreSavedSettingsAutoConnectsOnStartup(t *testing.T) {
 	}
 
 	_ = svc.Stop("zh-CN")
+}
+
+func TestRestoreSavedSettingsSkipsClearedSettings(t *testing.T) {
+	tr, err := i18n.New("zh-CN")
+	if err != nil {
+		t.Fatalf("i18n.New() error = %v", err)
+	}
+
+	settingsStore := settings.NewStore(filepath.Join(t.TempDir(), "settings.json"))
+	if err := settingsStore.Save(model.DetectionSessionRequest{}); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	svc := NewService(store.NewMemoryStore(10, 10), tr, settingsStore, Options{})
+
+	openCount := 0
+	svc.SetSerialOpener(func(cfg *serialport.Config) (serial.Port, error) {
+		openCount++
+		return newFakeSerialPort(), nil
+	})
+
+	svc.RestoreSavedSettings("zh-CN")
+
+	if openCount != 0 {
+		t.Fatalf("open count = %d, want 0", openCount)
+	}
+	if current := svc.Current("zh-CN"); current.Active {
+		t.Fatalf("restored session active = true, want inactive: %+v", current)
+	}
 }
 
 func TestReconnectsAfterPortClosesAutomatically(t *testing.T) {

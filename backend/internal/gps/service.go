@@ -101,6 +101,14 @@ func (s *Service) Settings() (model.GPSSessionRequest, bool, error) {
 	return s.settings.LoadGPS()
 }
 
+// ClearSettings 停止当前 GPS 会话并清空已保存的串口设置。
+func (s *Service) ClearSettings(locale string) (model.GPSSessionResponse, error) {
+	if err := s.saveSettings(model.GPSSessionRequest{}); err != nil {
+		return model.GPSSessionResponse{}, fmt.Errorf("%s: %w", s.translator.T(locale, "errors", "internal"), err)
+	}
+	return s.Stop(locale), nil
+}
+
 // Start 保存设置、打开串口并启动 GPS NMEA 读取循环。
 func (s *Service) Start(req model.GPSSessionRequest, locale string) (model.GPSSessionResponse, error) {
 	req = s.normalizeRequest(req)
@@ -254,6 +262,10 @@ func (s *Service) RestoreSavedSettings(locale string) {
 	}
 	req, ok, err := s.settings.LoadGPS()
 	if err != nil || !ok {
+		return
+	}
+	dataPortName, controlPortName := s.resolvePortNames(req)
+	if !req.AutoConnect || dataPortName == "" || controlPortName == "" {
 		return
 	}
 	_, _ = s.Start(req, locale)

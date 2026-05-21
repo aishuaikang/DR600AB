@@ -106,6 +106,8 @@
   "deceptionLinearSpeed": "速度(m/s)",
   "deceptionLinearDirection": "方向角(°)",
   "deceptionLinearMaxSpeed": "最大速度(m/s)",
+  "deceptionNoFlyZonePreset": "禁飞区预设",
+  "deceptionNoFlyZoneManual": "手动输入",
   "deceptionModes.fixedPoint": "模拟禁飞区",
   "deceptionModes.circle": "圆周运动",
   "deceptionModes.linear": "匀加速运动",

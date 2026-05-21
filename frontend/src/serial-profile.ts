@@ -6,3 +6,20 @@ export const FIXED_SERIAL_PROFILE = {
   readTimeoutMs: 1000,
 } as const;
 
+export const DETECTION_DEFAULT_BAUD_RATE = 460800;
+
+export const SERIAL_BAUD_RATE_LIMITS = {
+  min: 1200,
+  max: 3000000,
+} as const;
+
+export function normalizeSerialBaudRate(value: number | undefined, fallback = DETECTION_DEFAULT_BAUD_RATE) {
+  const baudRate = Math.trunc(Number(value));
+  if (!Number.isFinite(baudRate)) {
+    return fallback;
+  }
+  if (baudRate < SERIAL_BAUD_RATE_LIMITS.min || baudRate > SERIAL_BAUD_RATE_LIMITS.max) {
+    return fallback;
+  }
+  return baudRate;
+}

@@ -133,6 +133,41 @@ func TestStoreClearsUserSettingsWithoutOverwritingOtherSettings(t *testing.T) {
 	}
 }
 
+func TestStoreLoadsClearedStructuredSettings(t *testing.T) {
+	store := NewStore(filepath.Join(t.TempDir(), "settings.json"))
+	if err := store.Save(model.DetectionSessionRequest{}); err != nil {
+		t.Fatalf("Save(clear detection) error = %v", err)
+	}
+	if err := store.SaveGPS(model.GPSSessionRequest{}); err != nil {
+		t.Fatalf("SaveGPS(clear gps) error = %v", err)
+	}
+	if err := store.SaveDeception(model.DeceptionSessionRequest{}); err != nil {
+		t.Fatalf("SaveDeception(clear deception) error = %v", err)
+	}
+
+	gotDetection, ok, err := store.Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if !ok || gotDetection.PortName != "" || gotDetection.RxPortName != "" || gotDetection.TxPortName != "" {
+		t.Fatalf("Load() = %+v, %v, want empty structured detection settings", gotDetection, ok)
+	}
+	gotGPS, ok, err := store.LoadGPS()
+	if err != nil {
+		t.Fatalf("LoadGPS() error = %v", err)
+	}
+	if !ok || gotGPS.PortName != "" || gotGPS.DataPortName != "" || gotGPS.ControlPortName != "" {
+		t.Fatalf("LoadGPS() = %+v, %v, want empty structured gps settings", gotGPS, ok)
+	}
+	gotDeception, ok, err := store.LoadDeception()
+	if err != nil {
+		t.Fatalf("LoadDeception() error = %v", err)
+	}
+	if !ok || gotDeception.PortName != "" {
+		t.Fatalf("LoadDeception() = %+v, %v, want empty structured deception settings", gotDeception, ok)
+	}
+}
+
 func TestStoreWritesEmptyNetworkPrioritiesAsArray(t *testing.T) {
 	storePath := filepath.Join(t.TempDir(), "settings.json")
 	store := NewStore(storePath)
