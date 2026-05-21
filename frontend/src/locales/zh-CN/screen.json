@@ -75,6 +75,7 @@
   "targetFreshness.stale": "15-40 秒未更新，更新变慢",
   "targetFreshness.old": "40 秒以上未更新，接近过期",
   "targetFreshness.unknown": "更新时间未知",
+  "targetDisappearCountdown": "消失倒计时",
   "fpvSignalTransmission": "FPV 图传",
   "deviceNames.northDetector": "北区侦测站",
   "deviceNames.eastJammer": "东区压制站",

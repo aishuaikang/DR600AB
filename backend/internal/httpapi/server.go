@@ -2,6 +2,9 @@
 package httpapi
 
 import (
+	"sync"
+	"time"
+
 	"github.com/gofiber/fiber/v2"
 
 	"dr600ab-api/internal/config"
@@ -26,7 +29,13 @@ type UserSettingsStore interface {
 // IntrusionStore 查询已归档的目标入侵记录。
 type IntrusionStore interface {
 	List(intrusion.QueryOptions) ([]model.IntrusionRecord, error)
+	Delete([]string) (int64, error)
+	PruneRetention(days int, now time.Time) (int64, error)
 	Close() error
+}
+
+type intrusionDeviceLocationSetter interface {
+	SetDeviceLocationProvider(intrusion.DeviceLocationProvider)
 }
 
 // Server 持有 Fiber 应用以及对外暴露的后端服务。
@@ -42,6 +51,9 @@ type Server struct {
 	deception    *deception.Service
 	userSettings UserSettingsStore
 	intrusions   IntrusionStore
+
+	intrusionPruneMu      sync.Mutex
+	lastIntrusionPruneRun time.Time
 }
 
 // New 创建 Server，并注册中间件和 API 路由。
@@ -72,6 +84,15 @@ func New(
 	s.app = fiber.New(fiber.Config{
 		AppName: "dr600ab-api",
 	})
+	if setter, ok := intrusionStore.(intrusionDeviceLocationSetter); ok {
+		setter.SetDeviceLocationProvider(func() *model.ScreenDeviceLocationResponse {
+			location, err := s.currentScreenDeviceLocation()
+			if err != nil || !location.Valid {
+				return nil
+			}
+			return &location
+		})
+	}
 	s.routes()
 	return s
 }

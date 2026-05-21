@@ -42,7 +42,17 @@ func (s *Server) handleScreenStatus(c *fiber.Ctx) error {
 
 // handleScreenDetections 返回大屏使用的合并侦测目标列表。
 func (s *Server) handleScreenDetections(c *fiber.Ctx) error {
+	locale := s.resolveLocale(c)
 	items := s.detection.ScreenDetections(parseLimit(c, 100))
+	if err := s.maybePruneIntrusionsByCurrentUserSettings(); err != nil {
+		return s.respondError(
+			c,
+			fiber.StatusInternalServerError,
+			"internal",
+			s.translator.T(locale, "errors", "internal"),
+			err.Error(),
+		)
+	}
 	return c.JSON(model.ListResponse[model.ScreenDetectionTarget]{
 		Items: items,
 		Count: len(items),
@@ -51,7 +61,17 @@ func (s *Server) handleScreenDetections(c *fiber.Ctx) error {
 
 // handleScreenPositions 返回大屏使用的合并定位目标列表。
 func (s *Server) handleScreenPositions(c *fiber.Ctx) error {
+	locale := s.resolveLocale(c)
 	items := s.detection.ScreenPositions(parseLimit(c, 100))
+	if err := s.maybePruneIntrusionsByCurrentUserSettings(); err != nil {
+		return s.respondError(
+			c,
+			fiber.StatusInternalServerError,
+			"internal",
+			s.translator.T(locale, "errors", "internal"),
+			err.Error(),
+		)
+	}
 	return c.JSON(model.ListResponse[model.ScreenPositionTarget]{
 		Items: items,
 		Count: len(items),
@@ -61,25 +81,17 @@ func (s *Server) handleScreenPositions(c *fiber.Ctx) error {
 // handleScreenDeviceLocation 返回大屏地图使用的设备位置。
 func (s *Server) handleScreenDeviceLocation(c *fiber.Ctx) error {
 	locale := s.resolveLocale(c)
-	userSettings := model.UserSettings{}
-	if s.userSettings != nil {
-		settings, ok, err := s.userSettings.LoadUser()
-		if err != nil {
-			return s.respondError(
-				c,
-				fiber.StatusInternalServerError,
-				"internal",
-				s.translator.T(locale, "errors", "internal"),
-				err.Error(),
-			)
-		}
-		if ok {
-			userSettings = settings
-		}
+	response, err := s.currentScreenDeviceLocation()
+	if err != nil {
+		return s.respondError(
+			c,
+			fiber.StatusInternalServerError,
+			"internal",
+			s.translator.T(locale, "errors", "internal"),
+			err.Error(),
+		)
 	}
-
-	fix, updatedAt := s.gps.LatestFix()
-	return c.JSON(screenDeviceLocationResponse(fix, updatedAt, userSettings))
+	return c.JSON(response)
 }
 
 // handleScreenStrike 返回大屏干扰控制状态。
@@ -176,24 +188,36 @@ func (s *Server) handleSetScreenDeception(c *fiber.Ctx) error {
 }
 
 func (s *Server) screenDeviceLocation() (model.GeoPoint, float64, bool, error) {
+	response, err := s.currentScreenDeviceLocation()
+	if err != nil || !response.Valid || response.Point == nil {
+		return model.GeoPoint{}, 0, false, err
+	}
+	altitudeM := 0.0
+	if s.gps != nil && response.Source == "gps" {
+		if fix, _ := s.gps.LatestFix(); validGPSFix(fix) {
+			altitudeM = fix.AltitudeM
+		}
+	}
+	return *response.Point, altitudeM, true, nil
+}
+
+func (s *Server) currentScreenDeviceLocation() (model.ScreenDeviceLocationResponse, error) {
 	userSettings := model.UserSettings{}
 	if s.userSettings != nil {
 		settings, ok, err := s.userSettings.LoadUser()
 		if err != nil {
-			return model.GeoPoint{}, 0, false, err
+			return model.ScreenDeviceLocationResponse{}, err
 		}
 		if ok {
 			userSettings = settings
 		}
 	}
-	fix, _ := s.gps.LatestFix()
-	if validGPSFix(fix) {
-		return model.GeoPoint{Latitude: fix.Latitude, Longitude: fix.Longitude}, fix.AltitudeM, true, nil
+	var fix *model.GPSFix
+	var updatedAt *time.Time
+	if s.gps != nil {
+		fix, updatedAt = s.gps.LatestFix()
 	}
-	if validGeoPoint(userSettings.ManualDeviceLocation) {
-		return *userSettings.ManualDeviceLocation, 0, true, nil
-	}
-	return model.GeoPoint{}, 0, false, nil
+	return screenDeviceLocationResponse(fix, updatedAt, userSettings), nil
 }
 
 func (s *Server) screenStatus(locale string) (model.ScreenRuntimeStatus, error) {

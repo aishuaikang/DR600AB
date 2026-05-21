@@ -6,6 +6,9 @@ import { SectionHeader } from "../components/SectionHeader";
 import type { UserSettings } from "../types";
 import { extractErrorMessage } from "../utils/session";
 
+const defaultIntrusionRetentionDays = 90;
+const intrusionRetentionOptions = [30, 90, 180, 0];
+
 function coordinateDraft(value: number | undefined) {
   return typeof value === "number" && Number.isFinite(value) ? String(value) : "";
 }
@@ -52,8 +55,17 @@ export function UserSettingsPage({
     kind: "idle",
     text: "",
   });
+  const [retentionSaving, setRetentionSaving] = useState(false);
+  const [retentionMessage, setRetentionMessage] = useState<{ kind: "idle" | "success" | "error"; text: string }>({
+    kind: "idle",
+    text: "",
+  });
+  const [retentionDraft, setRetentionDraft] = useState(() => String(userSettings.intrusionRetentionDays ?? defaultIntrusionRetentionDays));
   const normalizedDraft = titleDraft.trim();
   const changed = normalizedDraft !== appTitle;
+  const savedRetentionDays = userSettings.intrusionRetentionDays ?? defaultIntrusionRetentionDays;
+  const retentionDays = Number(retentionDraft);
+  const retentionChanged = Number.isFinite(retentionDays) && retentionDays >= 0 && retentionDays !== savedRetentionDays;
   const savedLatitude = userSettings.manualDeviceLocation?.latitude;
   const savedLongitude = userSettings.manualDeviceLocation?.longitude;
   const latitude = parseCoordinate(latitudeDraft);
@@ -78,6 +90,10 @@ export function UserSettingsPage({
     setLatitudeDraft(coordinateDraft(userSettings.manualDeviceLocation?.latitude));
     setLongitudeDraft(coordinateDraft(userSettings.manualDeviceLocation?.longitude));
   }, [userSettings.manualDeviceLocation?.latitude, userSettings.manualDeviceLocation?.longitude]);
+
+  useEffect(() => {
+    setRetentionDraft(String(userSettings.intrusionRetentionDays ?? defaultIntrusionRetentionDays));
+  }, [userSettings.intrusionRetentionDays]);
 
   const saveManualLocation = async () => {
     if (!locationValid) {
@@ -115,6 +131,26 @@ export function UserSettingsPage({
       setLocationMessage({ kind: "error", text: extractErrorMessage(error, t("unexpectedError", { ns: "common" })) });
     } finally {
       setLocationSaving(false);
+    }
+  };
+
+  const saveIntrusionRetention = async () => {
+    if (!Number.isFinite(retentionDays) || retentionDays < 0) {
+      setRetentionMessage({ kind: "error", text: t("intrusionRetentionInvalid", { ns: "settings" }) });
+      return;
+    }
+    setRetentionSaving(true);
+    setRetentionMessage({ kind: "idle", text: "" });
+    try {
+      await onUserSettingsChange({
+        ...userSettings,
+        intrusionRetentionDays: retentionDays,
+      });
+      setRetentionMessage({ kind: "success", text: t("intrusionRetentionSaved", { ns: "settings" }) });
+    } catch (error) {
+      setRetentionMessage({ kind: "error", text: extractErrorMessage(error, t("unexpectedError", { ns: "common" })) });
+    } finally {
+      setRetentionSaving(false);
     }
   };
 
@@ -261,6 +297,61 @@ export function UserSettingsPage({
               onClick={() => void saveManualLocation()}
             >
               {locationSaving ? t("loading", { ns: "common" }) : t("save", { ns: "common" })}
+            </button>
+          </div>
+        </PanelBody>
+      </Panel>
+
+      <Panel>
+        <PanelBody>
+          <SectionHeader
+            title={t("intrusionRetentionTitle", { ns: "settings" })}
+            description={t("intrusionRetentionDescription", { ns: "settings" })}
+          />
+
+          <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_18rem]">
+            <label className="grid gap-1.5">
+              <span className="text-xs font-medium text-base-content/60">{t("intrusionRetentionField", { ns: "settings" })}</span>
+              <select
+                className="select select-bordered select-sm w-full bg-base-100"
+                value={retentionDraft}
+                onChange={(event) => setRetentionDraft(event.target.value)}
+              >
+                {intrusionRetentionOptions.map((days) => (
+                  <option key={days} value={days}>
+                    {days === 0
+                      ? t("intrusionRetentionForever", { ns: "settings" })
+                      : t("intrusionRetentionDays", { ns: "settings", value: days })}
+                  </option>
+                ))}
+              </select>
+              <span className="text-xs leading-5 text-base-content/50">{t("intrusionRetentionHint", { ns: "settings" })}</span>
+            </label>
+
+            <div className="rounded-2xl border border-base-300 bg-base-100/45 p-3">
+              <span className="text-[11px] font-semibold uppercase tracking-wide text-base-content/45">{t("savedValue", { ns: "settings" })}</span>
+              <strong className="mt-2 block text-sm font-semibold text-base-content">
+                {savedRetentionDays === 0
+                  ? t("intrusionRetentionForever", { ns: "settings" })
+                  : t("intrusionRetentionDays", { ns: "settings", value: savedRetentionDays })}
+              </strong>
+            </div>
+          </div>
+
+          {retentionMessage.text ? (
+            <div className={`alert py-2 text-sm ${retentionMessage.kind === "error" ? "alert-error" : "alert-success"}`}>
+              {retentionMessage.text}
+            </div>
+          ) : null}
+
+          <div className="flex flex-wrap justify-end gap-2">
+            <button
+              className="btn btn-sm btn-primary"
+              type="button"
+              disabled={retentionSaving || !retentionChanged}
+              onClick={() => void saveIntrusionRetention()}
+            >
+              {retentionSaving ? t("loading", { ns: "common" }) : t("save", { ns: "common" })}
             </button>
           </div>
         </PanelBody>

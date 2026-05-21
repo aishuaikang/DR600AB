@@ -191,7 +191,7 @@ func (s *Store) SaveUser(req model.UserSettings) error {
 func (s *Store) SaveEditableUser(req model.UserSettings) (model.UserSettings, error) {
 	req.DeviceSN = ""
 	if s == nil || s.path == "" {
-		return req, nil
+		return model.UserSettingsWithDefaults(req), nil
 	}
 
 	s.mu.Lock()
@@ -207,7 +207,7 @@ func (s *Store) SaveEditableUser(req model.UserSettings) (model.UserSettings, er
 	if err := s.save(settings); err != nil {
 		return model.UserSettings{}, err
 	}
-	return settings.User, nil
+	return model.UserSettingsWithDefaults(settings.User), nil
 }
 
 // SaveUserDeviceSN 保存侦测板卡上报的设备唯一 SN，并保留其他用户设置。
@@ -338,7 +338,8 @@ func isEmptyNetworkSettings(req model.NetworkSettings) bool {
 func isEmptyUserSettings(req model.UserSettings) bool {
 	return req.DeviceSN == "" &&
 		req.ManualDeviceLocation == nil &&
-		len(req.ScreenStrikeChannelLabels) == 0
+		len(req.ScreenStrikeChannelLabels) == 0 &&
+		req.IntrusionRetentionDays == nil
 }
 
 func normalizeSavedSettings(settings savedSettings) savedSettings {

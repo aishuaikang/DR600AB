@@ -128,6 +128,7 @@ export interface UserSettings {
   deviceSn?: string;
   manualDeviceLocation?: GeoPoint;
   screenStrikeChannelLabels?: string[];
+  intrusionRetentionDays?: number;
 }
 
 export interface ScreenDeviceLocationResponse {
@@ -446,6 +447,7 @@ export interface ScreenDetectionLastRecord {
 
 export interface ScreenDetectionTarget {
   id: string;
+  serial?: string;
   model: string;
   frequency: number;
   rssi: number;
@@ -484,6 +486,7 @@ export interface ScreenPositionTarget {
   serial: string;
   model: string;
   source: string;
+  sources?: string[];
   frequency?: number;
   rssi?: number;
   device?: string;
@@ -518,7 +521,9 @@ export interface IntrusionRecord {
   durationSeconds: number;
   hitCount: number;
   source?: string;
+  sources?: string[];
   cracked?: boolean;
+  deviceLocation?: ScreenDeviceLocationResponse;
   drone?: ScreenPositionPoint;
   pilot?: ScreenPositionPoint;
   home?: ScreenPositionPoint;
@@ -529,6 +534,14 @@ export interface IntrusionRecord {
   speed?: number;
   lastRecord?: unknown;
   archivedAt: string;
+}
+
+export interface IntrusionDeleteRequest {
+  ids: string[];
+}
+
+export interface IntrusionDeleteResponse {
+  deleted: number;
 }
 
 export type DebugRecord = DetectionRecord | ParsedMessage;

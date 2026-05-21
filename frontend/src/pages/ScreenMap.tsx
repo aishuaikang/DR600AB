@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef } from "react";
 import type { TFunction } from "i18next";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
+import { useTranslation } from "react-i18next";
 
 import centerPointIcon from "../assets/images/centerPoint.svg";
 import i18n from "../i18n";
@@ -11,6 +12,7 @@ import type {
   ScreenPositionTarget,
   ScreenPositionTrackPoint,
 } from "../types";
+import { cx } from "../utils/classnames";
 import { createDrawControlButtonGroup } from "../utils/leafletControls";
 import { installLeafletCoordConverter } from "../utils/leafletCoordConverter";
 import {
@@ -37,6 +39,22 @@ type RealMapData = {
   deviceLocation: ScreenDeviceLocationResponse | null;
   positions: ScreenPositionTarget[];
 };
+
+type PositionMapProps = {
+  selectedId: string;
+  positions: ScreenPositionTarget[];
+  deviceLocation: ScreenDeviceLocationResponse | null;
+  visibleMapLayers: ReferenceMapLayer[];
+  onSelectPosition: (target: ScreenPositionTarget) => void;
+  onMapReady?: (map: L.Map | null) => void;
+  className?: string;
+};
+
+type ScreenMapProps = PositionMapProps & {
+  t: TFunction;
+};
+
+const noopMapReady = () => undefined;
 
 function getOfflineTileBase() {
   if (typeof window === "undefined") {
@@ -211,6 +229,14 @@ function collectRealMapPoints(deviceLocation: ScreenDeviceLocationResponse | nul
   return points;
 }
 
+function fitBoundsPadding(map: L.Map) {
+  const size = map.getSize();
+  return {
+    paddingTopLeft: L.point(Math.min(110, Math.max(32, size.x * 0.1)), Math.min(120, Math.max(36, size.y * 0.16))),
+    paddingBottomRight: L.point(Math.min(520, Math.max(48, size.x * 0.28)), Math.min(120, Math.max(36, size.y * 0.16))),
+  };
+}
+
 function fitRealScreenBounds(
   map: L.Map,
   deviceLocation: ScreenDeviceLocationResponse | null,
@@ -227,8 +253,7 @@ function fitRealScreenBounds(
   }
 
   map.fitBounds(L.latLngBounds(points), {
-    paddingTopLeft: L.point(110, 120),
-    paddingBottomRight: L.point(520, 120),
+    ...fitBoundsPadding(map),
     maxZoom: 14,
   });
 }
@@ -421,23 +446,16 @@ function selectedPositionPoint(positions: ScreenPositionTarget[], selectedId: st
   return target.drone ?? target.pilot ?? null;
 }
 
-export function ScreenMap({
-  t,
+export function PositionMap({
   selectedId,
   positions,
   deviceLocation,
   visibleMapLayers,
   onSelectPosition,
-  onMapReady,
-}: {
-  t: TFunction;
-  selectedId: string;
-  positions: ScreenPositionTarget[];
-  deviceLocation: ScreenDeviceLocationResponse | null;
-  visibleMapLayers: ReferenceMapLayer[];
-  onSelectPosition: (target: ScreenPositionTarget) => void;
-  onMapReady: (map: L.Map | null) => void;
-}) {
+  onMapReady = noopMapReady,
+  className,
+}: PositionMapProps) {
+  const { t } = useTranslation();
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<L.Map | null>(null);
   const deviceLayerRef = useRef<L.LayerGroup | null>(null);
@@ -558,6 +576,7 @@ export function ScreenMap({
       if (mapRef.current !== map) {
         return;
       }
+      map.invalidateSize();
       if (collectRealMapPoints(data.deviceLocation, data.positions).length) {
         fitRealScreenBounds(map, data.deviceLocation, data.positions);
         hasFitRealBoundsRef.current = true;
@@ -613,5 +632,9 @@ export function ScreenMap({
     map.setView([point.latitude, point.longitude], Math.max(map.getZoom(), 14), { animate: false });
   }, [positions, selectedId]);
 
-  return <div id="lmap" ref={containerRef} className="screen-map dark" />;
+  return <div ref={containerRef} className={cx("screen-map dark", className)} />;
+}
+
+export function ScreenMap({ t: _t, ...props }: ScreenMapProps) {
+  return <PositionMap {...props} />;
 }

@@ -75,6 +75,7 @@
   "targetFreshness.stale": "No update for 15-40 seconds. Updates are slowing.",
   "targetFreshness.old": "No update for over 40 seconds. Close to expiry.",
   "targetFreshness.unknown": "Update time unknown.",
+  "targetDisappearCountdown": "Disappear In",
   "fpvSignalTransmission": "FPV Link",
   "deviceNames.northDetector": "North Detection Station",
   "deviceNames.eastJammer": "East Jamming Station",

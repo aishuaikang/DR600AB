@@ -3,6 +3,7 @@ package httpapi
 import (
 	"math"
 	"strings"
+	"time"
 
 	"github.com/gofiber/fiber/v2"
 
@@ -33,9 +34,9 @@ func (s *Server) handleUserSettings(c *fiber.Ctx) error {
 		)
 	}
 	if !ok {
-		return c.JSON(model.UserSettings{})
+		return c.JSON(model.UserSettingsWithDefaults(model.UserSettings{}))
 	}
-	return c.JSON(settings)
+	return c.JSON(model.UserSettingsWithDefaults(settings))
 }
 
 // handleUpdateUserSettings 保存或清空公开用户设置。
@@ -60,13 +61,33 @@ func (s *Server) handleUpdateUserSettings(c *fiber.Ctx) error {
 			nil,
 		)
 	}
+	if !validIntrusionRetentionDays(req.IntrusionRetentionDays) {
+		return s.respondError(
+			c,
+			fiber.StatusBadRequest,
+			"invalid_request",
+			s.translator.T(locale, "errors", "invalid_request"),
+			"invalid intrusion retention days",
+		)
+	}
 	req.ScreenStrikeChannelLabels = normalizeScreenStrikeChannelLabels(req.ScreenStrikeChannelLabels)
 	req.DeviceSN = ""
+	req = model.UserSettingsWithDefaults(req)
 	if s.userSettings == nil {
 		return c.JSON(req)
 	}
 	saved, err := s.userSettings.SaveEditableUser(req)
 	if err != nil {
+		return s.respondError(
+			c,
+			fiber.StatusInternalServerError,
+			"internal",
+			s.translator.T(locale, "errors", "internal"),
+			err.Error(),
+		)
+	}
+	saved = model.UserSettingsWithDefaults(saved)
+	if err := s.pruneIntrusionsByUserSettings(saved); err != nil {
 		return s.respondError(
 			c,
 			fiber.StatusInternalServerError,
@@ -117,4 +138,61 @@ func normalizeScreenStrikeChannelLabels(labels []string) []string {
 		return nil
 	}
 	return normalized
+}
+
+func validIntrusionRetentionDays(days *int) bool {
+	if days == nil {
+		return true
+	}
+	return *days >= 0
+}
+
+const intrusionPruneInterval = time.Minute
+
+func (s *Server) pruneIntrusionsByUserSettings(settings model.UserSettings) error {
+	if s.intrusions == nil {
+		return nil
+	}
+	days := model.UserSettingsIntrusionRetentionDays(settings)
+	_, err := s.intrusions.PruneRetention(days, time.Now())
+	return err
+}
+
+func (s *Server) pruneIntrusionsByCurrentUserSettings() error {
+	if s == nil || s.intrusions == nil {
+		return nil
+	}
+	settings := model.UserSettings{}
+	if s.userSettings != nil {
+		loaded, ok, err := s.userSettings.LoadUser()
+		if err != nil {
+			return err
+		}
+		if ok {
+			settings = loaded
+		}
+	}
+	return s.pruneIntrusionsByUserSettings(model.UserSettingsWithDefaults(settings))
+}
+
+func (s *Server) maybePruneIntrusionsByCurrentUserSettings() error {
+	if s == nil || s.intrusions == nil {
+		return nil
+	}
+	now := time.Now()
+	s.intrusionPruneMu.Lock()
+	if !s.lastIntrusionPruneRun.IsZero() && now.Sub(s.lastIntrusionPruneRun) < intrusionPruneInterval {
+		s.intrusionPruneMu.Unlock()
+		return nil
+	}
+	s.intrusionPruneMu.Unlock()
+
+	if err := s.pruneIntrusionsByCurrentUserSettings(); err != nil {
+		return err
+	}
+
+	s.intrusionPruneMu.Lock()
+	s.lastIntrusionPruneRun = now
+	s.intrusionPruneMu.Unlock()
+	return nil
 }

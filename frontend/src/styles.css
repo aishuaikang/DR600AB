@@ -327,6 +327,85 @@ body.virtual-keyboard-open .app-loading-overlay {
   min-height: 7rem;
 }
 
+.intrusion-overflow-cell {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  border: 0;
+  padding: 0;
+  color: inherit;
+  background: transparent;
+  text-align: inherit;
+}
+
+.intrusion-overflow-cell:disabled {
+  cursor: default;
+}
+
+.intrusion-overflow-cell--clickable {
+  cursor: zoom-in;
+}
+
+.intrusion-overflow-cell--clickable span {
+  text-decoration: underline dotted color-mix(in oklab, var(--color-primary) 58%, transparent);
+  text-underline-offset: 0.18rem;
+}
+
+.intrusion-overflow-cell--clickable:hover span,
+.intrusion-overflow-cell--clickable:focus-visible span {
+  color: var(--color-primary);
+}
+
+.intrusion-coordinate-cell {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.intrusion-coordinate-cell span {
+  min-width: 0;
+}
+
+.intrusion-coordinate-cell svg {
+  flex: none;
+  color: var(--color-primary);
+  opacity: 0.78;
+}
+
+.intrusion-cell-modal__content {
+  max-height: min(62dvh, 26rem);
+  overflow: auto;
+  border-radius: 0.85rem;
+  padding: 0.85rem;
+  background: color-mix(in oklab, var(--color-base-200) 78%, black);
+  color: color-mix(in oklab, var(--color-base-content) 88%, transparent);
+  font-size: 0.9rem;
+  line-height: 1.65;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.intrusion-map-modal {
+  max-width: min(72rem, calc(100vw - 2rem));
+}
+
+.screen-map.intrusion-map-modal__map {
+  position: relative;
+  inset: auto;
+  width: 100%;
+  height: min(72dvh, 42rem);
+  min-height: 28rem;
+  overflow: hidden;
+  border: 1px solid color-mix(in oklab, var(--color-base-content) 12%, transparent);
+  border-radius: 1rem;
+}
+
+.screen-map.intrusion-map-modal__map .leaflet-left {
+  top: 0.75rem;
+  left: 0.75rem;
+}
+
 .app-busy-button {
   position: relative;
   overflow: hidden;
@@ -3147,6 +3226,67 @@ body.virtual-keyboard-open .app-loading-overlay {
   border-left-color: rgba(251, 113, 133, 0.72);
 }
 
+.screen-target-countdown {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.38em;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 0.82em;
+  padding: 0.24em 0.46em;
+  color: rgba(232, 245, 248, 0.86);
+  background: rgba(2, 8, 14, 0.32);
+  font-size: 0.58em;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.screen-target-countdown svg {
+  flex: none;
+  color: currentColor;
+}
+
+.screen-target-countdown em {
+  min-width: 0;
+  overflow: hidden;
+  color: rgba(194, 214, 220, 0.68);
+  font-style: normal;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.screen-target-countdown strong {
+  flex: none;
+  color: #f7fbfc;
+  font-family: var(--font-mono);
+  font-size: 1.08em;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0;
+}
+
+.screen-target-countdown--fresh {
+  border-color: rgba(38, 201, 255, 0.24);
+  color: #b9f4ff;
+  background: rgba(38, 201, 255, 0.08);
+}
+
+.screen-target-countdown--stale {
+  border-color: rgba(250, 204, 21, 0.22);
+  color: #fde68a;
+  background: rgba(250, 204, 21, 0.08);
+}
+
+.screen-target-countdown--old {
+  border-color: rgba(251, 113, 133, 0.26);
+  color: #fecdd3;
+  background: rgba(244, 63, 94, 0.1);
+}
+
+.screen-target-countdown--unknown {
+  color: rgba(209, 213, 219, 0.72);
+}
+
 .screen-target-readouts {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -4065,10 +4205,10 @@ body.virtual-keyboard-open .app-loading-overlay {
 .screen-fpv-table__head,
 .screen-fpv-row {
   display: grid;
-  grid-template-columns: minmax(6.4em, 1.35fr) minmax(4.2em, 0.85fr) minmax(
+  grid-template-columns: minmax(5.8em, 1.25fr) minmax(4em, 0.78fr) minmax(
       5.4em,
       1.1fr
-    );
+    ) minmax(4.5em, 0.82fr);
   align-items: stretch;
 }
 
@@ -4185,6 +4325,19 @@ body.virtual-keyboard-open .app-loading-overlay {
   font-family: var(--font-mono);
   font-weight: 700;
   font-variant-numeric: tabular-nums;
+}
+
+.screen-fpv-row__countdown {
+  justify-content: center;
+  gap: 0.18em;
+  font-family: var(--font-mono);
+  font-size: 0.62em;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+
+.screen-fpv-row__countdown strong {
+  color: inherit;
 }
 
 .screen-fpv-row__meter {

@@ -2,6 +2,8 @@
 package store
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"log/slog"
 	"math"
@@ -253,6 +255,7 @@ func (s *MemoryStore) addScreenDetectionLocked(
 	if record.Kind != "detect" {
 		return model.ScreenDetectionTarget{}, false
 	}
+	record.Model = normalizeScreenTargetModel(record.Model)
 	if record.Model == "" || record.Frequency == 0 {
 		return model.ScreenDetectionTarget{}, false
 	}
@@ -272,6 +275,7 @@ func (s *MemoryStore) addScreenDetectionLocked(
 		s.screenSequence++
 		target := model.ScreenDetectionTarget{
 			ID:         fmt.Sprintf("screen-%d-%d", now.UnixNano(), s.screenSequence),
+			Serial:     newScreenDetectionSerial(),
 			Model:      record.Model,
 			Frequency:  record.Frequency,
 			RSSI:       record.RSSI,
@@ -291,10 +295,16 @@ func (s *MemoryStore) addScreenDetectionLocked(
 		if merged.Device == "" {
 			merged.Device = s.screen[matchIndex].Device
 		}
+		if merged.Serial == "" {
+			merged.Serial = s.screen[matchIndex].Serial
+		}
 		if s.screen[matchIndex].FirstSeen.Before(merged.FirstSeen) {
 			merged.FirstSeen = s.screen[matchIndex].FirstSeen
 		}
 		merged.HitCount += s.screen[matchIndex].HitCount
+	}
+	if merged.Serial == "" {
+		merged.Serial = newScreenDetectionSerial()
 	}
 	merged.Model = record.Model
 	merged.Frequency = record.Frequency
@@ -337,11 +347,13 @@ func (s *MemoryStore) pruneExpiredScreenDetectionsLocked(now time.Time) {
 func (s *MemoryStore) addScreenPositionLocked(target model.ScreenPositionTarget) (model.ScreenPositionTarget, bool) {
 	target.CorrelationID = stringsTrim(target.CorrelationID)
 	target.Serial = stringsTrim(target.Serial)
-	target.Model = normalizeScreenPositionModel(target.Model)
+	target.Model = normalizeScreenTargetModel(target.Model)
+	target.Source = stringsTrim(target.Source)
+	target.Sources = appendScreenTargetSources(target.Sources, target.Source)
 	if target.Serial == "" || target.Model == "" {
 		return model.ScreenPositionTarget{}, false
 	}
-	target.LastRecord.Model = normalizeScreenPositionModel(target.LastRecord.Model)
+	target.LastRecord.Model = normalizeScreenTargetModel(target.LastRecord.Model)
 	if target.LastSeen.IsZero() {
 		target.LastSeen = time.Now()
 	}
@@ -394,6 +406,8 @@ func (s *MemoryStore) addScreenPositionLocked(target model.ScreenPositionTarget)
 		if merged.CorrelationID == "" {
 			merged.CorrelationID = s.positions[matchIndex].CorrelationID
 		}
+		merged.Sources = appendScreenTargetSources(merged.Sources, s.positions[matchIndex].Source)
+		merged.Sources = appendScreenTargetSources(merged.Sources, s.positions[matchIndex].Sources...)
 		if s.positions[matchIndex].FirstSeen.Before(merged.FirstSeen) {
 			merged.FirstSeen = s.positions[matchIndex].FirstSeen
 		}
@@ -410,6 +424,8 @@ func (s *MemoryStore) addScreenPositionLocked(target model.ScreenPositionTarget)
 	if target.CorrelationID != "" {
 		merged.CorrelationID = target.CorrelationID
 	}
+	merged.Sources = appendScreenTargetSources(merged.Sources, target.Source)
+	merged.Sources = appendScreenTargetSources(merged.Sources, target.Sources...)
 	keepDecodedFields := shouldKeepDecodedScreenPositionFields(merged, target)
 	if !keepDecodedFields {
 		merged.Serial = target.Serial
@@ -609,13 +625,32 @@ func screenPositionTargetMatches(existing, incoming model.ScreenPositionTarget) 
 	return screenPositionPendingEncryptedTargetMatches(existing, incoming)
 }
 
-func normalizeScreenPositionModel(modelName string) string {
+func normalizeScreenTargetModel(modelName string) string {
 	modelName = stringsTrim(modelName)
 	prefix, suffix, ok := strings.Cut(modelName, "-")
 	if !ok || stringsTrim(suffix) == "" || !isDecimalString(stringsTrim(prefix)) {
 		return modelName
 	}
 	return stringsTrim(suffix)
+}
+
+func newScreenDetectionSerial() string {
+	var token [6]byte
+	if _, err := rand.Read(token[:]); err == nil {
+		return "DET-" + strings.ToUpper(hex.EncodeToString(token[:]))
+	}
+	return fmt.Sprintf("DET-%d", time.Now().UnixNano())
+}
+
+func appendScreenTargetSources(current []string, values ...string) []string {
+	for _, value := range values {
+		value = stringsTrim(value)
+		if value == "" || slices.Contains(current, value) {
+			continue
+		}
+		current = append(current, value)
+	}
+	return current
 }
 
 func isDecimalString(value string) bool {
@@ -861,6 +896,7 @@ func latestScreenPositions(items []model.ScreenPositionTarget, limit int) []mode
 }
 
 func cloneScreenPositionTarget(target model.ScreenPositionTarget) model.ScreenPositionTarget {
+	target.Sources = cloneStrings(target.Sources)
 	target.Drone = cloneScreenPositionPoint(target.Drone)
 	target.Pilot = cloneScreenPositionPoint(target.Pilot)
 	target.Home = cloneScreenPositionPoint(target.Home)
@@ -872,6 +908,15 @@ func cloneScreenPositionTarget(target model.ScreenPositionTarget) model.ScreenPo
 	target.Altitude = cloneFloat64Ptr(target.Altitude)
 	target.Speed = cloneFloat64Ptr(target.Speed)
 	return target
+}
+
+func cloneStrings(values []string) []string {
+	if len(values) == 0 {
+		return nil
+	}
+	cloned := make([]string, len(values))
+	copy(cloned, values)
+	return cloned
 }
 
 func cloneScreenPositionTrajectory(points []model.ScreenPositionTrackPoint) []model.ScreenPositionTrackPoint {

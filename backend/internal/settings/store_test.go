@@ -241,3 +241,20 @@ func TestStoreSavesEditableUserSettingsWithoutOverwritingDeviceSN(t *testing.T) 
 		t.Fatalf("manual location = %+v, want saved value", gotUser.ManualDeviceLocation)
 	}
 }
+
+func TestStoreSavesIntrusionRetentionDays(t *testing.T) {
+	store := NewStore(filepath.Join(t.TempDir(), "settings.json"))
+	retentionDays := 0
+
+	if err := store.SaveUser(model.UserSettings{IntrusionRetentionDays: &retentionDays}); err != nil {
+		t.Fatalf("SaveUser() error = %v", err)
+	}
+
+	gotUser, ok, err := store.LoadUser()
+	if err != nil || !ok {
+		t.Fatalf("LoadUser() = %+v, %v, %v", gotUser, ok, err)
+	}
+	if gotUser.IntrusionRetentionDays == nil || *gotUser.IntrusionRetentionDays != 0 {
+		t.Fatalf("retention days = %#v, want 0", gotUser.IntrusionRetentionDays)
+	}
+}

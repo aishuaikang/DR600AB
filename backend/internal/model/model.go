@@ -97,6 +97,36 @@ type UserSettings struct {
 	DeviceSN                  string    `json:"deviceSn,omitempty"`
 	ManualDeviceLocation      *GeoPoint `json:"manualDeviceLocation,omitempty"`
 	ScreenStrikeChannelLabels []string  `json:"screenStrikeChannelLabels,omitempty"`
+	IntrusionRetentionDays    *int      `json:"intrusionRetentionDays,omitempty"`
+}
+
+const DefaultIntrusionRetentionDays = 90
+
+// UserSettingsWithDefaults fills optional user settings with public defaults.
+func UserSettingsWithDefaults(settings UserSettings) UserSettings {
+	if settings.IntrusionRetentionDays == nil {
+		days := DefaultIntrusionRetentionDays
+		settings.IntrusionRetentionDays = &days
+	}
+	return settings
+}
+
+// UserSettingsIntrusionRetentionDays returns the effective target intrusion retention setting.
+func UserSettingsIntrusionRetentionDays(settings UserSettings) int {
+	if settings.IntrusionRetentionDays == nil {
+		return DefaultIntrusionRetentionDays
+	}
+	return *settings.IntrusionRetentionDays
+}
+
+// IntrusionDeleteRequest deletes selected intrusion records.
+type IntrusionDeleteRequest struct {
+	IDs []string `json:"ids"`
+}
+
+// IntrusionDeleteResponse reports how many intrusion records were deleted.
+type IntrusionDeleteResponse struct {
+	Deleted int64 `json:"deleted"`
 }
 
 // ScreenDeviceLocationResponse 返回大屏地图使用的设备位置。
@@ -231,6 +261,7 @@ type ScreenDetectionLastRecord struct {
 // ScreenDetectionTarget 是大屏侦测列表使用的合并目标。
 type ScreenDetectionTarget struct {
 	ID         string                    `json:"id"`
+	Serial     string                    `json:"serial,omitempty"`
 	Model      string                    `json:"model"`
 	Frequency  float64                   `json:"frequency"`
 	RSSI       float64                   `json:"rssi"`
@@ -275,6 +306,7 @@ type ScreenPositionTarget struct {
 	Serial           string                     `json:"serial"`
 	Model            string                     `json:"model"`
 	Source           string                     `json:"source"`
+	Sources          []string                   `json:"sources,omitempty"`
 	Frequency        float64                    `json:"frequency,omitempty"`
 	RSSI             float64                    `json:"rssi,omitempty"`
 	Device           string                     `json:"device"`
@@ -305,30 +337,32 @@ const (
 
 // IntrusionRecord 保存一个消失后的目标入侵历史。
 type IntrusionRecord struct {
-	ID              string                     `json:"id"`
-	TargetID        string                     `json:"targetId"`
-	TargetType      IntrusionTargetType        `json:"targetType"`
-	Model           string                     `json:"model,omitempty"`
-	Serial          string                     `json:"serial,omitempty"`
-	Device          string                     `json:"device,omitempty"`
-	Frequency       float64                    `json:"frequency,omitempty"`
-	RSSI            float64                    `json:"rssi,omitempty"`
-	FirstSeen       time.Time                  `json:"firstSeen"`
-	LastSeen        time.Time                  `json:"lastSeen"`
-	DurationSeconds int64                      `json:"durationSeconds"`
-	HitCount        int                        `json:"hitCount"`
-	Source          string                     `json:"source,omitempty"`
-	Cracked         bool                       `json:"cracked,omitempty"`
-	Drone           *ScreenPositionPoint       `json:"drone,omitempty"`
-	Pilot           *ScreenPositionPoint       `json:"pilot,omitempty"`
-	Home            *ScreenPositionPoint       `json:"home,omitempty"`
-	DroneTrajectory []ScreenPositionTrackPoint `json:"droneTrajectory,omitempty"`
-	PilotTrajectory []ScreenPositionTrackPoint `json:"pilotTrajectory,omitempty"`
-	Height          *float64                   `json:"height,omitempty"`
-	Altitude        *float64                   `json:"altitude,omitempty"`
-	Speed           *float64                   `json:"speed,omitempty"`
-	LastRecord      any                        `json:"lastRecord,omitempty"`
-	ArchivedAt      time.Time                  `json:"archivedAt"`
+	ID              string                        `json:"id"`
+	TargetID        string                        `json:"targetId"`
+	TargetType      IntrusionTargetType           `json:"targetType"`
+	Model           string                        `json:"model,omitempty"`
+	Serial          string                        `json:"serial,omitempty"`
+	Device          string                        `json:"device,omitempty"`
+	Frequency       float64                       `json:"frequency,omitempty"`
+	RSSI            float64                       `json:"rssi,omitempty"`
+	FirstSeen       time.Time                     `json:"firstSeen"`
+	LastSeen        time.Time                     `json:"lastSeen"`
+	DurationSeconds int64                         `json:"durationSeconds"`
+	HitCount        int                           `json:"hitCount"`
+	Source          string                        `json:"source,omitempty"`
+	Sources         []string                      `json:"sources,omitempty"`
+	Cracked         bool                          `json:"cracked,omitempty"`
+	DeviceLocation  *ScreenDeviceLocationResponse `json:"deviceLocation,omitempty"`
+	Drone           *ScreenPositionPoint          `json:"drone,omitempty"`
+	Pilot           *ScreenPositionPoint          `json:"pilot,omitempty"`
+	Home            *ScreenPositionPoint          `json:"home,omitempty"`
+	DroneTrajectory []ScreenPositionTrackPoint    `json:"droneTrajectory,omitempty"`
+	PilotTrajectory []ScreenPositionTrackPoint    `json:"pilotTrajectory,omitempty"`
+	Height          *float64                      `json:"height,omitempty"`
+	Altitude        *float64                      `json:"altitude,omitempty"`
+	Speed           *float64                      `json:"speed,omitempty"`
+	LastRecord      any                           `json:"lastRecord,omitempty"`
+	ArchivedAt      time.Time                     `json:"archivedAt"`
 }
 
 // GpioChannel 描述一个 GPIO 控制通道及其运行状态。

@@ -48,6 +48,28 @@ func TestMemoryStoreScreenDetectionsCreatesStableUniqueIDs(t *testing.T) {
 	}
 }
 
+func TestMemoryStoreScreenDetectionsGeneratesSerial(t *testing.T) {
+	st := NewMemoryStore(10, 10)
+	base := time.Now()
+
+	st.AddDetection(screenDetectionRecord("r1", "device-a", "DJI_OC123_10M", 5730, -60, base))
+	st.AddDetection(screenDetectionRecord("r2", "device-b", "DJI_OC123_20M", 5735, -55, base.Add(time.Second)))
+
+	items := st.ListScreenDetections(10)
+	if len(items) != 1 {
+		t.Fatalf("screen detections count = %d, want 1", len(items))
+	}
+	if items[0].Serial == "" {
+		t.Fatalf("serial is empty")
+	}
+	if items[0].Serial == items[0].Device {
+		t.Fatalf("serial = device = %q, want generated detection serial", items[0].Serial)
+	}
+	if items[0].Device != "device-b" {
+		t.Fatalf("device = %q, want latest device-b", items[0].Device)
+	}
+}
+
 func TestMemoryStoreScreenDetectionsMergeDJIFamily(t *testing.T) {
 	st := NewMemoryStore(10, 10)
 	base := time.Now()
@@ -171,6 +193,42 @@ func TestMemoryStoreScreenDetectionsLastRecordOmitsParsedPayload(t *testing.T) {
 	}
 }
 
+func TestMemoryStoreScreenDetectionsNormalizesNumericModelPrefix(t *testing.T) {
+	st := NewMemoryStore(10, 10)
+	base := time.Now()
+
+	st.AddDetection(screenDetectionRecord("r1", "device-a", "66-Air 2S", 5180, -58, base))
+
+	items := st.ListScreenDetections(10)
+	if len(items) != 1 {
+		t.Fatalf("screen detections count = %d, want 1", len(items))
+	}
+	if items[0].Model != "Air 2S" {
+		t.Fatalf("model = %q, want Air 2S", items[0].Model)
+	}
+	if items[0].LastRecord.Model != "Air 2S" {
+		t.Fatalf("last record model = %q, want Air 2S", items[0].LastRecord.Model)
+	}
+}
+
+func TestMemoryStoreScreenDetectionsKeepsNonNumericHyphenModel(t *testing.T) {
+	st := NewMemoryStore(10, 10)
+	base := time.Now()
+
+	st.AddDetection(screenDetectionRecord("r1", "device-a", "DJI-Drone", 5180, -58, base))
+
+	items := st.ListScreenDetections(10)
+	if len(items) != 1 {
+		t.Fatalf("screen detections count = %d, want 1", len(items))
+	}
+	if items[0].Model != "DJI-Drone" {
+		t.Fatalf("model = %q, want DJI-Drone", items[0].Model)
+	}
+	if items[0].LastRecord.Model != "DJI-Drone" {
+		t.Fatalf("last record model = %q, want DJI-Drone", items[0].LastRecord.Model)
+	}
+}
+
 func TestMemoryStoreScreenDetectionsPrunesExpiredTargets(t *testing.T) {
 	st := NewMemoryStore(10, 10)
 	base := time.Now()
@@ -202,6 +260,12 @@ func TestMemoryStoreScreenDetectionsArchivesExpiredTargets(t *testing.T) {
 	}
 	if archiver.detections[0].Device != "device-a" {
 		t.Fatalf("archived device = %q, want device-a", archiver.detections[0].Device)
+	}
+	if archiver.detections[0].Serial == "" {
+		t.Fatalf("archived serial is empty")
+	}
+	if archiver.detections[0].Serial == archiver.detections[0].Device {
+		t.Fatalf("archived serial = device = %q, want generated detection serial", archiver.detections[0].Serial)
 	}
 }
 
@@ -403,6 +467,9 @@ func TestMemoryStoreScreenPositionsMergeRIDSerialPrefixDifference(t *testing.T) 
 	if items[0].Source != "did_encrypted" {
 		t.Fatalf("source = %q, want did_encrypted", items[0].Source)
 	}
+	if !stringSlicesEqual(items[0].Sources, []string{"rid", "did_encrypted"}) {
+		t.Fatalf("sources = %#v, want rid and did_encrypted", items[0].Sources)
+	}
 	if items[0].Device != "10134" {
 		t.Fatalf("device = %q, want latest device", items[0].Device)
 	}
@@ -428,6 +495,9 @@ func TestMemoryStoreScreenPositionsMergeRIDSerialPrefixDifference(t *testing.T) 
 	}
 	if items[0].Model != "Mavic 3 Pro" || items[0].Source != "did_encrypted" || !items[0].Cracked {
 		t.Fatalf("expected decoded target to be preserved after later RID, got model=%q source=%q cracked=%v", items[0].Model, items[0].Source, items[0].Cracked)
+	}
+	if !stringSlicesEqual(items[0].Sources, []string{"rid", "did_encrypted"}) {
+		t.Fatalf("sources after later RID = %#v, want rid and did_encrypted", items[0].Sources)
 	}
 	if items[0].HitCount != 3 {
 		t.Fatalf("hit count after later RID = %d, want 3", items[0].HitCount)
@@ -762,6 +832,18 @@ func findScreenDetectionByModel(items []model.ScreenDetectionTarget, modelName s
 
 func floatPtr(value float64) *float64 {
 	return &value
+}
+
+func stringSlicesEqual(left, right []string) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for index := range left {
+		if left[index] != right[index] {
+			return false
+		}
+	}
+	return true
 }
 
 type memoryIntrusionArchiver struct {

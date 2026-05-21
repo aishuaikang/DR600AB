@@ -48,6 +48,7 @@ import type { ReferenceMapLayer, ScreenAlertKind } from "./screenData";
 
 const screenDetectionLimit = 100;
 const screenPositionLimit = 100;
+const screenTargetExpireSeconds = 60;
 const screenDetectionFreshMs = 15_000;
 const screenDetectionStaleMs = 40_000;
 const screenStrikeDefaultDurationSeconds = 60;
@@ -382,6 +383,14 @@ function formatCountdown(seconds: number) {
   const minutes = Math.floor(safeSeconds / 60);
   const rest = safeSeconds % 60;
   return `${String(minutes).padStart(2, "0")}:${String(rest).padStart(2, "0")}`;
+}
+
+function targetDisappearRemainingSeconds(lastSeen: string, now: Date) {
+  const lastSeenAt = new Date(lastSeen).getTime();
+  if (Number.isNaN(lastSeenAt)) {
+    return null;
+  }
+  return Math.max(0, Math.ceil(screenTargetExpireSeconds - (now.getTime() - lastSeenAt) / 1000));
 }
 
 function formatOptionalNumber(value: number | undefined, unit: string, digits = 0) {
@@ -801,6 +810,7 @@ function DetectionTargetCard({
   const imageUrl = getDroneImageUrl(target.model);
   const timeTone = getTargetTimeTone(target.lastSeen, now);
   const timeToneTitle = getTargetTimeToneTitle(timeTone, t);
+  const remainingSeconds = targetDisappearRemainingSeconds(target.lastSeen, now);
   const [freshnessOpen, setFreshnessOpen] = useState(false);
 
   return (
@@ -853,6 +863,12 @@ function DetectionTargetCard({
           </span>
         </div>
 
+        <span className={`screen-target-countdown screen-target-countdown--${timeTone}`}>
+          <TimerReset size={12} aria-hidden="true" />
+          <em>{t("targetDisappearCountdown", { ns: "screen" })}</em>
+          <strong>{remainingSeconds === null ? "--:--" : formatCountdown(remainingSeconds)}</strong>
+        </span>
+
         {freshnessOpen ? (
           <span className={`screen-detection-card__freshness screen-detection-card__freshness--${timeTone}`}>
             {timeToneTitle}
@@ -867,11 +883,13 @@ function FpvTargetTable({
   targets,
   selectedId,
   t,
+  now,
   onSelect,
 }: {
   targets: ScreenDetectionTarget[];
   selectedId: string;
   t: TFunction;
+  now: Date;
   onSelect: (target: ScreenDetectionTarget) => void;
 }) {
   return (
@@ -880,11 +898,14 @@ function FpvTargetTable({
         <span>{t("signal", { ns: "screen" })}</span>
         <span>{t("frequency", { ns: "screen" })}</span>
         <span>{t("signalStrength", { ns: "screen" })}</span>
+        <span>{t("targetDisappearCountdown", { ns: "screen" })}</span>
       </div>
 
       <div className="screen-fpv-table__body">
         {targets.map((target) => {
           const signalPercent = getRSSIPercent(target.rssi);
+          const timeTone = getTargetTimeTone(target.lastSeen, now);
+          const remainingSeconds = targetDisappearRemainingSeconds(target.lastSeen, now);
 
           return (
             <button
@@ -907,6 +928,11 @@ function FpvTargetTable({
                 <span className="screen-fpv-row__meter" aria-hidden="true">
                   <span style={{ width: `${signalPercent}%` }} />
                 </span>
+              </span>
+
+              <span className={`screen-fpv-row__countdown screen-target-countdown--${timeTone}`}>
+                <TimerReset size={12} aria-hidden="true" />
+                <strong>{remainingSeconds === null ? "--:--" : formatCountdown(remainingSeconds)}</strong>
               </span>
             </button>
           );
@@ -991,6 +1017,7 @@ function PositionTargetCard({
   const timeToneTitle = getTargetTimeToneTitle(timeTone, t);
   const imageUrl = getPositionDroneImageUrl(target.model);
   const pendingEncrypted = target.source === "did_encrypted" && target.model === "DJI-Drone" && !target.cracked;
+  const remainingSeconds = targetDisappearRemainingSeconds(target.lastSeen, now);
 
   return (
     <article
@@ -1020,6 +1047,12 @@ function PositionTargetCard({
           {formatTargetTime(target.lastSeen)}
         </button>
       </div>
+
+      <span className={`screen-target-countdown screen-target-countdown--${timeTone}`}>
+        <TimerReset size={12} aria-hidden="true" />
+        <em>{t("targetDisappearCountdown", { ns: "screen" })}</em>
+        <strong>{remainingSeconds === null ? "--:--" : formatCountdown(remainingSeconds)}</strong>
+      </span>
 
       {pendingEncrypted ? (
         <div className="screen-position-card__metrics screen-position-card__metrics--pending screen-target-readouts">
@@ -2313,6 +2346,7 @@ function RightList({
               targets={visibleTargets}
               selectedId={selectedId}
               t={t}
+              now={now}
               onSelect={onSelectTarget}
             />
           ) : tab === "position" && positions.length ? (

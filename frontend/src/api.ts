@@ -19,6 +19,8 @@ import type {
   GPSSessionRequest,
   GPSSessionResponse,
   GPSSettings,
+  IntrusionDeleteRequest,
+  IntrusionDeleteResponse,
   IntrusionRecord,
   IntrusionTargetType,
   ListResponse,
@@ -253,6 +255,13 @@ export function getIntrusions(
     params.set("type", targetType);
   }
   return requestJson<ListResponse<IntrusionRecord>>(`/intrusions?${params.toString()}`, {}, locale);
+}
+
+export function deleteIntrusions(payload: IntrusionDeleteRequest, locale: string): Promise<IntrusionDeleteResponse> {
+  return requestJson<IntrusionDeleteResponse>("/intrusions", {
+    method: "DELETE",
+    body: JSON.stringify(payload),
+  }, locale);
 }
 
 export function getUserSettings(): Promise<UserSettings> {
