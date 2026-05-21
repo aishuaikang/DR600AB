@@ -7,6 +7,7 @@ export type Page =
   | DebugRecordPage
   | "developer-settings"
   | "gps-records"
+  | "intrusions"
   | "interference"
   | "network-settings"
   | "settings"

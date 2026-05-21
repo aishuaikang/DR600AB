@@ -13,6 +13,7 @@ type Config struct {
 	Addr                  string
 	DefaultLocale         string
 	SettingsPath          string
+	IntrusionDBPath       string
 	DetectionDefaultBaud  int
 	DefaultBaudRate       int
 	DefaultDataBits       int
@@ -47,6 +48,7 @@ func Load() Config {
 		Addr:                  envString("API_ADDR", ":18080"),
 		DefaultLocale:         envString("API_DEFAULT_LOCALE", "zh-CN"),
 		SettingsPath:          envString("API_SETTINGS_PATH", "./backend/data/detection-settings.json"),
+		IntrusionDBPath:       envString("API_INTRUSION_DB_PATH", "./backend/data/intrusions.db"),
 		DetectionDefaultBaud:  envInt("API_DETECTION_DEFAULT_BAUD", 460800),
 		DefaultBaudRate:       envInt("API_DEFAULT_BAUD", 115200),
 		DefaultDataBits:       envInt("API_DEFAULT_DATA_BITS", 8),

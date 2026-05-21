@@ -11,6 +11,7 @@ import {
   getScreenDeceptionStatus,
   getScreenDeviceLocation,
   getScreenPositions,
+  getScreenStatus,
   getScreenStrike,
   openScreenStream,
   updateScreenDeception,
@@ -26,6 +27,8 @@ import type {
   ScreenDeviceLocationResponse,
   ScreenPositionPoint,
   ScreenPositionTarget,
+  ScreenRuntimeStatus,
+  ScreenSerialCapabilityStatus,
   ScreenStrikeChannel,
   ScreenStrikeState,
   UserSettings,
@@ -325,6 +328,40 @@ function EmptyState({
       <span>{t("noData", { ns: "screen" })}</span>
     </div>
   );
+}
+
+function ScreenOfflineState({
+  title,
+  message,
+  detail,
+  compact = false,
+}: {
+  title: string;
+  message: string;
+  detail?: string;
+  compact?: boolean;
+}) {
+  return (
+    <div className={cx("screen-offline-state", compact && "screen-offline-state--compact")}>
+      <RadioTower className="screen-offline-state__icon" size={compact ? 16 : 20} aria-hidden="true" />
+      <strong>{title}</strong>
+      <span>{message}</span>
+      {detail ? <em>{detail}</em> : null}
+    </div>
+  );
+}
+
+function screenCapabilityOfflineMessage(status: ScreenSerialCapabilityStatus | undefined, t: TFunction) {
+  if (!status?.configured) {
+    return "";
+  }
+  if (status.lastError) {
+    return status.lastError;
+  }
+  if (status.state === "connecting" || status.state === "reconnecting") {
+    return t("serialConnecting", { ns: "screen" });
+  }
+  return t("serialOffline", { ns: "screen" });
 }
 
 function getStrikeRemainingSeconds(state: ScreenStrikeState | null, now: Date) {
@@ -1553,6 +1590,7 @@ function ScreenStrikePanel({
 	deceptionState,
 	deceptionDeviceStatus,
 	deceptionDeviceStatusLoading,
+  screenStatus,
   deviceLocation,
   now,
   locale,
@@ -1569,6 +1607,7 @@ function ScreenStrikePanel({
 	deceptionState: ScreenDeceptionState | null;
 	deceptionDeviceStatus: ScreenDeceptionDeviceStatus | null;
 	deceptionDeviceStatusLoading: boolean;
+  screenStatus: ScreenRuntimeStatus | null;
   deviceLocation: ScreenDeviceLocationResponse | null;
   now: Date;
   locale: string;
@@ -1600,6 +1639,13 @@ function ScreenStrikePanel({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const channels = state?.channels ?? [];
+  const deceptionConfigured = screenStatus?.deception.configured !== false;
+  const operationTabs: Array<{ id: ScreenOperationTab; label: string; Icon: typeof RadioTower }> = [
+    { id: "interference", label: "strike", Icon: RadioTower },
+  ];
+  if (deceptionConfigured) {
+    operationTabs.push({ id: "deception", label: "deception", Icon: SatelliteDish });
+  }
   const strikeChannelLabels = userSettings.screenStrikeChannelLabels ?? [];
   const activeChannelIdsKey = state?.active ? state.channelIds.join("|") : "";
   const remainingSeconds = getStrikeRemainingSeconds(state, now);
@@ -1615,9 +1661,10 @@ function ScreenStrikePanel({
   const sortedNoFlyZonePresets = getSortedNoFlyZonePresets(noFlyZoneDistanceOrigin);
   const selectedCount = active ? state?.channelIds.length ?? 0 : selectedChannelIds.length;
   const operationTitle = t(operationTab === "interference" ? "strike" : "deception", { ns: "screen" });
+  const deceptionOfflineMessage = screenCapabilityOfflineMessage(screenStatus?.deception, t);
   const statusValue = operationTab === "interference"
     ? active ? formatCountdown(remainingSeconds) : selectedCount
-    : deceptionActive ? t("active", { ns: "common" }) : (deceptionState?.serialActive ? "OK" : "--");
+    : deceptionActive ? t("active", { ns: "common" }) : (deceptionState?.serialActive ? "OK" : t("offline", { ns: "screen" }));
   const statusActive = operationTab === "interference" ? active : deceptionActive;
   const durationNumber = Number(durationInput);
   const durationValid = Number.isFinite(durationNumber) &&
@@ -1638,7 +1685,7 @@ function ScreenStrikePanel({
     !deceptionState?.serialActive;
   const deceptionStopDisabled = busy || !deceptionActive;
   const deceptionBlockingReasons = [
-    !deceptionState?.serialActive ? t("deceptionSerialInactive", { ns: "screen" }) : "",
+    !deceptionState?.serialActive ? deceptionOfflineMessage || t("deceptionSerialInactive", { ns: "screen" }) : "",
     deceptionNeedsCoordinate && !hasDeceptionCoordinate ? t("deceptionCoordinateRequired", { ns: "screen" }) : "",
     deceptionNeedsCoordinate && !deceptionAltitudeValid ? t("deceptionAltitudeInvalid", { ns: "screen" }) : "",
   ].filter(Boolean);
@@ -1654,13 +1701,19 @@ function ScreenStrikePanel({
   );
 
   useEffect(() => {
+    if (operationTab === "deception" && !deceptionConfigured) {
+      setOperationTab("interference");
+    }
+  }, [deceptionConfigured, operationTab]);
+
+  useEffect(() => {
     if (state?.active) {
       setSelectedChannelIds(state.channelIds);
     }
   }, [activeChannelIdsKey, state?.active]);
 
   useEffect(() => {
-    if (deceptionState?.active) {
+    if (deceptionConfigured && deceptionState?.active) {
       if (!reflectedActiveDeceptionRef.current) {
         setOperationTab("deception");
         reflectedActiveDeceptionRef.current = true;
@@ -1668,7 +1721,7 @@ function ScreenStrikePanel({
       return;
     }
     reflectedActiveDeceptionRef.current = false;
-  }, [deceptionState?.active]);
+  }, [deceptionConfigured, deceptionState?.active]);
 
   useEffect(() => {
     if (!deceptionState?.active) {
@@ -2141,10 +2194,7 @@ function ScreenStrikePanel({
         </div>
 
         <div className="screen-strike-panel__tabs" role="tablist">
-          {([
-            { id: "interference", label: "strike", Icon: RadioTower },
-            { id: "deception", label: "deception", Icon: SatelliteDish },
-          ] as const).map(({ id, label, Icon }) => (
+          {operationTabs.map(({ id, label, Icon }) => (
             <button
               key={id}
               className={cx("screen-strike-tab", operationTab === id && "screen-strike-tab--active")}
@@ -2171,6 +2221,7 @@ function RightList({
   selectedId,
   targets,
   positions,
+  screenStatus,
   now,
   collapsed,
   onSelectTarget,
@@ -2182,6 +2233,7 @@ function RightList({
   selectedId: string;
   targets: ScreenDetectionTarget[];
   positions: ScreenPositionTarget[];
+  screenStatus: ScreenRuntimeStatus | null;
   now: Date;
   collapsed: boolean;
   onSelectTarget: (target: ScreenDetectionTarget) => void;
@@ -2191,6 +2243,10 @@ function RightList({
 }) {
   const [tab, setTab] = useState<ScreenAlertKind>("detection");
   const [hovered, setHovered] = useState(false);
+  const detectionConfigured = screenStatus?.detection.configured !== false;
+  const detectionActive = screenStatus ? screenStatus.detection.active : true;
+  const detectionOfflineMessage = screenCapabilityOfflineMessage(screenStatus?.detection, t);
+  const availableTabs: ScreenAlertKind[] = detectionConfigured ? ["detection", "position", "fpv"] : [];
   const fpvTargets = targets.filter(isFpvTarget);
   const visibleTargets = tab === "fpv" ? fpvTargets : tab === "detection" ? targets : [];
 
@@ -2207,7 +2263,13 @@ function RightList({
     return 0;
   };
   const activeCount = getTabCount(tab);
-  const activeLabel = t(`tabs.${tab}`, { ns: "screen" });
+  const activeLabel = availableTabs.length > 0
+    ? t(`tabs.${tab}`, { ns: "screen" })
+    : t("targetList", { ns: "screen" });
+
+  if (!detectionConfigured) {
+    return null;
+  }
 
   return (
     <aside
@@ -2240,7 +2302,13 @@ function RightList({
         </div>
 
         <div className="screen-list">
-          {tab === "fpv" && visibleTargets.length ? (
+          {!detectionActive ? (
+            <ScreenOfflineState
+              title={t("detectionOfflineTitle", { ns: "screen" })}
+              message={t("detectionOfflineMessage", { ns: "screen" })}
+              detail={detectionOfflineMessage}
+            />
+          ) : tab === "fpv" && visibleTargets.length ? (
             <FpvTargetTable
               targets={visibleTargets}
               selectedId={selectedId}
@@ -2274,7 +2342,7 @@ function RightList({
         </div>
 
         <div className="screen-tabs" role="tablist">
-          {(["detection", "position", "fpv"] as ScreenAlertKind[]).map((item) => {
+          {availableTabs.map((item) => {
             const TabIcon = item === "detection" ? Radar : item === "position" ? MapPin : Radio;
             return (
               <button
@@ -2340,6 +2408,7 @@ export function ScreenPage({
   const [targets, setTargets] = useState<ScreenDetectionTarget[]>([]);
   const [positions, setPositions] = useState<ScreenPositionTarget[]>([]);
   const [deviceLocation, setDeviceLocation] = useState<ScreenDeviceLocationResponse | null>(null);
+  const [screenStatus, setScreenStatus] = useState<ScreenRuntimeStatus | null>(null);
   const [strikeState, setStrikeState] = useState<ScreenStrikeState | null>(null);
   const [deceptionState, setDeceptionState] = useState<ScreenDeceptionState | null>(null);
   const [rightCollapsed, setRightCollapsed] = useState(false);
@@ -2490,6 +2559,37 @@ export function ScreenPage({
       },
     });
   }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    let syncing = false;
+
+    const syncScreenStatus = async () => {
+      if (syncing) {
+        return;
+      }
+      syncing = true;
+      try {
+        const response = await getScreenStatus(locale);
+        if (!cancelled) {
+          setScreenStatus(response);
+        }
+      } catch {
+        // Keep the last visible runtime status during a transient polling failure.
+      } finally {
+        syncing = false;
+      }
+    };
+
+    void syncScreenStatus();
+    const timer = window.setInterval(() => {
+      void syncScreenStatus();
+    }, 3000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [locale]);
 
   useEffect(() => {
     let cancelled = false;
@@ -2658,8 +2758,16 @@ export function ScreenPage({
   }, [deceptionStatusOpen, syncDeceptionDeviceStatus]);
 
   useEffect(() => {
+    if (screenStatus?.detection.configured === false) {
+      setTargets([]);
+      setPositions([]);
+      setSelectedId("");
+    }
+  }, [screenStatus?.detection.configured]);
+
+  useEffect(() => {
     window.setTimeout(() => mapRef.current?.invalidateSize(), 350);
-  }, [rightCollapsed]);
+  }, [rightCollapsed, screenStatus?.detection.configured]);
 
   useEffect(() => {
     if (!navigationQRCode) {
@@ -2692,7 +2800,7 @@ export function ScreenPage({
       <ScreenMap
         t={t}
         selectedId={selectedId}
-        positions={positions}
+        positions={screenStatus?.detection.configured === false ? [] : positions}
         deviceLocation={deviceLocation}
         visibleMapLayers={visibleMapLayers}
         onSelectPosition={handleSelectPosition}
@@ -2714,6 +2822,7 @@ export function ScreenPage({
         deceptionState={deceptionState}
         deceptionDeviceStatus={deceptionDeviceStatus}
         deceptionDeviceStatusLoading={deceptionStatusLoading}
+        screenStatus={screenStatus}
         deviceLocation={deviceLocation}
         now={now}
         locale={locale}
@@ -2732,6 +2841,7 @@ export function ScreenPage({
         selectedId={selectedId}
         targets={targets}
         positions={positions}
+        screenStatus={screenStatus}
         now={now}
         collapsed={rightCollapsed}
         onSelectTarget={handleSelectTarget}

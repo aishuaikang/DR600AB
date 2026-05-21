@@ -137,6 +137,21 @@ export interface ScreenDeviceLocationResponse {
   valid: boolean;
 }
 
+export interface ScreenSerialCapabilityStatus {
+  configured: boolean;
+  active: boolean;
+  state?: "unconfigured" | "inactive" | "connecting" | "connected" | "reconnecting";
+  portName?: string;
+  rxPortName?: string;
+  txPortName?: string;
+  lastError?: string;
+}
+
+export interface ScreenRuntimeStatus {
+  detection: ScreenSerialCapabilityStatus;
+  deception: ScreenSerialCapabilityStatus;
+}
+
 export interface ScreenStrikeChannel {
   id: string;
   label: string;
@@ -485,6 +500,35 @@ export interface ScreenPositionTarget {
   lastSeen: string;
   hitCount: number;
   lastRecord: ScreenPositionLastRecord;
+}
+
+export type IntrusionTargetType = "detection" | "position";
+
+export interface IntrusionRecord {
+  id: string;
+  targetId: string;
+  targetType: IntrusionTargetType;
+  model?: string;
+  serial?: string;
+  device?: string;
+  frequency?: number;
+  rssi?: number;
+  firstSeen: string;
+  lastSeen: string;
+  durationSeconds: number;
+  hitCount: number;
+  source?: string;
+  cracked?: boolean;
+  drone?: ScreenPositionPoint;
+  pilot?: ScreenPositionPoint;
+  home?: ScreenPositionPoint;
+  droneTrajectory?: ScreenPositionTrackPoint[];
+  pilotTrajectory?: ScreenPositionTrackPoint[];
+  height?: number;
+  altitude?: number;
+  speed?: number;
+  lastRecord?: unknown;
+  archivedAt: string;
 }
 
 export type DebugRecord = DetectionRecord | ParsedMessage;

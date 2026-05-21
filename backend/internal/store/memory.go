@@ -3,6 +3,7 @@ package store
 
 import (
 	"fmt"
+	"log/slog"
 	"math"
 	"slices"
 	"strings"
@@ -27,6 +28,7 @@ type MemoryStore struct {
 
 	maxDetections int
 	maxParsed     int
+	archiver      IntrusionArchiver
 
 	detections []model.DetectionRecord
 	screen     []model.ScreenDetectionTarget
@@ -34,9 +36,17 @@ type MemoryStore struct {
 	parsed     []model.ParsedMessage
 	gps        []model.GPSRecord
 
-	screenSequence uint64
-	positionSeq    uint64
-	subscribers    map[chan model.Event]struct{}
+	expiredDetections []model.ScreenDetectionTarget
+	expiredPositions  []model.ScreenPositionTarget
+	screenSequence    uint64
+	positionSeq       uint64
+	subscribers       map[chan model.Event]struct{}
+}
+
+// IntrusionArchiver 持久化从大屏当前列表中消失的目标。
+type IntrusionArchiver interface {
+	ArchiveDetection(model.ScreenDetectionTarget) error
+	ArchivePosition(model.ScreenPositionTarget) error
 }
 
 // NewMemoryStore 创建带历史长度上限的内存存储。
@@ -46,6 +56,13 @@ func NewMemoryStore(maxDetections, maxParsed int) *MemoryStore {
 		maxParsed:     max(1, maxParsed),
 		subscribers:   make(map[chan model.Event]struct{}),
 	}
+}
+
+// SetIntrusionArchiver 设置目标消失时使用的归档器。
+func (s *MemoryStore) SetIntrusionArchiver(archiver IntrusionArchiver) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.archiver = archiver
 }
 
 // AddParsed 追加解析消息，并发布解析事件。
@@ -62,7 +79,10 @@ func (s *MemoryStore) AddDetection(record model.DetectionRecord) {
 	s.mu.Lock()
 	s.detections = appendBounded(s.detections, record, s.maxDetections)
 	target, updated := s.addScreenDetectionLocked(record, record.ReceivedAt)
+	archiver := s.archiver
 	s.mu.Unlock()
+
+	s.archiveExpiredScreenTargets(archiver)
 
 	s.Publish(model.Event{Type: "detection.record", Time: record.ReceivedAt, Payload: record})
 	if updated {
@@ -74,7 +94,10 @@ func (s *MemoryStore) AddDetection(record model.DetectionRecord) {
 func (s *MemoryStore) AddScreenPosition(target model.ScreenPositionTarget) (model.ScreenPositionTarget, bool) {
 	s.mu.Lock()
 	merged, updated := s.addScreenPositionLocked(target)
+	archiver := s.archiver
 	s.mu.Unlock()
+
+	s.archiveExpiredScreenTargets(archiver)
 
 	if updated {
 		s.Publish(model.Event{Type: screenPositionEventType, Time: merged.LastSeen, Payload: merged})
@@ -108,19 +131,27 @@ func (s *MemoryStore) ListDetections(limit int) []model.DetectionRecord {
 // ListScreenDetections 按首次发现时间倒序返回大屏合并侦测目标，避免实时更新导致列表跳动。
 func (s *MemoryStore) ListScreenDetections(limit int) []model.ScreenDetectionTarget {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	now := time.Now()
 	s.pruneExpiredScreenDetectionsLocked(now)
-	return latestScreenDetections(s.screen, limit)
+	items := latestScreenDetections(s.screen, limit)
+	archiver := s.archiver
+	s.mu.Unlock()
+
+	s.archiveExpiredScreenTargets(archiver)
+	return items
 }
 
 // ListScreenPositions 按首次发现时间倒序返回大屏合并定位目标，避免实时更新导致列表跳动。
 func (s *MemoryStore) ListScreenPositions(limit int) []model.ScreenPositionTarget {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	now := time.Now()
 	s.pruneExpiredScreenPositionsLocked(now)
-	return latestScreenPositions(s.positions, limit)
+	items := latestScreenPositions(s.positions, limit)
+	archiver := s.archiver
+	s.mu.Unlock()
+
+	s.archiveExpiredScreenTargets(archiver)
+	return items
 }
 
 // ListGPS 按时间倒序返回最新 GPS 记录。
@@ -164,6 +195,34 @@ func (s *MemoryStore) Publish(evt model.Event) {
 		default:
 		}
 	}
+}
+
+func (s *MemoryStore) archiveExpiredScreenTargets(archiver IntrusionArchiver) {
+	detections, positions := s.popExpiredScreenTargets()
+	if archiver == nil {
+		return
+	}
+	for _, target := range detections {
+		if err := archiver.ArchiveDetection(target); err != nil {
+			slog.Warn("归档侦测入侵目标失败", "targetId", target.ID, "error", err)
+		}
+	}
+	for _, target := range positions {
+		if err := archiver.ArchivePosition(target); err != nil {
+			slog.Warn("归档定位入侵目标失败", "targetId", target.ID, "error", err)
+		}
+	}
+}
+
+func (s *MemoryStore) popExpiredScreenTargets() ([]model.ScreenDetectionTarget, []model.ScreenPositionTarget) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	detections := s.expiredDetections
+	positions := s.expiredPositions
+	s.expiredDetections = nil
+	s.expiredPositions = nil
+	return detections, positions
 }
 
 // appendBounded 追加数据，并只保留最新的 maxItems 条。
@@ -267,7 +326,9 @@ func (s *MemoryStore) pruneExpiredScreenDetectionsLocked(now time.Time) {
 	for _, target := range s.screen {
 		if now.Sub(target.LastSeen) <= screenDetectionTTL {
 			active = append(active, target)
+			continue
 		}
+		s.expiredDetections = append(s.expiredDetections, cloneScreenDetectionTarget(target))
 	}
 	clear(s.screen[len(active):])
 	s.screen = active
@@ -533,7 +594,9 @@ func (s *MemoryStore) pruneExpiredScreenPositionsLocked(now time.Time) {
 	for _, target := range s.positions {
 		if now.Sub(target.LastSeen) <= screenPositionTTL {
 			active = append(active, target)
+			continue
 		}
+		s.expiredPositions = append(s.expiredPositions, cloneScreenPositionTarget(target))
 	}
 	clear(s.positions[len(active):])
 	s.positions = active

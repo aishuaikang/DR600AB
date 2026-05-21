@@ -4,7 +4,6 @@ import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 
 import centerPointIcon from "../assets/images/centerPoint.svg";
-import compassIcon from "../assets/images/compass.png";
 import i18n from "../i18n";
 import type {
   ScreenDeviceLocationResponse,
@@ -506,13 +505,6 @@ export function ScreenMap({
     baseLayers[activeLayer].addTo(map);
 
     const customButtons = createDrawControlButtonGroup([
-      {
-        title: t("screenPage.compass", { ns: "screen" }),
-        contentType: "image",
-        text: compassIcon,
-        className: "compass-button",
-        onClick: () => {},
-      },
       {
         title: t("screenPage.center", { ns: "screen" }),
         contentType: "image",

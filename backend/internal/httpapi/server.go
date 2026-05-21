@@ -11,6 +11,7 @@ import (
 	"dr600ab-api/internal/gps"
 	"dr600ab-api/internal/i18n"
 	"dr600ab-api/internal/interference"
+	"dr600ab-api/internal/intrusion"
 	"dr600ab-api/internal/model"
 	"dr600ab-api/internal/network"
 )
@@ -20,6 +21,12 @@ type UserSettingsStore interface {
 	LoadUser() (model.UserSettings, bool, error)
 	SaveUser(model.UserSettings) error
 	SaveEditableUser(model.UserSettings) (model.UserSettings, error)
+}
+
+// IntrusionStore 查询已归档的目标入侵记录。
+type IntrusionStore interface {
+	List(intrusion.QueryOptions) ([]model.IntrusionRecord, error)
+	Close() error
 }
 
 // Server 持有 Fiber 应用以及对外暴露的后端服务。
@@ -34,6 +41,7 @@ type Server struct {
 	network      *network.Service
 	deception    *deception.Service
 	userSettings UserSettingsStore
+	intrusions   IntrusionStore
 }
 
 // New 创建 Server，并注册中间件和 API 路由。
@@ -47,6 +55,7 @@ func New(
 	networkSvc *network.Service,
 	deceptionSvc *deception.Service,
 	userSettingsStore UserSettingsStore,
+	intrusionStore IntrusionStore,
 ) *Server {
 	s := &Server{
 		cfg:          cfg,
@@ -58,6 +67,7 @@ func New(
 		network:      networkSvc,
 		deception:    deceptionSvc,
 		userSettings: userSettingsStore,
+		intrusions:   intrusionStore,
 	}
 	s.app = fiber.New(fiber.Config{
 		AppName: "dr600ab-api",
@@ -77,5 +87,8 @@ func (s *Server) Shutdown() error {
 	s.gps.Stop("")
 	s.interference.Shutdown()
 	s.deception.Shutdown()
+	if s.intrusions != nil {
+		_ = s.intrusions.Close()
+	}
 	return s.app.Shutdown()
 }

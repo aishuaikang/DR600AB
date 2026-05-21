@@ -9,13 +9,12 @@ import {
   LogOut,
   Menu,
   Monitor,
-  Settings2,
   ShieldCheck,
   Wrench,
   X,
 } from "lucide-react";
 
-import { debugPageItems } from "../app/navigation";
+import { debugPageItems, userPageItems } from "../app/navigation";
 import type { Page } from "../app/types";
 import { LoadingSpinner } from "../components/LoadingState";
 import { cx } from "../utils/classnames";
@@ -184,20 +183,27 @@ export function Sidebar({
         </div>
 
         <nav className="admin-nav flex min-h-0 gap-2 overflow-x-auto pb-1 xl:flex-col xl:overflow-y-auto xl:overflow-x-hidden" aria-label={appTitle}>
-          <a
-            href="#/settings"
-            aria-current={page === "settings" ? "page" : undefined}
-            className={cx(
-              "flex h-9 min-w-max items-center gap-2 rounded-[1.35rem] border border-base-300/80 px-2.5 text-[13px] font-medium xl:w-full",
-              page === "settings"
-                ? "bg-primary text-primary-content"
-                : "bg-base-100/35 text-base-content/72 hover:bg-base-300/70 hover:text-base-content",
-            )}
-            onClick={() => handleNavigate("settings")}
-          >
-            <Settings2 size={16} />
-            <span>{t("settings", { ns: "nav" })}</span>
-          </a>
+          {userPageItems.map((item) => {
+            const Icon = item.icon;
+            const active = page === item.id;
+            return (
+              <a
+                key={item.id}
+                href={`#/${item.id}`}
+                aria-current={active ? "page" : undefined}
+                className={cx(
+                  "flex h-9 min-w-max items-center gap-2 rounded-[1.35rem] border border-base-300/80 px-2.5 text-[13px] font-medium xl:w-full",
+                  active
+                    ? "bg-primary text-primary-content"
+                    : "bg-base-100/35 text-base-content/72 hover:bg-base-300/70 hover:text-base-content",
+                )}
+                onClick={() => handleNavigate(item.id)}
+              >
+                <Icon size={16} />
+                <span>{t(item.labelKey, { ns: "nav" })}</span>
+              </a>
+            );
+          })}
 
           {developerActive ? (
             <details

@@ -187,6 +187,24 @@ func TestMemoryStoreScreenDetectionsPrunesExpiredTargets(t *testing.T) {
 	}
 }
 
+func TestMemoryStoreScreenDetectionsArchivesExpiredTargets(t *testing.T) {
+	st := NewMemoryStore(10, 10)
+	archiver := &memoryIntrusionArchiver{}
+	st.SetIntrusionArchiver(archiver)
+	base := time.Now()
+
+	st.AddDetection(screenDetectionRecord("r1", "device-a", "DJI_OC123_10M", 5730, -60, base))
+	st.AddDetection(screenDetectionRecord("r2", "device-b", "Autel_type1", 5800, -55, base.Add(screenDetectionTTL+time.Second)))
+	st.ListScreenDetections(10)
+
+	if len(archiver.detections) != 1 {
+		t.Fatalf("archived detections count = %d, want 1", len(archiver.detections))
+	}
+	if archiver.detections[0].Device != "device-a" {
+		t.Fatalf("archived device = %q, want device-a", archiver.detections[0].Device)
+	}
+}
+
 func TestMemoryStoreScreenDetectionsIgnoreNonDetect(t *testing.T) {
 	st := NewMemoryStore(10, 10)
 	record := screenDetectionRecord("r1", "device-a", "DJI_OC123_10M", 5730, -60, time.Now())
@@ -595,6 +613,66 @@ func TestMemoryStoreScreenPositionsPrunesExpiredTargets(t *testing.T) {
 	}
 }
 
+func TestMemoryStoreScreenPositionsArchivesExpiredTargetsWithTrajectory(t *testing.T) {
+	st := NewMemoryStore(10, 10)
+	archiver := &memoryIntrusionArchiver{}
+	st.SetIntrusionArchiver(archiver)
+	base := time.Now()
+
+	first := screenPositionTarget("sn-old", "device-a", "DJI Mini", base)
+	first.Pilot = &model.ScreenPositionPoint{Latitude: 31.1, Longitude: 121.3}
+	first.Speed = floatPtr(8.5)
+	first.Height = floatPtr(30)
+	second := screenPositionTarget("sn-old", "device-a", "DJI Mini", base.Add(time.Second))
+	second.Drone = &model.ScreenPositionPoint{Latitude: 31.25, Longitude: 121.45}
+	second.Pilot = &model.ScreenPositionPoint{Latitude: 31.15, Longitude: 121.35}
+	second.Speed = floatPtr(10.5)
+	second.Height = floatPtr(45)
+	newTarget := screenPositionTarget("sn-new", "device-b", "DJI Mini 4", base.Add(screenPositionTTL+2*time.Second))
+
+	st.AddScreenPosition(first)
+	st.AddScreenPosition(second)
+	st.AddScreenPosition(newTarget)
+	st.ListScreenPositions(10)
+
+	if len(archiver.positions) != 1 {
+		t.Fatalf("archived positions count = %d, want 1", len(archiver.positions))
+	}
+	archived := archiver.positions[0]
+	if archived.Serial != "sn-old" {
+		t.Fatalf("archived serial = %q, want sn-old", archived.Serial)
+	}
+	if len(archived.DroneTrajectory) != 2 {
+		t.Fatalf("archived drone trajectory count = %d, want 2", len(archived.DroneTrajectory))
+	}
+	point := archived.DroneTrajectory[1]
+	if point.Latitude != 31.25 || point.Longitude != 121.45 {
+		t.Fatalf("archived trajectory point = %#v, want latest drone point", point)
+	}
+	if point.Speed == nil || *point.Speed != 10.5 {
+		t.Fatalf("archived trajectory speed = %#v, want 10.5", point.Speed)
+	}
+	if point.Height == nil || *point.Height != 45 {
+		t.Fatalf("archived trajectory height = %#v, want 45", point.Height)
+	}
+}
+
+func TestMemoryStoreScreenPositionsArchivesExpiredTargetsOnce(t *testing.T) {
+	st := NewMemoryStore(10, 10)
+	archiver := &memoryIntrusionArchiver{}
+	st.SetIntrusionArchiver(archiver)
+	base := time.Now()
+
+	st.AddScreenPosition(screenPositionTarget("sn-old", "device-a", "DJI Mini", base))
+	st.AddScreenPosition(screenPositionTarget("sn-new", "device-b", "DJI Mini 4", base.Add(screenPositionTTL+time.Second)))
+	st.ListScreenPositions(10)
+	st.ListScreenPositions(10)
+
+	if len(archiver.positions) != 1 {
+		t.Fatalf("archived positions count = %d, want 1", len(archiver.positions))
+	}
+}
+
 func TestMemoryStoreScreenPositionsIgnoreIncompleteTarget(t *testing.T) {
 	st := NewMemoryStore(10, 10)
 	target := screenPositionTarget("", "device-a", "DJI Mini", time.Now())
@@ -684,4 +762,19 @@ func findScreenDetectionByModel(items []model.ScreenDetectionTarget, modelName s
 
 func floatPtr(value float64) *float64 {
 	return &value
+}
+
+type memoryIntrusionArchiver struct {
+	detections []model.ScreenDetectionTarget
+	positions  []model.ScreenPositionTarget
+}
+
+func (a *memoryIntrusionArchiver) ArchiveDetection(target model.ScreenDetectionTarget) error {
+	a.detections = append(a.detections, target)
+	return nil
+}
+
+func (a *memoryIntrusionArchiver) ArchivePosition(target model.ScreenPositionTarget) error {
+	a.positions = append(a.positions, target)
+	return nil
 }

@@ -27,6 +27,7 @@ func (s *Server) routes() {
 	s.registerUserRoutes(api)
 	s.registerDeveloperRoutes(api)
 	s.registerDetectionRoutes(api)
+	s.registerIntrusionRoutes(api)
 	s.registerScreenRoutes(api)
 	s.registerInterferenceRoutes(api)
 	s.registerDeceptionRoutes(api)

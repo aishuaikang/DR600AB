@@ -12,6 +12,7 @@ import (
 
 // registerScreenRoutes 挂载大屏公开接口。
 func (s *Server) registerScreenRoutes(api fiber.Router) {
+	api.Get("/screen/status", s.handleScreenStatus)
 	api.Get("/screen/detections", s.handleScreenDetections)
 	api.Get("/screen/positions", s.handleScreenPositions)
 	api.Get("/screen/device-location", s.handleScreenDeviceLocation)
@@ -21,6 +22,22 @@ func (s *Server) registerScreenRoutes(api fiber.Router) {
 	api.Post("/screen/deception", s.handleSetScreenDeception)
 	api.Get("/screen/deception/status", s.handleScreenDeceptionStatus)
 	api.Get("/screen/stream", s.handleScreenStream)
+}
+
+// handleScreenStatus 返回大屏依赖的串口能力配置和运行状态。
+func (s *Server) handleScreenStatus(c *fiber.Ctx) error {
+	locale := s.resolveLocale(c)
+	status, err := s.screenStatus(locale)
+	if err != nil {
+		return s.respondError(
+			c,
+			fiber.StatusInternalServerError,
+			"internal",
+			s.translator.T(locale, "errors", "internal"),
+			err.Error(),
+		)
+	}
+	return c.JSON(status)
 }
 
 // handleScreenDetections 返回大屏使用的合并侦测目标列表。
@@ -177,6 +194,92 @@ func (s *Server) screenDeviceLocation() (model.GeoPoint, float64, bool, error) {
 		return *userSettings.ManualDeviceLocation, 0, true, nil
 	}
 	return model.GeoPoint{}, 0, false, nil
+}
+
+func (s *Server) screenStatus(locale string) (model.ScreenRuntimeStatus, error) {
+	detectionSettings, detectionConfigured, err := s.detection.Configured()
+	if err != nil {
+		return model.ScreenRuntimeStatus{}, err
+	}
+	deceptionSettings, deceptionConfigured, err := s.deception.Configured()
+	if err != nil {
+		return model.ScreenRuntimeStatus{}, err
+	}
+
+	detectionSession := s.detection.Current(locale)
+	deceptionSession := s.deception.Current(locale)
+
+	return model.ScreenRuntimeStatus{
+		Detection: screenDetectionCapabilityStatus(
+			detectionSettings,
+			detectionConfigured,
+			detectionSession,
+		),
+		Deception: screenDeceptionCapabilityStatus(
+			deceptionSettings,
+			deceptionConfigured,
+			deceptionSession,
+		),
+	}, nil
+}
+
+func screenDetectionCapabilityStatus(
+	settings model.DetectionSessionRequest,
+	configured bool,
+	session model.DetectionSessionResponse,
+) model.ScreenSerialCapabilityStatus {
+	hasSessionPort := session.PortName != "" || session.RxPortName != "" || session.TxPortName != ""
+	status := model.ScreenSerialCapabilityStatus{
+		Configured: configured || hasSessionPort,
+		Active:     session.Active,
+		State:      session.State,
+		LastError:  session.LastError,
+	}
+	if status.Configured {
+		status.PortName = settings.PortName
+		status.RxPortName = settings.RxPortName
+		status.TxPortName = settings.TxPortName
+		if status.RxPortName == "" {
+			status.RxPortName = settings.PortName
+		}
+		if status.TxPortName == "" {
+			status.TxPortName = status.RxPortName
+		}
+	} else {
+		status.State = "unconfigured"
+	}
+	if session.PortName != "" {
+		status.PortName = session.PortName
+	}
+	if session.RxPortName != "" {
+		status.RxPortName = session.RxPortName
+	}
+	if session.TxPortName != "" {
+		status.TxPortName = session.TxPortName
+	}
+	return status
+}
+
+func screenDeceptionCapabilityStatus(
+	settings model.DeceptionSessionRequest,
+	configured bool,
+	session model.DeceptionSessionResponse,
+) model.ScreenSerialCapabilityStatus {
+	status := model.ScreenSerialCapabilityStatus{
+		Configured: configured || session.PortName != "",
+		Active:     session.Active,
+		State:      session.State,
+		LastError:  session.LastError,
+	}
+	if status.Configured {
+		status.PortName = settings.PortName
+	} else {
+		status.State = "unconfigured"
+	}
+	if session.PortName != "" {
+		status.PortName = session.PortName
+	}
+	return status
 }
 
 func screenDeviceLocationResponse(

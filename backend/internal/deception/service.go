@@ -170,6 +170,15 @@ func (s *Service) Settings() (model.DeceptionSessionRequest, bool, error) {
 	return s.settings.LoadDeception()
 }
 
+// Configured 返回 GNSS 诱骗串口是否已保存有效配置。
+func (s *Service) Configured() (model.DeceptionSessionRequest, bool, error) {
+	settings, ok, err := s.Settings()
+	if err != nil || !ok {
+		return model.DeceptionSessionRequest{}, false, err
+	}
+	return settings, strings.TrimSpace(settings.PortName) != "", nil
+}
+
 // ClearSettings 停止当前 GNSS 诱骗串口会话并清空已保存的串口设置。
 func (s *Service) ClearSettings(locale string) (model.DeceptionSessionResponse, error) {
 	if err := s.saveSettings(model.DeceptionSessionRequest{}); err != nil {

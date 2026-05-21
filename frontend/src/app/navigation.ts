@@ -1,4 +1,4 @@
-import { Monitor, Network, Satellite, Settings2, Zap } from "lucide-react";
+import { ListTree, Monitor, Network, Satellite, Settings2, Zap } from "lucide-react";
 
 import { MESSAGE_PAGE_CONFIG } from "./message-pages";
 import type { NavItem, Page } from "./types";
@@ -12,9 +12,14 @@ export const debugPageItems: NavItem[] = [
   { id: "developer-settings", icon: Settings2, labelKey: "developerSettings" },
 ];
 
+export const userPageItems: NavItem[] = [
+  { id: "settings", icon: Settings2, labelKey: "settings" },
+  { id: "intrusions", icon: ListTree, labelKey: "intrusions" },
+];
+
 export const pageItems: NavItem[] = [
   { id: "screen", icon: Monitor, labelKey: "screen" },
-  { id: "settings", icon: Settings2, labelKey: "settings" },
+  ...userPageItems,
   ...debugPageItems,
 ];
 

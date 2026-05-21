@@ -1,5 +1,6 @@
 {
   "screen": "Situation Screen",
+  "intrusions": "Target Intrusions",
   "detectionRecords": "Detection Data",
   "parsedRecords": "Parsed Data",
   "gpsRecords": "GPS Records",

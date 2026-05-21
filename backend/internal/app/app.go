@@ -12,6 +12,7 @@ import (
 	"dr600ab-api/internal/httpapi"
 	"dr600ab-api/internal/i18n"
 	"dr600ab-api/internal/interference"
+	"dr600ab-api/internal/intrusion"
 	"dr600ab-api/internal/network"
 	"dr600ab-api/internal/settings"
 	"dr600ab-api/internal/store"
@@ -31,6 +32,11 @@ func New(cfg config.Config) (*App, error) {
 
 	state := store.NewMemoryStore(cfg.MaxDetectionRecords, cfg.MaxParsedMessages)
 	settingsStore := settings.NewStore(cfg.SettingsPath)
+	intrusionStore, err := intrusion.NewStore(cfg.IntrusionDBPath)
+	if err != nil {
+		return nil, err
+	}
+	state.SetIntrusionArchiver(intrusionStore)
 	detectionSvc := detection.NewService(state, translator, settingsStore, detection.Options{
 		DefaultBaudRate:       cfg.DetectionDefaultBaud,
 		DefaultDataBits:       cfg.DefaultDataBits,
@@ -90,6 +96,7 @@ func New(cfg config.Config) (*App, error) {
 			networkSvc,
 			deceptionSvc,
 			settingsStore,
+			intrusionStore,
 		),
 	}, nil
 }

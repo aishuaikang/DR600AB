@@ -35,6 +35,7 @@ import { getStoredLocale, persistLocale, supportedLocales } from "./i18n";
 import { useHashPage } from "./hooks/useHashPage";
 import { InterferencePage } from "./pages/InterferencePage";
 import { GPSRecordsPage } from "./pages/GPSRecordsPage";
+import { IntrusionsPage } from "./pages/IntrusionsPage";
 import { MessagePage } from "./pages/MessagePage";
 import { NetworkSettingsPage } from "./pages/NetworkSettingsPage";
 import { ScreenPage } from "./pages/ScreenPage";
@@ -131,7 +132,7 @@ function App() {
   const developerActive = Boolean(developerSession);
   const developerToken = developerSession?.token ?? "";
   const debugAccessBlocked = !developerActive && isDebugPage(page);
-  const needsRuntimeData = page !== "screen" && page !== "settings" && !debugAccessBlocked;
+  const needsRuntimeData = page !== "screen" && page !== "settings" && page !== "intrusions" && !debugAccessBlocked;
 
   const syncSerialSelection = useCallback((receivePort: string, sendPort: string, baudRate?: number) => {
     const nextReceivePort = receivePort.trim();
@@ -841,6 +842,13 @@ function App() {
                     locale={locale}
                     t={t}
                     onRefresh={() => void loadGPSRecords()}
+                  />
+                ) : null}
+
+                {page === "intrusions" ? (
+                  <IntrusionsPage
+                    locale={locale}
+                    t={t}
                   />
                 ) : null}
 

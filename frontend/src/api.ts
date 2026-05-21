@@ -19,6 +19,8 @@ import type {
   GPSSessionRequest,
   GPSSessionResponse,
   GPSSettings,
+  IntrusionRecord,
+  IntrusionTargetType,
   ListResponse,
   LocaleMeta,
   NetworkInterfacesResponse,
@@ -35,6 +37,7 @@ import type {
   ScreenDeceptionResponse,
   ScreenDeceptionState,
   ScreenPositionTarget,
+  ScreenRuntimeStatus,
   ScreenStrikeRequest,
   ScreenStrikeResponse,
   ScreenStrikeState,
@@ -240,6 +243,18 @@ export function getGPSRecords(locale: string, developerToken: string, limit = 20
   }, locale);
 }
 
+export function getIntrusions(
+  locale: string,
+  limit = 200,
+  targetType?: IntrusionTargetType | "all",
+): Promise<ListResponse<IntrusionRecord>> {
+  const params = new URLSearchParams({ limit: String(limit) });
+  if (targetType && targetType !== "all") {
+    params.set("type", targetType);
+  }
+  return requestJson<ListResponse<IntrusionRecord>>(`/intrusions?${params.toString()}`, {}, locale);
+}
+
 export function getUserSettings(): Promise<UserSettings> {
   return requestJson<UserSettings>("/user/settings");
 }
@@ -249,6 +264,10 @@ export function updateUserSettings(payload: UserSettings, locale: string): Promi
     method: "PUT",
     body: JSON.stringify(payload),
   }, locale);
+}
+
+export function getScreenStatus(locale?: string): Promise<ScreenRuntimeStatus> {
+  return requestJson<ScreenRuntimeStatus>("/screen/status", {}, locale);
 }
 
 export function getScreenDetections(limit = 100): Promise<ListResponse<ScreenDetectionTarget>> {

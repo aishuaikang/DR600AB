@@ -107,6 +107,23 @@ type ScreenDeviceLocationResponse struct {
 	Valid     bool       `json:"valid"`
 }
 
+// ScreenSerialCapabilityStatus 描述大屏依赖串口能力的配置和运行状态。
+type ScreenSerialCapabilityStatus struct {
+	Configured bool   `json:"configured"`
+	Active     bool   `json:"active"`
+	State      string `json:"state,omitempty"`
+	PortName   string `json:"portName,omitempty"`
+	RxPortName string `json:"rxPortName,omitempty"`
+	TxPortName string `json:"txPortName,omitempty"`
+	LastError  string `json:"lastError,omitempty"`
+}
+
+// ScreenRuntimeStatus 返回大屏各串口能力的公开运行状态。
+type ScreenRuntimeStatus struct {
+	Detection ScreenSerialCapabilityStatus `json:"detection"`
+	Deception ScreenSerialCapabilityStatus `json:"deception"`
+}
+
 // GPSSessionResponse 返回当前 GPS 会话状态。
 type GPSSessionResponse struct {
 	Active          bool       `json:"active"`
@@ -276,6 +293,42 @@ type ScreenPositionTarget struct {
 	LastSeen         time.Time                  `json:"lastSeen"`
 	HitCount         int                        `json:"hitCount"`
 	LastRecord       ScreenPositionLastRecord   `json:"lastRecord"`
+}
+
+// IntrusionTargetType 标识归档目标来自侦测列表还是定位列表。
+type IntrusionTargetType string
+
+const (
+	IntrusionTargetTypeDetection IntrusionTargetType = "detection"
+	IntrusionTargetTypePosition  IntrusionTargetType = "position"
+)
+
+// IntrusionRecord 保存一个消失后的目标入侵历史。
+type IntrusionRecord struct {
+	ID              string                     `json:"id"`
+	TargetID        string                     `json:"targetId"`
+	TargetType      IntrusionTargetType        `json:"targetType"`
+	Model           string                     `json:"model,omitempty"`
+	Serial          string                     `json:"serial,omitempty"`
+	Device          string                     `json:"device,omitempty"`
+	Frequency       float64                    `json:"frequency,omitempty"`
+	RSSI            float64                    `json:"rssi,omitempty"`
+	FirstSeen       time.Time                  `json:"firstSeen"`
+	LastSeen        time.Time                  `json:"lastSeen"`
+	DurationSeconds int64                      `json:"durationSeconds"`
+	HitCount        int                        `json:"hitCount"`
+	Source          string                     `json:"source,omitempty"`
+	Cracked         bool                       `json:"cracked,omitempty"`
+	Drone           *ScreenPositionPoint       `json:"drone,omitempty"`
+	Pilot           *ScreenPositionPoint       `json:"pilot,omitempty"`
+	Home            *ScreenPositionPoint       `json:"home,omitempty"`
+	DroneTrajectory []ScreenPositionTrackPoint `json:"droneTrajectory,omitempty"`
+	PilotTrajectory []ScreenPositionTrackPoint `json:"pilotTrajectory,omitempty"`
+	Height          *float64                   `json:"height,omitempty"`
+	Altitude        *float64                   `json:"altitude,omitempty"`
+	Speed           *float64                   `json:"speed,omitempty"`
+	LastRecord      any                        `json:"lastRecord,omitempty"`
+	ArchivedAt      time.Time                  `json:"archivedAt"`
 }
 
 // GpioChannel 描述一个 GPIO 控制通道及其运行状态。

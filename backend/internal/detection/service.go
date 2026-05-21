@@ -144,6 +144,16 @@ func (s *Service) Settings() (model.DetectionSessionRequest, bool, error) {
 	return s.settings.Load()
 }
 
+// Configured 返回侦测串口是否已保存有效配置。
+func (s *Service) Configured() (model.DetectionSessionRequest, bool, error) {
+	settings, ok, err := s.Settings()
+	if err != nil || !ok {
+		return model.DetectionSessionRequest{}, false, err
+	}
+	rxPortName, _ := s.resolvePortNames(settings)
+	return settings, rxPortName != "", nil
+}
+
 // ClearSettings 停止当前侦测会话并清空已保存的串口设置。
 func (s *Service) ClearSettings(locale string) (model.DetectionSessionResponse, error) {
 	if err := s.saveSettings(model.DetectionSessionRequest{}); err != nil {
