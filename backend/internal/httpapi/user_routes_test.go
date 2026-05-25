@@ -145,6 +145,80 @@ func TestHandleUserSettingsReturnsDefaultIntrusionRetention(t *testing.T) {
 	if body.IntrusionRetentionDays == nil || *body.IntrusionRetentionDays != model.DefaultIntrusionRetentionDays {
 		t.Fatalf("retention days = %#v, want default", body.IntrusionRetentionDays)
 	}
+	if body.ScreenAlarmSettings == nil ||
+		!body.ScreenAlarmSettings.Detection ||
+		!body.ScreenAlarmSettings.Position ||
+		!body.ScreenAlarmSettings.FPV ||
+		!body.ScreenAlarmSettings.Sound {
+		t.Fatalf("screen alarm settings = %#v, want all enabled by default", body.ScreenAlarmSettings)
+	}
+}
+
+func TestHandleUpdateUserSettingsNormalizesWhitelistAndAlarmSettings(t *testing.T) {
+	store := &memoryUserSettingsStore{
+		settings: model.UserSettings{DeviceSN: "10125"},
+		ok:       true,
+	}
+	server := &Server{
+		translator:   mustTranslator(t),
+		userSettings: store,
+	}
+	server.app = fiber.New()
+	api := server.app.Group("/api/v1")
+	server.registerUserRoutes(api)
+
+	body, err := json.Marshal(model.UserSettings{
+		Whitelist: []model.WhitelistItem{
+			{Serial: "  DJI-001  ", Model: "  Mavic 3  ", Source: "  manual  "},
+			{Serial: "dji-001", Model: "duplicate"},
+			{Serial: "   "},
+			{Serial: "RID-002", Model: "Mini 4 Pro"},
+		},
+		ScreenAlarmSettings: &model.ScreenAlarmSettings{
+			Detection: false,
+			Position:  true,
+			FPV:       false,
+			Sound:     false,
+		},
+	})
+	if err != nil {
+		t.Fatalf("Marshal() error = %v", err)
+	}
+	req, err := http.NewRequest(http.MethodPut, "/api/v1/user/settings", bytes.NewReader(body))
+	if err != nil {
+		t.Fatalf("NewRequest() error = %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := server.app.Test(req)
+	if err != nil {
+		t.Fatalf("app.Test() error = %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusOK)
+	}
+	if store.settings.DeviceSN != "10125" {
+		t.Fatalf("saved device SN = %q, want preserved 10125", store.settings.DeviceSN)
+	}
+	if len(store.settings.Whitelist) != 2 {
+		t.Fatalf("whitelist = %#v, want 2 normalized items", store.settings.Whitelist)
+	}
+	if store.settings.Whitelist[0].Serial != "DJI-001" ||
+		store.settings.Whitelist[0].Model != "Mavic 3" ||
+		store.settings.Whitelist[0].Source != "manual" ||
+		store.settings.Whitelist[0].CreatedAt.IsZero() {
+		t.Fatalf("first whitelist item = %#v, want trimmed item with createdAt", store.settings.Whitelist[0])
+	}
+	if store.settings.Whitelist[1].Serial != "RID-002" {
+		t.Fatalf("second whitelist serial = %q, want RID-002", store.settings.Whitelist[1].Serial)
+	}
+	if store.settings.ScreenAlarmSettings == nil ||
+		store.settings.ScreenAlarmSettings.Detection ||
+		!store.settings.ScreenAlarmSettings.Position ||
+		store.settings.ScreenAlarmSettings.FPV ||
+		store.settings.ScreenAlarmSettings.Sound {
+		t.Fatalf("screen alarm settings = %#v, want explicit false values preserved", store.settings.ScreenAlarmSettings)
+	}
 }
 
 func TestHandleUpdateUserSettingsPrunesIntrusions(t *testing.T) {

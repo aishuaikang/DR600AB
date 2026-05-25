@@ -132,13 +132,10 @@ func TestValidGeoPointRejectsInvalidCoordinates(t *testing.T) {
 		{Latitude: 91, Longitude: 0},
 		{Latitude: 0, Longitude: -181},
 		{Latitude: 0, Longitude: 181},
+		{Latitude: 0, Longitude: 0},
 	} {
 		if validGeoPoint(point) {
 			t.Fatalf("validGeoPoint(%+v) = true, want false", point)
 		}
-	}
-
-	if !validGeoPoint(&model.GeoPoint{Latitude: 0, Longitude: 0}) {
-		t.Fatal("validGeoPoint(0,0) = false, want true")
 	}
 }

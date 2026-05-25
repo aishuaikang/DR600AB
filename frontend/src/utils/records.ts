@@ -71,7 +71,7 @@ export function formatGps(value: unknown): string {
 
 export function buildSearchText(record: DebugRecord): string {
   if (isDetectionRecord(record)) {
-    return `${record.kind} ${record.summary} ${record.parsed.raw} ${JSON.stringify(record.parsed.data ?? {})}`.toLowerCase();
+    return `${record.kind} ${record.displayModel ?? ""} ${record.summary} ${record.parsed.raw} ${JSON.stringify(record.parsed.data ?? {})}`.toLowerCase();
   }
   return `${record.type} ${record.raw} ${JSON.stringify(record.data ?? {})}`.toLowerCase();
 }

@@ -46,6 +46,9 @@ func TestIngestLineStoresParsedAndDetectionRecords(t *testing.T) {
 	if records[0].Frequency != 5865 {
 		t.Fatalf("frequency = %v, want 5865", records[0].Frequency)
 	}
+	if records[0].DisplayModel != "Analog PAL" {
+		t.Fatalf("display model = %q, want Analog PAL", records[0].DisplayModel)
+	}
 }
 
 func TestIngestLineStoresScreenPositionFromRID(t *testing.T) {

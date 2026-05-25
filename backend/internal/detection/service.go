@@ -109,6 +109,14 @@ func NewService(store *store.MemoryStore, translator *i18n.Translator, settingsS
 	return service
 }
 
+// Store returns the runtime state store used by the service.
+func (s *Service) Store() *store.MemoryStore {
+	if s == nil {
+		return nil
+	}
+	return s.store
+}
+
 // SetSerialOpener 替换串口打开函数，主要用于测试。
 func (s *Service) SetSerialOpener(open SerialOpener) {
 	if open == nil {

@@ -336,6 +336,10 @@ export function VirtualKeyboard({
     };
 
     const handlePointerDown = (event: PointerEvent) => {
+      if (event.target instanceof Node && keyboardRef.current?.contains(event.target)) {
+        cancelClose();
+        return;
+      }
       if (isEditableElement(event.target)) {
         showForElement(event.target);
         return;

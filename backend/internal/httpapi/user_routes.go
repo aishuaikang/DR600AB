@@ -71,6 +71,7 @@ func (s *Server) handleUpdateUserSettings(c *fiber.Ctx) error {
 		)
 	}
 	req.ScreenStrikeChannelLabels = normalizeScreenStrikeChannelLabels(req.ScreenStrikeChannelLabels)
+	req.Whitelist = normalizeUserWhitelist(req.Whitelist, time.Now())
 	req.DeviceSN = ""
 	req = model.UserSettingsWithDefaults(req)
 	if s.userSettings == nil {
@@ -110,7 +111,8 @@ func validGeoPoint(point *model.GeoPoint) bool {
 		point.Latitude >= -90 &&
 		point.Latitude <= 90 &&
 		point.Longitude >= -180 &&
-		point.Longitude <= 180
+		point.Longitude <= 180 &&
+		!(point.Latitude == 0 && point.Longitude == 0)
 }
 
 func normalizeScreenStrikeChannelLabels(labels []string) []string {
@@ -138,6 +140,55 @@ func normalizeScreenStrikeChannelLabels(labels []string) []string {
 		return nil
 	}
 	return normalized
+}
+
+func normalizeUserWhitelist(items []model.WhitelistItem, now time.Time) []model.WhitelistItem {
+	if len(items) == 0 {
+		return nil
+	}
+
+	const maxItems = 500
+	normalized := make([]model.WhitelistItem, 0, min(len(items), maxItems))
+	seen := make(map[string]struct{}, len(items))
+	for _, item := range items {
+		if len(normalized) == maxItems {
+			break
+		}
+		serial := truncateRunes(strings.TrimSpace(item.Serial), 128)
+		if serial == "" {
+			continue
+		}
+		key := strings.ToLower(serial)
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		createdAt := item.CreatedAt
+		if createdAt.IsZero() {
+			createdAt = now
+		}
+		normalized = append(normalized, model.WhitelistItem{
+			Serial:    serial,
+			Model:     truncateRunes(strings.TrimSpace(item.Model), 64),
+			Source:    truncateRunes(strings.TrimSpace(item.Source), 32),
+			CreatedAt: createdAt,
+		})
+	}
+	if len(normalized) == 0 {
+		return nil
+	}
+	return normalized
+}
+
+func truncateRunes(value string, maxLength int) string {
+	if maxLength <= 0 {
+		return ""
+	}
+	runes := []rune(value)
+	if len(runes) <= maxLength {
+		return value
+	}
+	return string(runes[:maxLength])
 }
 
 func validIntrusionRetentionDays(days *int) bool {

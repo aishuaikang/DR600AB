@@ -3,6 +3,8 @@ package deception
 import (
 	"bytes"
 	"encoding/binary"
+	"errors"
+	"fmt"
 	"io"
 	"math"
 	"strings"
@@ -23,12 +25,14 @@ type fakePort struct {
 	reads   chan []byte
 	closed  bool
 	reports map[byte][][]byte
+	ackErrs map[byte]uint16
 }
 
 func newFakePort() *fakePort {
 	return &fakePort{
 		reads:   make(chan []byte, 64),
 		reports: make(map[byte][][]byte),
+		ackErrs: make(map[byte]uint16),
 	}
 }
 
@@ -60,7 +64,17 @@ func (p *fakePort) Write(data []byte) (int, error) {
 				}
 			}
 		default:
-			ack, ackErr := protocol.BuildFrame(protocol.ControlAck, protocol.DeviceAddress, protocol.HostAddress, []byte{frame.Command(), 0, 0, 0})
+			errorCode := p.ackErrs[frame.Command()]
+			returnValue := byte(0)
+			if errorCode != 0 {
+				returnValue = 1
+			}
+			ack, ackErr := protocol.BuildFrame(protocol.ControlAck, protocol.DeviceAddress, protocol.HostAddress, []byte{
+				frame.Command(),
+				returnValue,
+				byte(errorCode),
+				byte(errorCode >> 8),
+			})
 			if ackErr == nil {
 				p.reads <- ack
 			}
@@ -116,6 +130,65 @@ func (p *fakePort) setReport(command byte, body []byte, more ...[]byte) {
 		bodies = append(bodies, append([]byte(nil), item...))
 	}
 	p.reports[command] = bodies
+}
+
+func (p *fakePort) setAckError(command byte, code uint16) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.ackErrs[command] = code
+}
+
+type fakeReportStore struct {
+	mu    sync.Mutex
+	items []model.DeceptionReport
+}
+
+func (s *fakeReportStore) Create(report model.DeceptionReport) (model.DeceptionReport, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if report.ID == "" {
+		report.ID = fmt.Sprintf("report-%d", len(s.items)+1)
+	}
+	now := time.Now()
+	if report.StartedAt.IsZero() {
+		report.StartedAt = now
+	}
+	if report.CreatedAt.IsZero() {
+		report.CreatedAt = now
+	}
+	report.UpdatedAt = now
+	report.RecordCount = len(report.Records)
+	s.items = append(s.items, cloneReport(report))
+	return cloneReport(report), nil
+}
+
+func (s *fakeReportStore) CreateRunning(report model.DeceptionReport) (model.DeceptionReport, error) {
+	report.Status = model.DeceptionReportStatusRunning
+	return s.Create(report)
+}
+
+func (s *fakeReportStore) Update(report model.DeceptionReport) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for index := range s.items {
+		if s.items[index].ID == report.ID {
+			report.UpdatedAt = time.Now()
+			report.RecordCount = len(report.Records)
+			s.items[index] = cloneReport(report)
+			return nil
+		}
+	}
+	return errors.New("report not found")
+}
+
+func (s *fakeReportStore) snapshot() []model.DeceptionReport {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make([]model.DeceptionReport, len(s.items))
+	for index, item := range s.items {
+		out[index] = cloneReport(item)
+	}
+	return out
 }
 
 func TestSetScreenDeceptionSendsFixedPointCommandSequence(t *testing.T) {
@@ -468,6 +541,162 @@ func TestSetScreenDeceptionManualStopTurnsOffTransmit(t *testing.T) {
 	}
 }
 
+func TestSetScreenDeceptionCreatesAndCompletesReport(t *testing.T) {
+	svc, port := newTestService(t)
+	reports := &fakeReportStore{}
+	svc.SetReportStore(reports)
+	setCompleteDeviceStatusReports(port)
+	startSession(t, svc)
+
+	lon := 116.994057
+	lat := 28.170931
+	mask := uint16(protocol.SignalGPSL1CA | protocol.SignalBDSB1I)
+	state, err := svc.SetScreenDeception(model.ScreenDeceptionRequest{
+		Enabled:    true,
+		TargetID:   "target-report",
+		Mode:       "fixed_point",
+		Longitude:  &lon,
+		Latitude:   &lat,
+		SignalMask: &mask,
+	}, model.GeoPoint{Latitude: 28.1, Longitude: 116.9}, 0, true, "zh-CN")
+	if err != nil {
+		t.Fatalf("SetScreenDeception(start) error = %v", err)
+	}
+	if !state.Active {
+		t.Fatalf("state.Active = false, want true")
+	}
+
+	items := reports.snapshot()
+	if len(items) != 1 {
+		t.Fatalf("reports len = %d, want 1", len(items))
+	}
+	startReport := items[0]
+	if startReport.Status != model.DeceptionReportStatusRunning {
+		t.Fatalf("start report status = %q, want running", startReport.Status)
+	}
+	if startReport.Request.TargetID != "target-report" || startReport.StartState == nil || !startReport.StartState.Active {
+		t.Fatalf("start report = %#v, want request and active start state", startReport)
+	}
+	if startReport.StartDeviceStatus == nil || startReport.StartDeviceStatus.RawDescriptions["status"] == "" {
+		t.Fatalf("StartDeviceStatus = %+v, want raw query evidence", startReport.StartDeviceStatus)
+	}
+	if startReport.RawDescriptions["status"] == "" {
+		t.Fatalf("RawDescriptions missing status evidence: %+v", startReport.RawDescriptions)
+	}
+	if len(startReport.Records) == 0 || startReport.RecordCount != len(startReport.Records) {
+		t.Fatalf("Records count = %d/%d, want persisted records", startReport.RecordCount, len(startReport.Records))
+	}
+
+	stoppedState, err := svc.SetScreenDeception(model.ScreenDeceptionRequest{Enabled: false}, model.GeoPoint{}, 0, false, "zh-CN")
+	if err != nil {
+		t.Fatalf("SetScreenDeception(stop) error = %v", err)
+	}
+	if stoppedState.Active {
+		t.Fatalf("stoppedState.Active = true, want false")
+	}
+
+	items = reports.snapshot()
+	if len(items) != 1 {
+		t.Fatalf("reports len after stop = %d, want 1", len(items))
+	}
+	report := items[0]
+	if report.Status != model.DeceptionReportStatusCompleted {
+		t.Fatalf("report status = %q, want completed", report.Status)
+	}
+	if report.EndedAt == nil || report.EndState == nil || report.EndState.Active {
+		t.Fatalf("end evidence = endedAt:%v endState:%+v, want completed inactive evidence", report.EndedAt, report.EndState)
+	}
+	if report.BeforeStopStatus == nil || report.AfterStopStatus == nil {
+		t.Fatalf("stop status snapshots = before:%+v after:%+v, want both", report.BeforeStopStatus, report.AfterStopStatus)
+	}
+	if report.RawDescriptions["before_stop.status"] == "" || report.RawDescriptions["after_stop.status"] == "" {
+		t.Fatalf("RawDescriptions = %+v, want prefixed stop query evidence", report.RawDescriptions)
+	}
+	if len(report.Records) <= len(startReport.Records) {
+		t.Fatalf("Records len = %d, want more than start %d", len(report.Records), len(startReport.Records))
+	}
+}
+
+func TestSetScreenDeceptionCommandFailureCreatesFailedReport(t *testing.T) {
+	svc, port := newTestService(t)
+	reports := &fakeReportStore{}
+	svc.SetReportStore(reports)
+	port.setAckError(protocol.CmdSimulatedPosition, 7)
+	startSession(t, svc)
+
+	lon := 116.994057
+	lat := 28.170931
+	_, err := svc.SetScreenDeception(model.ScreenDeceptionRequest{
+		Enabled:   true,
+		TargetID:  "target-failed",
+		Mode:      "fixed_point",
+		Longitude: &lon,
+		Latitude:  &lat,
+	}, model.GeoPoint{Latitude: 28.1, Longitude: 116.9}, 0, true, "zh-CN")
+	if err == nil {
+		t.Fatalf("SetScreenDeception() error = nil, want command failure")
+	}
+
+	items := reports.snapshot()
+	if len(items) != 1 {
+		t.Fatalf("reports len = %d, want 1", len(items))
+	}
+	report := items[0]
+	if report.Status != model.DeceptionReportStatusFailed {
+		t.Fatalf("report status = %q, want failed", report.Status)
+	}
+	if report.Request.TargetID != "target-failed" {
+		t.Fatalf("Request.TargetID = %q, want target-failed", report.Request.TargetID)
+	}
+	if report.EndedAt == nil || report.LastError == "" {
+		t.Fatalf("EndedAt/LastError = %v/%q, want failed evidence", report.EndedAt, report.LastError)
+	}
+	if len(report.Records) == 0 {
+		t.Fatalf("Records is empty, want failed command protocol records")
+	}
+	if svc.ScreenState().Active {
+		t.Fatalf("ScreenState().Active = true, want inactive after failed start")
+	}
+}
+
+func TestShutdownClosesActiveReportAbnormal(t *testing.T) {
+	svc, port := newTestService(t)
+	reports := &fakeReportStore{}
+	svc.SetReportStore(reports)
+	setCompleteDeviceStatusReports(port)
+	startSession(t, svc)
+
+	lon := 116.994057
+	lat := 28.170931
+	_, err := svc.SetScreenDeception(model.ScreenDeceptionRequest{
+		Enabled:   true,
+		TargetID:  "target-shutdown",
+		Mode:      "fixed_point",
+		Longitude: &lon,
+		Latitude:  &lat,
+	}, model.GeoPoint{Latitude: 28.1, Longitude: 116.9}, 0, true, "zh-CN")
+	if err != nil {
+		t.Fatalf("SetScreenDeception(start) error = %v", err)
+	}
+
+	svc.Shutdown()
+
+	items := reports.snapshot()
+	if len(items) != 1 {
+		t.Fatalf("reports len = %d, want 1", len(items))
+	}
+	report := items[0]
+	if report.Status != model.DeceptionReportStatusAbnormal {
+		t.Fatalf("report status = %q, want abnormal", report.Status)
+	}
+	if report.AbnormalReason != "service_shutdown" || report.LastError != "service_shutdown" {
+		t.Fatalf("reason/error = %q/%q, want service_shutdown", report.AbnormalReason, report.LastError)
+	}
+	if report.EndedAt == nil || report.EndState == nil {
+		t.Fatalf("end evidence = endedAt:%v endState:%+v, want shutdown evidence", report.EndedAt, report.EndState)
+	}
+}
+
 func TestScreenDeviceStatusReturnsInactiveWithoutSerial(t *testing.T) {
 	svc, _ := newTestService(t)
 
@@ -572,6 +801,90 @@ func TestScreenDeviceStatusQueriesStructuredReports(t *testing.T) {
 	}
 }
 
+func TestScreenDeviceStatusQueriesStructuredReportsInEnglish(t *testing.T) {
+	svc, port := newTestService(t)
+	port.setReport(protocol.QueryDeviceStatus, testDeviceStatusBody())
+	port.setReport(protocol.QueryFirmwareVersion, []byte{protocol.QueryFirmwareVersion, 0, 0x03, 0x08, 0x10, 0x00, 0x05, 0x0C, 0x20, 0x00, 0x07, 0x10, 0x30, 0x00})
+	port.setReport(protocol.QuerySystemTime, []byte{protocol.QuerySystemTime, 26, 5, 20, 1, 2, 3})
+	port.setReport(protocol.QueryTransmitSwitch, []byte{protocol.QueryTransmitSwitch, 0, 0x47, 0x00})
+	startSession(t, svc)
+
+	status := svc.ScreenDeviceStatus("en-US")
+	if got := status.RawDescriptions["status"]; !strings.Contains(got, "TX ") || !strings.Contains(got, "RX ") || !strings.Contains(got, "current position") {
+		t.Fatalf("RawDescriptions[status] = %q, want english tx/rx/current position", got)
+	}
+	for key, value := range status.QueryErrors {
+		if strings.Contains(value, "当前") || strings.Contains(value, "设备") {
+			t.Fatalf("QueryErrors[%s] = %q, want english text", key, value)
+		}
+	}
+}
+
+func TestQueryReturnsEnglishDescription(t *testing.T) {
+	svc, port := newTestService(t)
+	port.setReport(protocol.QueryDeviceStatus, testDeviceStatusBody())
+	startSession(t, svc)
+
+	response, err := svc.Query("status", "en-US")
+	if err != nil {
+		t.Fatalf("Query() error = %v", err)
+	}
+	if strings.Contains(response.Description, "当前定位") || !strings.Contains(response.Description, "current position") {
+		t.Fatalf("Description = %q, want english description", response.Description)
+	}
+}
+
+func TestEnglishReportDoesNotContainChineseDescriptions(t *testing.T) {
+	svc, port := newTestService(t)
+	reports := &fakeReportStore{}
+	svc.SetReportStore(reports)
+	setCompleteDeviceStatusReports(port)
+	startSession(t, svc)
+
+	lon := 116.994057
+	lat := 28.170931
+	_, err := svc.SetScreenDeception(model.ScreenDeceptionRequest{
+		Enabled:   true,
+		TargetID:  "target-en",
+		Mode:      "fixed_point",
+		Longitude: &lon,
+		Latitude:  &lat,
+	}, model.GeoPoint{Latitude: 28.1, Longitude: 116.9}, 0, true, "en-US")
+	if err != nil {
+		t.Fatalf("SetScreenDeception(start) error = %v", err)
+	}
+
+	items := reports.snapshot()
+	if len(items) != 1 {
+		t.Fatalf("reports len = %d, want 1", len(items))
+	}
+	report := items[0]
+	if strings.Contains(report.Summary, "模拟") || strings.Contains(report.Summary, "诱骗") {
+		t.Fatalf("Summary = %q, want english summary", report.Summary)
+	}
+	if report.StartDeviceStatus == nil {
+		t.Fatalf("StartDeviceStatus = nil, want populated")
+	}
+	for key, value := range report.RawDescriptions {
+		if strings.Contains(value, "当前定位") || strings.Contains(value, "设备状态") {
+			t.Fatalf("RawDescriptions[%s] = %q, want english text", key, value)
+		}
+	}
+
+	_, err = svc.SetScreenDeception(model.ScreenDeceptionRequest{Enabled: false}, model.GeoPoint{}, 0, false, "en-US")
+	if err != nil {
+		t.Fatalf("SetScreenDeception(stop) error = %v", err)
+	}
+	items = reports.snapshot()
+	if len(items) != 1 {
+		t.Fatalf("reports len after stop = %d, want 1", len(items))
+	}
+	report = items[0]
+	if strings.Contains(report.LastError, "串口") || strings.Contains(report.LastError, "失败") {
+		t.Fatalf("LastError = %q, want english or empty", report.LastError)
+	}
+}
+
 func TestScreenDeviceStatusIncludesRawDescriptionOnQueryTimeout(t *testing.T) {
 	svc, _ := newTestService(t)
 	startSession(t, svc)
@@ -607,6 +920,28 @@ func TestScreenDeviceStatusCollectsDeviceSignalBurst(t *testing.T) {
 	if _, ok := status.RawDescriptions["device_signal_02"]; !ok {
 		t.Fatalf("RawDescriptions missing device_signal_02: %+v", status.RawDescriptions)
 	}
+}
+
+func setCompleteDeviceStatusReports(port *fakePort) {
+	port.setReport(protocol.QueryDeviceStatus, testDeviceStatusBody())
+	port.setReport(protocol.QueryFirmwareVersion, []byte{protocol.QueryFirmwareVersion, 0, 0x03, 0x08, 0x10, 0x00, 0x05, 0x0C, 0x20, 0x00, 0x07, 0x10, 0x30, 0x00})
+	port.setReport(protocol.QuerySystemTime, []byte{protocol.QuerySystemTime, 26, 5, 20, 1, 2, 3})
+	port.setReport(protocol.QueryTransmitSwitch, []byte{protocol.QueryTransmitSwitch, 0, 0x47, 0x00})
+	port.setReport(protocol.QuerySimulatedPosition, testPositionBody(protocol.QuerySimulatedPosition, 28.170931, 116.994057, 120))
+	port.setReport(protocol.QueryDevicePosition, testPositionBody(protocol.QueryDevicePosition, 29.654321, 117.123456, 88))
+	port.setReport(protocol.QueryTargetPosition, testTargetPositionBody())
+	port.setReport(protocol.QuerySpoofCircle, testSpoofCircleBody())
+	port.setReport(protocol.QueryRandomPosition, []byte{protocol.QueryRandomPosition, 0, 1, 0, 0, 0, 100, 0, 0, 0, 3, 0, 0, 0})
+	port.setReport(protocol.QueryPowerAttenuation, []byte{protocol.QueryPowerAttenuation, 1, 2, 3, 0, 0, 0, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0})
+	delayBody := make([]byte, 30)
+	delayBody[0] = protocol.QuerySignalDelay
+	putFloat32(delayBody, 2, 11)
+	putFloat32(delayBody, 6, 12)
+	putFloat32(delayBody, 10, 13)
+	putFloat32(delayBody, 26, 14)
+	port.setReport(protocol.QuerySignalDelay, delayBody)
+	port.setReport(protocol.QueryTimedSearch, []byte{protocol.QueryTimedSearch, 1})
+	port.setReport(protocol.QueryDeviceSignal, testDeviceSignalBody(protocol.SignalGPSL1CA, 0x7D))
 }
 
 func newTestService(t *testing.T) (*Service, *fakePort) {

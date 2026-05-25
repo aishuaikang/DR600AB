@@ -20,6 +20,7 @@ const (
 	screenDetectionTTL              = 60 * time.Second
 	screenPositionTTL               = 60 * time.Second
 	screenPositionTrajectoryLimit   = 120
+	screenPositionTrajectoryJitterM = 3.0
 	screenDetectionEventType        = "screen.detection.updated"
 	screenPositionEventType         = "screen.position.updated"
 )
@@ -28,9 +29,10 @@ const (
 type MemoryStore struct {
 	mu sync.RWMutex
 
-	maxDetections int
-	maxParsed     int
-	archiver      IntrusionArchiver
+	maxDetections          int
+	maxParsed              int
+	archiver               IntrusionArchiver
+	deviceLocationProvider func() *model.ScreenDeviceLocationResponse
 
 	detections []model.DetectionRecord
 	screen     []model.ScreenDetectionTarget
@@ -67,6 +69,13 @@ func (s *MemoryStore) SetIntrusionArchiver(archiver IntrusionArchiver) {
 	s.archiver = archiver
 }
 
+// SetDeviceLocationProvider sets the source used to calculate live position target relations.
+func (s *MemoryStore) SetDeviceLocationProvider(provider func() *model.ScreenDeviceLocationResponse) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.deviceLocationProvider = provider
+}
+
 // AddParsed 追加解析消息，并发布解析事件。
 func (s *MemoryStore) AddParsed(msg model.ParsedMessage) {
 	s.mu.Lock()
@@ -78,6 +87,7 @@ func (s *MemoryStore) AddParsed(msg model.ParsedMessage) {
 
 // AddDetection 追加侦测记录，并发布侦测事件。
 func (s *MemoryStore) AddDetection(record model.DetectionRecord) {
+	record.DisplayModel = model.DisplayModelName(record.Model)
 	s.mu.Lock()
 	s.detections = appendBounded(s.detections, record, s.maxDetections)
 	target, updated := s.addScreenDetectionLocked(record, record.ReceivedAt)
@@ -97,9 +107,11 @@ func (s *MemoryStore) AddScreenPosition(target model.ScreenPositionTarget) (mode
 	s.mu.Lock()
 	merged, updated := s.addScreenPositionLocked(target)
 	archiver := s.archiver
+	deviceLocation := s.currentDeviceLocationLocked()
 	s.mu.Unlock()
 
 	s.archiveExpiredScreenTargets(archiver)
+	merged = withPositionRelations(merged, deviceLocation)
 
 	if updated {
 		s.Publish(model.Event{Type: screenPositionEventType, Time: merged.LastSeen, Payload: merged})
@@ -150,9 +162,11 @@ func (s *MemoryStore) ListScreenPositions(limit int) []model.ScreenPositionTarge
 	s.pruneExpiredScreenPositionsLocked(now)
 	items := latestScreenPositions(s.positions, limit)
 	archiver := s.archiver
+	deviceLocation := s.currentDeviceLocationLocked()
 	s.mu.Unlock()
 
 	s.archiveExpiredScreenTargets(archiver)
+	applyPositionRelations(items, deviceLocation)
 	return items
 }
 
@@ -227,6 +241,13 @@ func (s *MemoryStore) popExpiredScreenTargets() ([]model.ScreenDetectionTarget, 
 	return detections, positions
 }
 
+func (s *MemoryStore) currentDeviceLocationLocked() *model.ScreenDeviceLocationResponse {
+	if s.deviceLocationProvider == nil {
+		return nil
+	}
+	return cloneDeviceLocation(s.deviceLocationProvider())
+}
+
 // appendBounded 追加数据，并只保留最新的 maxItems 条。
 func appendBounded[T any](items []T, item T, maxItems int) []T {
 	items = append(items, item)
@@ -256,6 +277,7 @@ func (s *MemoryStore) addScreenDetectionLocked(
 		return model.ScreenDetectionTarget{}, false
 	}
 	record.Model = normalizeScreenTargetModel(record.Model)
+	record.DisplayModel = model.DisplayModelName(record.Model)
 	if record.Model == "" || record.Frequency == 0 {
 		return model.ScreenDetectionTarget{}, false
 	}
@@ -274,16 +296,17 @@ func (s *MemoryStore) addScreenDetectionLocked(
 	if len(matches) == 0 {
 		s.screenSequence++
 		target := model.ScreenDetectionTarget{
-			ID:         fmt.Sprintf("screen-%d-%d", now.UnixNano(), s.screenSequence),
-			Serial:     newScreenDetectionSerial(),
-			Model:      record.Model,
-			Frequency:  record.Frequency,
-			RSSI:       record.RSSI,
-			Device:     stringsTrim(record.Device),
-			FirstSeen:  now,
-			LastSeen:   now,
-			HitCount:   1,
-			LastRecord: screenDetectionLastRecord(record),
+			ID:           fmt.Sprintf("screen-%d-%d", now.UnixNano(), s.screenSequence),
+			Serial:       newScreenDetectionSerial(),
+			Model:        record.Model,
+			DisplayModel: record.DisplayModel,
+			Frequency:    record.Frequency,
+			RSSI:         record.RSSI,
+			Device:       stringsTrim(record.Device),
+			FirstSeen:    now,
+			LastSeen:     now,
+			HitCount:     1,
+			LastRecord:   screenDetectionLastRecord(record),
 		}
 		insertScreenDetectionByFirstSeen(&s.screen, target)
 		trimScreenDetectionsToLimit(&s.screen, s.maxDetections)
@@ -307,6 +330,7 @@ func (s *MemoryStore) addScreenDetectionLocked(
 		merged.Serial = newScreenDetectionSerial()
 	}
 	merged.Model = record.Model
+	merged.DisplayModel = record.DisplayModel
 	merged.Frequency = record.Frequency
 	merged.RSSI = record.RSSI
 	if device := stringsTrim(record.Device); device != "" {
@@ -476,7 +500,7 @@ func appendScreenPositionTrajectory(
 ) []model.ScreenPositionTrackPoint {
 	result := normalizedScreenPositionTrajectory(trajectory)
 	if !validScreenPositionTrackCoordinate(point) || seenAt.IsZero() {
-		return trimScreenPositionTrajectory(result)
+		return compactScreenPositionTrajectory(result)
 	}
 
 	next := model.ScreenPositionTrackPoint{
@@ -502,14 +526,18 @@ func mergeScreenPositionTrajectories(
 	incoming []model.ScreenPositionTrackPoint,
 ) []model.ScreenPositionTrackPoint {
 	if len(current) == 0 {
-		return trimScreenPositionTrajectory(normalizedScreenPositionTrajectory(incoming))
+		return compactScreenPositionTrajectory(incoming)
 	}
 	if len(incoming) == 0 {
-		return trimScreenPositionTrajectory(normalizedScreenPositionTrajectory(current))
+		return compactScreenPositionTrajectory(current)
 	}
 
 	merged := append(normalizedScreenPositionTrajectory(current), normalizedScreenPositionTrajectory(incoming)...)
-	return trimScreenPositionTrajectory(deduplicateScreenPositionTrajectory(merged))
+	return compactScreenPositionTrajectory(merged)
+}
+
+func compactScreenPositionTrajectory(points []model.ScreenPositionTrackPoint) []model.ScreenPositionTrackPoint {
+	return trimScreenPositionTrajectory(deduplicateScreenPositionTrajectory(normalizedScreenPositionTrajectory(points)))
 }
 
 func normalizedScreenPositionTrajectory(points []model.ScreenPositionTrackPoint) []model.ScreenPositionTrackPoint {
@@ -553,7 +581,8 @@ func deduplicateScreenPositionTrajectory(points []model.ScreenPositionTrackPoint
 
 	out := points[:0]
 	for _, point := range points {
-		if len(out) > 0 && sameScreenPositionTrackPoint(out[len(out)-1], point) {
+		if len(out) > 0 && screenPositionTrackPointsWithinJitter(out[len(out)-1], point) {
+			out[len(out)-1] = mergeScreenPositionTrackPoint(out[len(out)-1], point)
 			continue
 		}
 		out = append(out, point)
@@ -569,19 +598,45 @@ func trimScreenPositionTrajectory(points []model.ScreenPositionTrackPoint) []mod
 	return points[len(points)-screenPositionTrajectoryLimit:]
 }
 
-func sameScreenPositionTrackPoint(a, b model.ScreenPositionTrackPoint) bool {
-	return a.Latitude == b.Latitude &&
-		a.Longitude == b.Longitude &&
-		float64PtrEqual(a.Speed, b.Speed) &&
-		float64PtrEqual(a.Height, b.Height) &&
-		a.Time.Equal(b.Time)
+func screenPositionTrackPointsWithinJitter(a, b model.ScreenPositionTrackPoint) bool {
+	return screenPositionTrackPointDistanceM(a, b) <= screenPositionTrajectoryJitterM
 }
 
-func float64PtrEqual(a, b *float64) bool {
-	if a == nil || b == nil {
-		return a == b
+func mergeScreenPositionTrackPoint(current, latest model.ScreenPositionTrackPoint) model.ScreenPositionTrackPoint {
+	merged := latest
+	if latest.Speed == nil {
+		merged.Speed = cloneFloat64Ptr(current.Speed)
+	} else {
+		merged.Speed = cloneFloat64Ptr(latest.Speed)
 	}
-	return *a == *b
+	if latest.Height == nil {
+		merged.Height = cloneFloat64Ptr(current.Height)
+	} else {
+		merged.Height = cloneFloat64Ptr(latest.Height)
+	}
+	return merged
+}
+
+func screenPositionTrackPointDistanceM(a, b model.ScreenPositionTrackPoint) float64 {
+	const earthRadiusM = 6_371_000
+
+	lat1 := degreesToRadians(a.Latitude)
+	lat2 := degreesToRadians(b.Latitude)
+	deltaLat := degreesToRadians(b.Latitude - a.Latitude)
+	deltaLon := degreesToRadians(b.Longitude - a.Longitude)
+	value := math.Sin(deltaLat/2)*math.Sin(deltaLat/2) +
+		math.Cos(lat1)*math.Cos(lat2)*math.Sin(deltaLon/2)*math.Sin(deltaLon/2)
+	if value < 0 {
+		value = 0
+	}
+	if value > 1 {
+		value = 1
+	}
+	return earthRadiusM * 2 * math.Atan2(math.Sqrt(value), math.Sqrt(1-value))
+}
+
+func degreesToRadians(value float64) float64 {
+	return value * math.Pi / 180
 }
 
 func validScreenPositionTrackCoordinate(point *model.ScreenPositionPoint) bool {
@@ -907,7 +962,44 @@ func cloneScreenPositionTarget(target model.ScreenPositionTarget) model.ScreenPo
 	target.Height = cloneFloat64Ptr(target.Height)
 	target.Altitude = cloneFloat64Ptr(target.Altitude)
 	target.Speed = cloneFloat64Ptr(target.Speed)
+	target.PilotDistanceM = cloneFloat64Ptr(target.PilotDistanceM)
+	target.DroneDistanceM = cloneFloat64Ptr(target.DroneDistanceM)
+	target.DroneDirectionDeg = cloneFloat64Ptr(target.DroneDirectionDeg)
+	target.DeviceDirectionDeg = cloneFloat64Ptr(target.DeviceDirectionDeg)
 	return target
+}
+
+func applyPositionRelations(items []model.ScreenPositionTarget, deviceLocation *model.ScreenDeviceLocationResponse) {
+	for index := range items {
+		items[index] = withPositionRelations(items[index], deviceLocation)
+	}
+}
+
+func withPositionRelations(target model.ScreenPositionTarget, deviceLocation *model.ScreenDeviceLocationResponse) model.ScreenPositionTarget {
+	pilotDistanceM, droneDistanceM, droneDirectionDeg, deviceDirectionDeg := model.ScreenPositionRelations(
+		deviceLocation,
+		target.Drone,
+		target.Pilot,
+	)
+	target.PilotDistanceM = pilotDistanceM
+	target.DroneDistanceM = droneDistanceM
+	target.DroneDirectionDeg = droneDirectionDeg
+	target.DeviceDirectionDeg = deviceDirectionDeg
+	return target
+}
+
+func cloneDeviceLocation(location *model.ScreenDeviceLocationResponse) *model.ScreenDeviceLocationResponse {
+	if location == nil || !location.Valid || location.Point == nil {
+		return nil
+	}
+	cloned := *location
+	point := *location.Point
+	cloned.Point = &point
+	if location.UpdatedAt != nil {
+		updatedAt := *location.UpdatedAt
+		cloned.UpdatedAt = &updatedAt
+	}
+	return &cloned
 }
 
 func cloneStrings(values []string) []string {
@@ -950,14 +1042,15 @@ func cloneFloat64Ptr(value *float64) *float64 {
 
 func screenDetectionLastRecord(record model.DetectionRecord) model.ScreenDetectionLastRecord {
 	return model.ScreenDetectionLastRecord{
-		ID:         record.ID,
-		Kind:       record.Kind,
-		ReceivedAt: record.ReceivedAt,
-		Device:     record.Device,
-		Model:      record.Model,
-		Frequency:  record.Frequency,
-		RSSI:       record.RSSI,
-		Summary:    record.Summary,
+		ID:           record.ID,
+		Kind:         record.Kind,
+		ReceivedAt:   record.ReceivedAt,
+		Device:       record.Device,
+		Model:        record.Model,
+		DisplayModel: record.DisplayModel,
+		Frequency:    record.Frequency,
+		RSSI:         record.RSSI,
+		Summary:      record.Summary,
 	}
 }
 

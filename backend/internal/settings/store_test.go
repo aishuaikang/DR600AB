@@ -258,3 +258,37 @@ func TestStoreSavesIntrusionRetentionDays(t *testing.T) {
 		t.Fatalf("retention days = %#v, want 0", gotUser.IntrusionRetentionDays)
 	}
 }
+
+func TestStoreSavesWhitelistAndScreenAlarmSettings(t *testing.T) {
+	store := NewStore(filepath.Join(t.TempDir(), "settings.json"))
+	req := model.UserSettings{
+		Whitelist: []model.WhitelistItem{
+			{Serial: "DJI-001", Model: "Mavic 3", Source: "manual"},
+		},
+		ScreenAlarmSettings: &model.ScreenAlarmSettings{
+			Detection: true,
+			Position:  false,
+			FPV:       true,
+			Sound:     false,
+		},
+	}
+
+	if err := store.SaveUser(req); err != nil {
+		t.Fatalf("SaveUser() error = %v", err)
+	}
+
+	gotUser, ok, err := store.LoadUser()
+	if err != nil || !ok {
+		t.Fatalf("LoadUser() = %+v, %v, %v", gotUser, ok, err)
+	}
+	if len(gotUser.Whitelist) != 1 || gotUser.Whitelist[0].Serial != "DJI-001" {
+		t.Fatalf("whitelist = %#v, want saved item", gotUser.Whitelist)
+	}
+	if gotUser.ScreenAlarmSettings == nil ||
+		!gotUser.ScreenAlarmSettings.Detection ||
+		gotUser.ScreenAlarmSettings.Position ||
+		!gotUser.ScreenAlarmSettings.FPV ||
+		gotUser.ScreenAlarmSettings.Sound {
+		t.Fatalf("screen alarm settings = %#v, want saved explicit values", gotUser.ScreenAlarmSettings)
+	}
+}

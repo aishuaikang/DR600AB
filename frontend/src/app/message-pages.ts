@@ -11,6 +11,7 @@ import {
   getTextValue,
   isDetectionRecord,
 } from "../utils/records";
+import { resolveDisplayModel } from "../utils/models";
 import type { DebugRecord, DebugRecordPage } from "../types";
 
 export const MESSAGE_PAGE_ORDER: DebugRecordPage[] = [
@@ -39,7 +40,7 @@ export const MESSAGE_PAGE_CONFIG: Record<DebugRecordPage, MessagePageConfig> = {
       {
         labelKey: "detectionRecords.model",
         width: "w-[20rem]",
-        render: (record) => getTextValue(isDetectionRecord(record) ? record.model : getRecordField(record, "model", "seq", "encrypted_id")),
+        render: (record) => getTextValue(isDetectionRecord(record) ? resolveDisplayModel(record) : getRecordField(record, "model", "seq", "encrypted_id")),
       },
       {
         labelKey: "detectionRecords.frequency",

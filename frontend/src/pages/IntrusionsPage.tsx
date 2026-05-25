@@ -17,6 +17,7 @@ import type {
 } from "../types";
 import { cx } from "../utils/classnames";
 import { formatNumber, formatTime } from "../utils/format";
+import { resolveDisplayModel } from "../utils/models";
 import { extractErrorMessage } from "../utils/session";
 import { PositionMap } from "./ScreenMap";
 import { referenceMapLayers } from "./screenData";
@@ -30,6 +31,39 @@ type CellDetail = {
 
 const intrusionLimit = 200;
 const intrusionFilters: IntrusionFilter[] = ["all", "detection", "position"];
+
+function formatIntrusionDateKey(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return "";
+  }
+  const year = String(date.getFullYear());
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function normalizeIntrusionQuery(value: string | undefined) {
+  return (value || "").trim().toLowerCase();
+}
+
+function intrusionDateRangeMatches(record: IntrusionRecord, from: string, to: string) {
+  if (!from && !to) {
+    return true;
+  }
+  const start = formatIntrusionDateKey(record.firstSeen);
+  const end = formatIntrusionDateKey(record.lastSeen) || start;
+  if (!start || !end) {
+    return false;
+  }
+  if (from && end < from) {
+    return false;
+  }
+  if (to && start > to) {
+    return false;
+  }
+  return true;
+}
 
 function formatDuration(seconds: number, t: TFunction) {
   if (!Number.isFinite(seconds) || seconds <= 0) {
@@ -63,6 +97,16 @@ function formatOptionalMetric(locale: string, value: number | undefined, unit: s
     return "-";
   }
   return `${formatNumber(locale, value, digits)} ${unit}`;
+}
+
+function formatDistanceMetric(locale: string, value: number | undefined) {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return "-";
+  }
+  if (Math.abs(value) >= 1000) {
+    return `${formatNumber(locale, value / 1000, value >= 100_000 ? 0 : 1)} km`;
+  }
+  return `${formatNumber(locale, value, 0)} m`;
 }
 
 function formatPoint(point?: ScreenPositionPoint) {
@@ -117,19 +161,9 @@ function targetTypeTone(type: IntrusionTargetType): Tone {
   return type === "position" ? "success" : "info";
 }
 
-function sourceSummary(source?: string, sources?: string[]) {
-  const values = [...(sources ?? []), source ?? ""]
-    .map((item) => item.trim())
-    .filter(Boolean);
-  const unique = Array.from(new Set(values));
-  return unique.length > 0 ? unique.join(" / ") : "-";
-}
-
 function hasIntrusionMapData(record: IntrusionRecord) {
-  if (record.targetType !== "position") {
-    return false;
-  }
   return (
+    validIntrusionPoint(record.deviceLocation?.point) ||
     validIntrusionPoint(record.drone) ||
     validIntrusionPoint(record.pilot) ||
     Boolean(record.droneTrajectory?.some(validIntrusionTrackPoint)) ||
@@ -150,14 +184,17 @@ function intrusionToPositionTarget(record: IntrusionRecord): ScreenPositionTarge
     frequency: record.frequency,
     rssi: record.rssi,
     device: record.device,
-    drone: record.drone,
-    pilot: record.pilot,
-    home: record.home,
-    droneTrajectory: record.droneTrajectory,
-    pilotTrajectory: record.pilotTrajectory,
+    drone: validIntrusionPoint(record.drone) ? record.drone : undefined,
+    pilot: validIntrusionPoint(record.pilot) ? record.pilot : undefined,
+    droneTrajectory: (record.droneTrajectory ?? []).filter(validIntrusionTrackPoint),
+    pilotTrajectory: (record.pilotTrajectory ?? []).filter(validIntrusionTrackPoint),
     height: record.height,
     altitude: record.altitude,
     speed: record.speed,
+    pilotDistanceM: record.pilotDistanceM,
+    droneDistanceM: record.droneDistanceM,
+    droneDirectionDeg: record.droneDirectionDeg,
+    deviceDirectionDeg: record.deviceDirectionDeg,
     cracked: record.cracked,
     firstSeen: record.firstSeen,
     lastSeen: record.lastSeen,
@@ -229,41 +266,40 @@ function OverflowCell({
 
 function CoordinateMapCell({
   label,
+  mapLabel,
   value,
   record,
-  onOpenText,
   onOpenMap,
 }: {
   label: string;
+  mapLabel: string;
   value: string;
   record: IntrusionRecord;
-  onOpenText: (detail: CellDetail) => void;
   onOpenMap: (record: IntrusionRecord) => void;
 }) {
   const displayValue = value || "-";
-  if (!hasIntrusionMapData(record)) {
-    return (
-      <OverflowCell
-        label={label}
-        value={displayValue}
-        mono
-        className="text-xs tabular-nums text-base-content/80"
-        onOpen={onOpenText}
-      />
-    );
-  }
+  const lines = displayValue === "-" ? [displayValue] : displayValue.split(" / ");
+  const hasMapData = hasIntrusionMapData(record);
 
   return (
-    <button
-      className="intrusion-overflow-cell intrusion-overflow-cell--clickable intrusion-coordinate-cell font-mono text-xs tabular-nums text-base-content/80"
-      type="button"
-      title={displayValue}
-      aria-label={label}
-      onClick={() => onOpenMap(record)}
-    >
-      <span className="block truncate">{displayValue}</span>
-      <MapPinned size={14} aria-hidden="true" />
-    </button>
+    <div className="intrusion-coordinate-cell font-mono text-xs tabular-nums text-base-content/80">
+      <div className="intrusion-coordinate-cell__values" aria-label={label}>
+        {lines.map((line, index) => (
+          <span key={`${index}-${line}`}>{line}</span>
+        ))}
+      </div>
+      {hasMapData ? (
+        <button
+          className="intrusion-coordinate-cell__map-button"
+          type="button"
+          title={mapLabel}
+          aria-label={mapLabel}
+          onClick={() => onOpenMap(record)}
+        >
+          <MapPinned size={14} aria-hidden="true" />
+        </button>
+      ) : null}
+    </div>
   );
 }
 
@@ -330,8 +366,13 @@ function IntrusionMapModal({
   }
 
   const target = intrusionToPositionTarget(record);
+  const hasTargetMapData =
+    validIntrusionPoint(record.drone) ||
+    validIntrusionPoint(record.pilot) ||
+    Boolean(record.droneTrajectory?.some(validIntrusionTrackPoint)) ||
+    Boolean(record.pilotTrajectory?.some(validIntrusionTrackPoint));
   const identity = record.serial || record.device || record.targetId || record.id;
-  const title = record.model || t("intrusionMapTitle", { ns: "settings" });
+  const title = resolveDisplayModel(record) || t("intrusionMapTitle", { ns: "settings" });
 
   return (
     <div className="app-modal-backdrop fixed inset-0 z-50 grid place-items-center bg-black/60 p-4" role="presentation" onClick={onClose}>
@@ -356,7 +397,7 @@ function IntrusionMapModal({
         <PositionMap
           selectedId={target.id}
           positions={[target]}
-          deviceLocation={null}
+          deviceLocation={hasTargetMapData ? null : record.deviceLocation ?? null}
           visibleMapLayers={referenceMapLayers}
           onSelectPosition={() => undefined}
           className="intrusion-map-modal__map"
@@ -427,6 +468,10 @@ export function IntrusionsPage({
 }) {
   const [records, setRecords] = useState<IntrusionRecord[]>([]);
   const [filter, setFilter] = useState<IntrusionFilter>("all");
+  const [modelQuery, setModelQuery] = useState("");
+  const [serialQuery, setSerialQuery] = useState("");
+  const [intrusionDateFrom, setIntrusionDateFrom] = useState("");
+  const [intrusionDateTo, setIntrusionDateTo] = useState("");
   const [banner, setBanner] = useState<Banner>({ kind: "idle", message: "" });
   const [loading, setLoading] = useState(false);
   const [cellDetail, setCellDetail] = useState<CellDetail | null>(null);
@@ -459,14 +504,55 @@ export function IntrusionsPage({
     void loadRecords();
   }, [loadRecords]);
 
+  const handleIntrusionDateFromChange = useCallback((value: string) => {
+    setIntrusionDateFrom(value);
+    setIntrusionDateTo((currentTo) => (value && currentTo && currentTo < value ? value : currentTo));
+  }, []);
+
+  const handleIntrusionDateToChange = useCallback((value: string) => {
+    setIntrusionDateTo(value && intrusionDateFrom && value < intrusionDateFrom ? intrusionDateFrom : value);
+  }, [intrusionDateFrom]);
+
+  const clearIntrusionFilters = useCallback(() => {
+    setModelQuery("");
+    setSerialQuery("");
+    setIntrusionDateFrom("");
+    setIntrusionDateTo("");
+  }, []);
+
+  const visibleRecords = useMemo(() => {
+    const modelNeedle = normalizeIntrusionQuery(modelQuery);
+    const serialNeedle = normalizeIntrusionQuery(serialQuery);
+    return records.filter((record) => {
+      const modelText = normalizeIntrusionQuery(`${resolveDisplayModel(record)} ${record.model || ""}`);
+      const serialText = normalizeIntrusionQuery(record.serial);
+      if (modelNeedle && !modelText.includes(modelNeedle)) {
+        return false;
+      }
+      if (serialNeedle && !serialText.includes(serialNeedle)) {
+        return false;
+      }
+      return intrusionDateRangeMatches(record, intrusionDateFrom, intrusionDateTo);
+    });
+  }, [intrusionDateFrom, intrusionDateTo, modelQuery, records, serialQuery]);
+
+  useEffect(() => {
+    const availableIds = new Set(visibleRecords.map((record) => record.id));
+    setSelectedIds((items) => {
+      const next = items.filter((id) => availableIds.has(id));
+      return next.length === items.length ? items : next;
+    });
+  }, [visibleRecords]);
+
   const totalTrajectoryCount = useMemo(
-    () => records.reduce((sum, record) => sum + (record.droneTrajectory?.length ?? 0) + (record.pilotTrajectory?.length ?? 0), 0),
-    [records],
+    () => visibleRecords.reduce((sum, record) => sum + (record.droneTrajectory?.length ?? 0) + (record.pilotTrajectory?.length ?? 0), 0),
+    [visibleRecords],
   );
   const selectedIdSet = useMemo(() => new Set(selectedIds), [selectedIds]);
   const selectedCount = selectedIds.length;
-  const allCurrentSelected = records.length > 0 && records.every((record) => selectedIdSet.has(record.id));
-  const someCurrentSelected = records.some((record) => selectedIdSet.has(record.id));
+  const allCurrentSelected = visibleRecords.length > 0 && visibleRecords.every((record) => selectedIdSet.has(record.id));
+  const someCurrentSelected = visibleRecords.some((record) => selectedIdSet.has(record.id));
+  const hasIntrusionFilters = Boolean(modelQuery.trim() || serialQuery.trim() || intrusionDateFrom || intrusionDateTo);
 
   const toggleRecordSelection = (id: string, checked: boolean) => {
     setSelectedIds((items) => {
@@ -479,13 +565,13 @@ export function IntrusionsPage({
 
   const toggleCurrentPageSelection = (checked: boolean) => {
     if (!checked) {
-      const currentIds = new Set(records.map((record) => record.id));
+      const currentIds = new Set(visibleRecords.map((record) => record.id));
       setSelectedIds((items) => items.filter((id) => !currentIds.has(id)));
       return;
     }
     setSelectedIds((items) => {
       const next = [...items];
-      for (const record of records) {
+      for (const record of visibleRecords) {
         if (!next.includes(record.id)) {
           next.push(record.id);
         }
@@ -553,8 +639,58 @@ export function IntrusionsPage({
               ))}
             </div>
             <span className="text-xs text-base-content/60">
-              {t("intrusionCount", { ns: "settings", value: records.length })} · {t("intrusionSelectedCount", { ns: "settings", value: selectedCount })} · {t("intrusionTrajectoryCount", { ns: "settings", value: totalTrajectoryCount })}
+              {t("intrusionCount", { ns: "settings", value: visibleRecords.length })} · {t("intrusionSelectedCount", { ns: "settings", value: selectedCount })} · {t("intrusionTrajectoryCount", { ns: "settings", value: totalTrajectoryCount })}
             </span>
+          </div>
+
+          <div className="flex flex-wrap items-end gap-2">
+            <label className="flex min-w-0 flex-col gap-1 text-xs text-base-content/60">
+              <span>{t("intrusionModel", { ns: "settings" })}</span>
+              <input
+                className="input input-bordered input-sm w-44 bg-base-100"
+                type="search"
+                value={modelQuery}
+                placeholder={t("intrusionModel", { ns: "settings" })}
+                onChange={(event) => setModelQuery(event.target.value)}
+              />
+            </label>
+            <label className="flex min-w-0 flex-col gap-1 text-xs text-base-content/60">
+              <span>{t("intrusionIdentity", { ns: "settings" })}</span>
+              <input
+                className="input input-bordered input-sm w-44 bg-base-100 font-mono"
+                type="search"
+                value={serialQuery}
+                placeholder={t("intrusionIdentity", { ns: "settings" })}
+                onChange={(event) => setSerialQuery(event.target.value)}
+              />
+            </label>
+            <div className="flex min-w-0 flex-col gap-1 text-xs text-base-content/60">
+              <span>{t("intrusionDateRange", { ns: "settings" })}</span>
+              <div className="flex flex-wrap items-end gap-2">
+                <label className="flex min-w-0 flex-col gap-1">
+                  <span>{t("intrusionDateFrom", { ns: "settings" })}</span>
+                  <input
+                    className="input input-bordered input-sm w-44 bg-base-100"
+                    type="date"
+                    value={intrusionDateFrom}
+                    onChange={(event) => handleIntrusionDateFromChange(event.target.value)}
+                  />
+                </label>
+                <label className="flex min-w-0 flex-col gap-1">
+                  <span>{t("intrusionDateTo", { ns: "settings" })}</span>
+                  <input
+                    className="input input-bordered input-sm w-44 bg-base-100"
+                    type="date"
+                    min={intrusionDateFrom || undefined}
+                    value={intrusionDateTo}
+                    onChange={(event) => handleIntrusionDateToChange(event.target.value)}
+                  />
+                </label>
+              </div>
+            </div>
+            <button className="btn btn-sm btn-ghost" type="button" disabled={!hasIntrusionFilters} onClick={clearIntrusionFilters}>
+              {t("clear", { ns: "common" })}
+            </button>
           </div>
 
           {(banner.kind === "error" || banner.kind === "success") && banner.message ? (
@@ -564,7 +700,7 @@ export function IntrusionsPage({
           ) : null}
 
           <div className="min-h-0 min-w-0 flex-1 overflow-auto rounded-2xl border border-base-300 bg-base-100/70">
-            <table className="table table-zebra table-sm w-full min-w-[116rem] table-fixed whitespace-nowrap">
+            <table className="table table-zebra table-sm w-full min-w-[115rem] table-fixed whitespace-nowrap">
               <thead className="sticky top-0 z-10 bg-base-200">
                 <tr>
                   <th className="w-[4rem]">
@@ -578,7 +714,7 @@ export function IntrusionsPage({
                         }
                       }}
                       aria-label={t("intrusionSelectCurrentPage", { ns: "settings" })}
-                      disabled={records.length === 0 || loading || deleteBusy}
+                      disabled={visibleRecords.length === 0 || loading || deleteBusy}
                       onChange={(event) => toggleCurrentPageSelection(event.currentTarget.checked)}
                     />
                   </th>
@@ -590,24 +726,28 @@ export function IntrusionsPage({
                   <th className="w-[13rem]">{t("intrusionFirstSeen", { ns: "settings" })}</th>
                   <th className="w-[13rem]">{t("intrusionLastSeen", { ns: "settings" })}</th>
                   <th className="w-[8rem]">{t("intrusionDuration", { ns: "settings" })}</th>
-                  <th className="w-[7rem]">{t("intrusionHitCount", { ns: "settings" })}</th>
                   <th className="w-[22rem]">{t("intrusionCoordinates", { ns: "settings" })}</th>
+                  <th className="w-[10rem]">{t("intrusionPilotDistance", { ns: "settings" })}</th>
+                  <th className="w-[10rem]">{t("intrusionDroneDistance", { ns: "settings" })}</th>
                   <th className="w-[9rem]">{t("intrusionSpeed", { ns: "settings" })}</th>
                   <th className="w-[9rem]">{t("intrusionHeight", { ns: "settings" })}</th>
-                  <th className="w-[10rem]">{t("intrusionSource", { ns: "settings" })}</th>
                 </tr>
               </thead>
               <tbody>
-                {records.length === 0 ? (
+                {visibleRecords.length === 0 ? (
                   <tr>
                     <td colSpan={14} className="p-3">
                       <div className="admin-empty-state admin-empty-state--table">
-                        {loading ? t("loading", { ns: "common" }) : t("empty", { ns: "common" })}
+                        {loading
+                          ? t("loading", { ns: "common" })
+                          : records.length > 0
+                            ? t("intrusionNoMatch", { ns: "settings" })
+                            : t("empty", { ns: "common" })}
                       </div>
                     </td>
                   </tr>
                 ) : (
-                  records.map((record) => (
+                  visibleRecords.map((record) => (
                     <tr key={record.id} className="row-hover">
                       <td>
                         <input
@@ -625,14 +765,14 @@ export function IntrusionsPage({
                       <td>
                         <OverflowCell
                           label={t("intrusionModel", { ns: "settings" })}
-                          value={record.model || "-"}
+                          value={resolveDisplayModel(record) || "-"}
                           onOpen={setCellDetail}
                         />
                       </td>
                       <td>
                         <OverflowCell
                           label={t("intrusionIdentity", { ns: "settings" })}
-                          value={record.serial || record.device || record.targetId}
+                          value={record.serial || "-"}
                           mono
                           className="rounded-xl bg-base-200/80 px-2 py-1 text-xs"
                           onOpen={setCellDetail}
@@ -657,25 +797,19 @@ export function IntrusionsPage({
                         />
                       </td>
                       <td className="tabular-nums">{formatDuration(record.durationSeconds, t)}</td>
-                      <td className="tabular-nums">{formatNumber(locale, record.hitCount, 0)}</td>
                       <td>
                         <CoordinateMapCell
                           label={t("intrusionCoordinates", { ns: "settings" })}
+                          mapLabel={t("intrusionMapTitle", { ns: "settings" })}
                           value={coordinateSummary(record, t)}
                           record={record}
-                          onOpenText={setCellDetail}
                           onOpenMap={setMapRecord}
                         />
                       </td>
+                      <td className="tabular-nums">{formatDistanceMetric(locale, record.pilotDistanceM)}</td>
+                      <td className="tabular-nums">{formatDistanceMetric(locale, record.droneDistanceM)}</td>
                       <td className="tabular-nums">{formatOptionalMetric(locale, record.speed, "m/s", 1)}</td>
                       <td className="tabular-nums">{formatOptionalMetric(locale, record.height, "m", 0)}</td>
-                      <td>
-                        <OverflowCell
-                          label={t("intrusionSource", { ns: "settings" })}
-                          value={sourceSummary(record.source, record.sources)}
-                          onOpen={setCellDetail}
-                        />
-                      </td>
                     </tr>
                   ))
                 )}

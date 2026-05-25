@@ -1,6 +1,7 @@
 {
   "screen": "态势大屏",
   "intrusions": "目标入侵",
+  "deceptionReports": "诱骗报告",
   "detectionRecords": "侦测数据",
   "parsedRecords": "解析数据",
   "gpsRecords": "GPS 数据",
@@ -8,6 +9,7 @@
   "networkSettings": "网络设置",
   "debugGroup": "调试",
   "settings": "设置",
+  "whitelist": "白名单管理",
   "openMenu": "展开菜单",
   "developerSettings": "开发设置",
   "developerLogin": "开发者登录",

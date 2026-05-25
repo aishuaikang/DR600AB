@@ -5,6 +5,10 @@ import type {
   DeceptionSessionRequest,
   DeceptionSessionResponse,
   DeceptionQueryResponse,
+  DeceptionReport,
+  DeceptionReportDeleteResponse,
+  DeceptionReportStatus,
+  DeceptionReportSummary,
   DeceptionSettings,
   DetectionSessionRequest,
   DetectionSessionResponse,
@@ -255,6 +259,28 @@ export function getIntrusions(
     params.set("type", targetType);
   }
   return requestJson<ListResponse<IntrusionRecord>>(`/intrusions?${params.toString()}`, {}, locale);
+}
+
+export function getDeceptionReports(
+  locale: string,
+  limit = 200,
+  status?: DeceptionReportStatus | "all",
+): Promise<ListResponse<DeceptionReportSummary>> {
+  const params = new URLSearchParams({ limit: String(limit) });
+  if (status && status !== "all") {
+    params.set("status", status);
+  }
+  return requestJson<ListResponse<DeceptionReportSummary>>(`/deception-reports?${params.toString()}`, {}, locale);
+}
+
+export function getDeceptionReport(id: string, locale: string): Promise<DeceptionReport> {
+  return requestJson<DeceptionReport>(`/deception-reports/${encodeURIComponent(id)}`, {}, locale);
+}
+
+export function deleteFailedDeceptionReport(id: string, locale: string): Promise<DeceptionReportDeleteResponse> {
+  return requestJson<DeceptionReportDeleteResponse>(`/deception-reports/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+  }, locale);
 }
 
 export function deleteIntrusions(payload: IntrusionDeleteRequest, locale: string): Promise<IntrusionDeleteResponse> {

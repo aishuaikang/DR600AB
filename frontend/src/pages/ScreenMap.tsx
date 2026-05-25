@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef } from "react";
 import type { TFunction } from "i18next";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
+import { Info } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import centerPointIcon from "../assets/images/centerPoint.svg";
@@ -11,10 +12,12 @@ import type {
   ScreenPositionPoint,
   ScreenPositionTarget,
   ScreenPositionTrackPoint,
+  WhitelistItem,
 } from "../types";
 import { cx } from "../utils/classnames";
 import { createDrawControlButtonGroup } from "../utils/leafletControls";
 import { installLeafletCoordConverter } from "../utils/leafletCoordConverter";
+import { isSerialWhitelisted } from "../utils/whitelist";
 import {
   REFERENCE_DEFAULT_MAP_LAYER,
   REFERENCE_MAP_CENTER,
@@ -38,11 +41,13 @@ const pilotTrajectoryColor = "#f4c95d";
 type RealMapData = {
   deviceLocation: ScreenDeviceLocationResponse | null;
   positions: ScreenPositionTarget[];
+  whitelist?: WhitelistItem[];
 };
 
 type PositionMapProps = {
   selectedId: string;
   positions: ScreenPositionTarget[];
+  whitelist?: WhitelistItem[];
   deviceLocation: ScreenDeviceLocationResponse | null;
   visibleMapLayers: ReferenceMapLayer[];
   onSelectPosition: (target: ScreenPositionTarget) => void;
@@ -180,6 +185,94 @@ function formatMapOptionalNumber(value: number | undefined, unit: string, digits
     return "-";
   }
   return `${value.toFixed(digits)}${unit}`;
+}
+
+type MapLegendItem = {
+  id: string;
+  label: string;
+  kind: "marker" | "line";
+  iconUrl?: string;
+  iconClassName?: string;
+  color?: string;
+};
+
+function buildMapLegendItems(t: TFunction) {
+  return [
+    {
+      id: "device",
+      label: t("deviceLocation", { ns: "screen" }),
+      kind: "marker" as const,
+      iconUrl: referenceMarkerIcons.detectionOnline,
+    },
+    {
+      id: "drone-whitelist",
+      label: t("whitelistDrone", { ns: "screen" }),
+      kind: "marker" as const,
+      iconUrl: referenceMarkerIcons.uav,
+      iconClassName: "screen-legend-panel__icon--whitelist",
+    },
+    {
+      id: "drone-unwhitelisted",
+      label: t("unwhitelistedDrone", { ns: "screen" }),
+      kind: "marker" as const,
+      iconUrl: referenceMarkerIcons.uavBlackFly,
+      iconClassName: "screen-legend-panel__icon--alert",
+    },
+    {
+      id: "pilot-whitelist",
+      label: t("whitelistPilot", { ns: "screen" }),
+      kind: "marker" as const,
+      iconUrl: referenceMarkerIcons.remote,
+      iconClassName: "screen-legend-panel__icon--whitelist",
+    },
+    {
+      id: "pilot-unwhitelisted",
+      label: t("unwhitelistedPilot", { ns: "screen" }),
+      kind: "marker" as const,
+      iconUrl: referenceMarkerIcons.remoteBlackFly,
+      iconClassName: "screen-legend-panel__icon--alert",
+    },
+    {
+      id: "drone-trajectory",
+      label: t("trajectory", { ns: "screen" }),
+      kind: "line" as const,
+      color: droneTrajectoryColor,
+    },
+    {
+      id: "pilot-trajectory",
+      label: t("pilotTrajectory", { ns: "screen" }),
+      kind: "line" as const,
+      color: pilotTrajectoryColor,
+    },
+  ] satisfies MapLegendItem[];
+}
+
+export function ScreenMapLegend({ t }: { t: TFunction }) {
+  const items = useMemo(() => buildMapLegendItems(t), [t]);
+
+  return (
+    <details className="screen-legend-toggle">
+      <summary className="screen-legend-trigger" aria-label={t("mapLegend", { ns: "screen" })} title={t("mapLegend", { ns: "screen" })}>
+        <Info size={13} strokeWidth={2.4} aria-hidden="true" />
+        <span className="sr-only">{t("mapLegend", { ns: "screen" })}</span>
+      </summary>
+      <div className="screen-legend-panel" role="note" aria-label={t("mapLegend", { ns: "screen" })}>
+        <strong className="screen-legend-panel__title">{t("mapLegend", { ns: "screen" })}</strong>
+        <div className="screen-legend-panel__items">
+          {items.map((item) => (
+            <div key={item.id} className={cx("screen-legend-panel__item", item.kind === "line" && "screen-legend-panel__item--line")}>
+              {item.kind === "marker" ? (
+                <img className={cx("screen-legend-panel__icon", item.iconClassName)} src={item.iconUrl} alt="" aria-hidden="true" />
+              ) : (
+                <span className="screen-legend-panel__line" aria-hidden="true" style={{ backgroundColor: item.color }} />
+              )}
+              <span>{item.label}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+    </details>
+  );
 }
 
 function validMapPoint(point?: ScreenPositionPoint | null): point is ScreenPositionPoint {
@@ -382,6 +475,7 @@ function renderPositionLayers(
   map: L.Map,
   positions: ScreenPositionTarget[],
   selectedId: string,
+  whitelist: WhitelistItem[] | undefined,
   onSelectPosition: (target: ScreenPositionTarget) => void,
   t: TFunction,
 ) {
@@ -389,16 +483,23 @@ function renderPositionLayers(
 
   positions.forEach((target) => {
     const selected = selectedId === target.id;
+    const whitelisted = isSerialWhitelisted(target.serial, whitelist);
+    const markerClassName = cx(
+      selected && "screen-reference-marker-selected",
+      !whitelisted && "screen-reference-marker-alert",
+    );
+    const remoteIcon = whitelisted
+      ? selected ? referenceMarkerIcons.selectedRemote : referenceMarkerIcons.remote
+      : selected ? referenceMarkerIcons.selectedRemoteBlackFly : referenceMarkerIcons.remoteBlackFly;
+    const uavIcon = whitelisted
+      ? selected ? referenceMarkerIcons.selectedUav : referenceMarkerIcons.uav
+      : selected ? referenceMarkerIcons.selectedUavBlackFly : referenceMarkerIcons.uavBlackFly;
     renderTrajectoryLayer(group, target, "pilot", selected, onSelectPosition, t);
     renderTrajectoryLayer(group, target, "drone", selected, onSelectPosition, t);
 
     if (validMapPoint(target.pilot)) {
       L.marker([target.pilot.latitude, target.pilot.longitude], {
-        icon: createIcon(
-          selected ? referenceMarkerIcons.selectedRemote : referenceMarkerIcons.remote,
-          targetIconSize,
-          selected ? "screen-reference-marker-selected" : undefined,
-        ),
+        icon: createIcon(remoteIcon, targetIconSize, markerClassName),
         pane: selected ? selectedPane : markerPane,
         riseOnHover: true,
         alt: `${target.serial || target.id}-pilot`,
@@ -415,11 +516,7 @@ function renderPositionLayers(
 
     if (validMapPoint(target.drone)) {
       L.marker([target.drone.latitude, target.drone.longitude], {
-        icon: createIcon(
-          selected ? referenceMarkerIcons.selectedUav : referenceMarkerIcons.uav,
-          targetIconSize,
-          selected ? "screen-reference-marker-selected" : undefined,
-        ),
+        icon: createIcon(uavIcon, targetIconSize, markerClassName),
         pane: selected ? selectedPane : markerPane,
         riseOnHover: true,
         alt: `${target.serial || target.id}-drone`,
@@ -449,6 +546,7 @@ function selectedPositionPoint(positions: ScreenPositionTarget[], selectedId: st
 export function PositionMap({
   selectedId,
   positions,
+  whitelist,
   deviceLocation,
   visibleMapLayers,
   onSelectPosition,
@@ -462,7 +560,7 @@ export function PositionMap({
   const positionLayerRef = useRef<L.LayerGroup | null>(null);
   const onSelectPositionRef = useRef(onSelectPosition);
   const selectedIdRef = useRef(selectedId);
-  const realDataRef = useRef<RealMapData>({ deviceLocation, positions });
+  const realDataRef = useRef<RealMapData>({ deviceLocation, positions, whitelist });
   const hasFitRealBoundsRef = useRef(false);
   const visibleMapLayersKey = visibleMapLayers.join("|");
 
@@ -475,8 +573,8 @@ export function PositionMap({
   }, [selectedId]);
 
   useEffect(() => {
-    realDataRef.current = { deviceLocation, positions };
-  }, [deviceLocation, positions]);
+    realDataRef.current = { deviceLocation, positions, whitelist };
+  }, [deviceLocation, positions, whitelist]);
 
   const layerLabels = useMemo(() => {
     return Object.fromEntries(referenceMapLayers.map((key) => [key, t(key, { ns: "screen" })])) as Record<ReferenceMapLayer, string>;
@@ -549,6 +647,7 @@ export function PositionMap({
       map,
       data.positions,
       selectedIdRef.current,
+      data.whitelist,
       (target) => onSelectPositionRef.current(target),
       t,
     );
@@ -613,6 +712,7 @@ export function PositionMap({
       map,
       positions,
       selectedId,
+      whitelist,
       (target) => onSelectPositionRef.current(target),
       t,
     );
@@ -621,7 +721,7 @@ export function PositionMap({
       fitRealScreenBounds(map, deviceLocation, positions);
       hasFitRealBoundsRef.current = true;
     }
-  }, [deviceLocation, positions, selectedId, t]);
+  }, [deviceLocation, positions, selectedId, t, whitelist]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -632,7 +732,11 @@ export function PositionMap({
     map.setView([point.latitude, point.longitude], Math.max(map.getZoom(), 14), { animate: false });
   }, [positions, selectedId]);
 
-  return <div ref={containerRef} className={cx("screen-map dark", className)} />;
+  return (
+    <div className={cx("screen-map-shell", className)}>
+      <div ref={containerRef} className="screen-map dark" />
+    </div>
+  );
 }
 
 export function ScreenMap({ t: _t, ...props }: ScreenMapProps) {

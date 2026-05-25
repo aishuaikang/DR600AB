@@ -35,5 +35,7 @@
   "deception_invalid_circle": "Circle motion settings are invalid",
   "deception_invalid_linear": "Linear motion settings are invalid",
   "deception_invalid_random": "Random coordinate settings are invalid",
-  "deception_invalid_query": "Unsupported spoofing device query item"
+  "deception_invalid_query": "Unsupported spoofing device query item",
+  "deception_report_not_found": "Deception report was not found",
+  "deception_report_delete_not_failed": "Only failed deception reports can be deleted"
 }

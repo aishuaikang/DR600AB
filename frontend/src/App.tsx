@@ -33,6 +33,7 @@ import { Sidebar } from "./components/Sidebar";
 import { VirtualKeyboard } from "./components/VirtualKeyboard";
 import { getStoredLocale, persistLocale, supportedLocales } from "./i18n";
 import { useHashPage } from "./hooks/useHashPage";
+import { DeceptionReportsPage } from "./pages/DeceptionReportsPage";
 import { InterferencePage } from "./pages/InterferencePage";
 import { GPSRecordsPage } from "./pages/GPSRecordsPage";
 import { IntrusionsPage } from "./pages/IntrusionsPage";
@@ -41,6 +42,7 @@ import { NetworkSettingsPage } from "./pages/NetworkSettingsPage";
 import { ScreenPage } from "./pages/ScreenPage";
 import { SettingsPage } from "./pages/SettingsPage";
 import { UserSettingsPage } from "./pages/UserSettingsPage";
+import { WhitelistPage } from "./pages/WhitelistPage";
 import { getStoredSettings, persistSettings } from "./preferences";
 import {
   DETECTION_DEFAULT_BAUD_RATE,
@@ -132,7 +134,7 @@ function App() {
   const developerActive = Boolean(developerSession);
   const developerToken = developerSession?.token ?? "";
   const debugAccessBlocked = !developerActive && isDebugPage(page);
-  const needsRuntimeData = page !== "screen" && page !== "settings" && page !== "intrusions" && !debugAccessBlocked;
+  const needsRuntimeData = page !== "screen" && page !== "settings" && page !== "whitelist" && page !== "intrusions" && page !== "deception-reports" && !debugAccessBlocked;
 
   const syncSerialSelection = useCallback((receivePort: string, sendPort: string, baudRate?: number) => {
     const nextReceivePort = receivePort.trim();
@@ -772,9 +774,11 @@ function App() {
         t={t}
         locale={locale}
         localeOptions={localeOptions}
+        developerActive={developerActive}
         visibleMapLayers={mapLayerOptions}
         userSettings={userSettings}
         onLocaleChange={setLocale}
+        onUserSettingsChange={handleUserSettingsChange}
       />
     );
   }
@@ -852,6 +856,13 @@ function App() {
                   />
                 ) : null}
 
+                {page === "deception-reports" ? (
+                  <DeceptionReportsPage
+                    locale={locale}
+                    t={t}
+                  />
+                ) : null}
+
                 {page === "settings" ? (
                   <UserSettingsPage
                     appTitle={appTitle}
@@ -859,6 +870,15 @@ function App() {
                     userSettings={userSettings}
                     t={t}
                     onAppTitleChange={handleAppTitleChange}
+                    onUserSettingsChange={handleUserSettingsChange}
+                  />
+                ) : null}
+
+                {page === "whitelist" ? (
+                  <WhitelistPage
+                    locale={locale}
+                    userSettings={userSettings}
+                    t={t}
                     onUserSettingsChange={handleUserSettingsChange}
                   />
                 ) : null}

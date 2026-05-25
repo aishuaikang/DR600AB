@@ -1,6 +1,7 @@
 {
   "screen": "Situation Screen",
   "intrusions": "Target Intrusions",
+  "deceptionReports": "Spoofing Reports",
   "detectionRecords": "Detection Data",
   "parsedRecords": "Parsed Data",
   "gpsRecords": "GPS Records",
@@ -8,6 +9,7 @@
   "networkSettings": "Network Settings",
   "debugGroup": "Debug",
   "settings": "Settings",
+  "whitelist": "Whitelist",
   "openMenu": "Open menu",
   "developerSettings": "Developer Settings",
   "developerLogin": "Developer Login",

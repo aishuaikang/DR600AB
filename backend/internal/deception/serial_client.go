@@ -26,6 +26,7 @@ type serialClient struct {
 	port           SerialPort
 	portName       string
 	commandTimeout time.Duration
+	locale         string
 	record         func(model.DeceptionRecord)
 
 	requestMu sync.Mutex
@@ -42,6 +43,7 @@ func newSerialClient(
 	port SerialPort,
 	portName string,
 	commandTimeout time.Duration,
+	locale string,
 	record func(model.DeceptionRecord),
 ) *serialClient {
 	if commandTimeout <= 0 {
@@ -51,6 +53,7 @@ func newSerialClient(
 		port:           port,
 		portName:       portName,
 		commandTimeout: commandTimeout,
+		locale:         locale,
 		record:         record,
 		waiters:        make(map[int]frameWaiter),
 		done:           make(chan struct{}),
@@ -72,7 +75,7 @@ func (c *serialClient) Close() {
 
 func (c *serialClient) SendAndWaitAck(ctx context.Context, command byte, data []byte) (protocol.Ack, error) {
 	if len(data) == 0 {
-		return protocol.Ack{}, fmt.Errorf("命令帧为空")
+		return protocol.Ack{}, fmt.Errorf("%s", protocol.TextLocale(c.locale, "empty_command_frame"))
 	}
 	if ctx == nil {
 		ctx = context.Background()
@@ -220,10 +223,10 @@ func (c *serialClient) send(data []byte) error {
 	n, err := c.port.Write(data)
 	c.recordFrame("tx", data, protocol.Frame{}, err)
 	if err != nil {
-		return fmt.Errorf("发送失败: %w", err)
+		return fmt.Errorf("%s", protocol.TextLocale(c.locale, "send_failed", protocol.LocalizeErrorText(err.Error(), c.locale)))
 	}
 	if n != len(data) {
-		return fmt.Errorf("发送不完整: 期望 %d 字节，实际 %d 字节", len(data), n)
+		return fmt.Errorf("%s", protocol.TextLocale(c.locale, "partial_send", len(data), n))
 	}
 	return nil
 }
@@ -278,7 +281,7 @@ func (c *serialClient) readLoop() {
 				return
 			default:
 			}
-			c.dispatch(receivedFrame{err: fmt.Errorf("读取串口失败: %w", err), time: time.Now()})
+			c.dispatch(receivedFrame{err: fmt.Errorf("%s", protocol.TextLocale(c.locale, "read_failed", protocol.LocalizeErrorText(err.Error(), c.locale))), time: time.Now()})
 			return
 		}
 	}
@@ -313,7 +316,7 @@ func (c *serialClient) recordFrame(direction string, raw []byte, frame protocol.
 		RawHex:    protocol.Hex(raw),
 	}
 	if err != nil {
-		record.Error = err.Error()
+		record.Error = protocol.LocalizeErrorText(err.Error(), c.locale)
 	} else if len(raw) > 0 {
 		if frame.Control == 0 && len(frame.Body) == 0 {
 			parsed, parseErr := protocol.ParseFrame(raw)
@@ -322,8 +325,8 @@ func (c *serialClient) recordFrame(direction string, raw []byte, frame protocol.
 			}
 		}
 		record.Command = fmt.Sprintf("0x%02X", frame.Command())
-		record.Control = protocol.ControlName(frame.Control)
-		record.Description = protocol.DescribeFrame(frame)
+		record.Control = protocol.ControlNameLocale(frame.Control, c.locale)
+		record.Description = protocol.DescribeFrameLocale(frame, c.locale)
 	}
 	c.record(record)
 }

@@ -339,7 +339,9 @@ func isEmptyUserSettings(req model.UserSettings) bool {
 	return req.DeviceSN == "" &&
 		req.ManualDeviceLocation == nil &&
 		len(req.ScreenStrikeChannelLabels) == 0 &&
-		req.IntrusionRetentionDays == nil
+		req.IntrusionRetentionDays == nil &&
+		len(req.Whitelist) == 0 &&
+		req.ScreenAlarmSettings == nil
 }
 
 func normalizeSavedSettings(settings savedSettings) savedSettings {
@@ -348,6 +350,9 @@ func normalizeSavedSettings(settings savedSettings) savedSettings {
 	}
 	if settings.User.ScreenStrikeChannelLabels == nil {
 		settings.User.ScreenStrikeChannelLabels = []string{}
+	}
+	if settings.User.Whitelist == nil {
+		settings.User.Whitelist = []model.WhitelistItem{}
 	}
 	return settings
 }

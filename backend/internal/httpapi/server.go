@@ -9,6 +9,7 @@ import (
 
 	"dr600ab-api/internal/config"
 	"dr600ab-api/internal/deception"
+	"dr600ab-api/internal/deceptionreport"
 	"dr600ab-api/internal/detection"
 	"dr600ab-api/internal/developer"
 	"dr600ab-api/internal/gps"
@@ -34,8 +35,21 @@ type IntrusionStore interface {
 	Close() error
 }
 
+// DeceptionReportStore 查询已归档的诱骗报告。
+type DeceptionReportStore interface {
+	List(deceptionreport.QueryOptions) ([]model.DeceptionReportSummary, error)
+	Get(string) (model.DeceptionReport, error)
+	DeleteFailed(string) (int64, error)
+	CloseRunning(reason string, now time.Time) (int64, error)
+	Close() error
+}
+
 type intrusionDeviceLocationSetter interface {
 	SetDeviceLocationProvider(intrusion.DeviceLocationProvider)
+}
+
+type screenPositionRelationSetter interface {
+	SetDeviceLocationProvider(func() *model.ScreenDeviceLocationResponse)
 }
 
 // Server 持有 Fiber 应用以及对外暴露的后端服务。
@@ -51,6 +65,7 @@ type Server struct {
 	deception    *deception.Service
 	userSettings UserSettingsStore
 	intrusions   IntrusionStore
+	reports      DeceptionReportStore
 
 	intrusionPruneMu      sync.Mutex
 	lastIntrusionPruneRun time.Time
@@ -68,6 +83,7 @@ func New(
 	deceptionSvc *deception.Service,
 	userSettingsStore UserSettingsStore,
 	intrusionStore IntrusionStore,
+	reportStore DeceptionReportStore,
 ) *Server {
 	s := &Server{
 		cfg:          cfg,
@@ -80,11 +96,25 @@ func New(
 		deception:    deceptionSvc,
 		userSettings: userSettingsStore,
 		intrusions:   intrusionStore,
+		reports:      reportStore,
 	}
 	s.app = fiber.New(fiber.Config{
 		AppName: "dr600ab-api",
 	})
 	if setter, ok := intrusionStore.(intrusionDeviceLocationSetter); ok {
+		setter.SetDeviceLocationProvider(func() *model.ScreenDeviceLocationResponse {
+			location, err := s.currentScreenDeviceLocation()
+			if err != nil || !location.Valid {
+				return nil
+			}
+			return &location
+		})
+	}
+	var screenStore any
+	if detectionSvc != nil {
+		screenStore = detectionSvc.Store()
+	}
+	if setter, ok := screenStore.(screenPositionRelationSetter); ok {
 		setter.SetDeviceLocationProvider(func() *model.ScreenDeviceLocationResponse {
 			location, err := s.currentScreenDeviceLocation()
 			if err != nil || !location.Valid {
@@ -110,6 +140,10 @@ func (s *Server) Shutdown() error {
 	s.deception.Shutdown()
 	if s.intrusions != nil {
 		_ = s.intrusions.Close()
+	}
+	if s.reports != nil {
+		_, _ = s.reports.CloseRunning("service_shutdown", time.Now())
+		_ = s.reports.Close()
 	}
 	return s.app.Shutdown()
 }

@@ -1,4 +1,4 @@
-import { ListTree, Monitor, Network, Satellite, Settings2, Zap } from "lucide-react";
+import { FileText, ListTree, Monitor, Network, Satellite, Settings2, ShieldCheck, Zap } from "lucide-react";
 
 import { MESSAGE_PAGE_CONFIG } from "./message-pages";
 import type { NavItem, Page } from "./types";
@@ -14,7 +14,9 @@ export const debugPageItems: NavItem[] = [
 
 export const userPageItems: NavItem[] = [
   { id: "settings", icon: Settings2, labelKey: "settings" },
+  { id: "whitelist", icon: ShieldCheck, labelKey: "whitelist" },
   { id: "intrusions", icon: ListTree, labelKey: "intrusions" },
+  { id: "deception-reports", icon: FileText, labelKey: "deceptionReports" },
 ];
 
 export const pageItems: NavItem[] = [

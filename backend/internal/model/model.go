@@ -94,10 +94,28 @@ type GeoPoint struct {
 
 // UserSettings 保存公开用户设置。
 type UserSettings struct {
-	DeviceSN                  string    `json:"deviceSn,omitempty"`
-	ManualDeviceLocation      *GeoPoint `json:"manualDeviceLocation,omitempty"`
-	ScreenStrikeChannelLabels []string  `json:"screenStrikeChannelLabels,omitempty"`
-	IntrusionRetentionDays    *int      `json:"intrusionRetentionDays,omitempty"`
+	DeviceSN                  string               `json:"deviceSn,omitempty"`
+	ManualDeviceLocation      *GeoPoint            `json:"manualDeviceLocation,omitempty"`
+	ScreenStrikeChannelLabels []string             `json:"screenStrikeChannelLabels,omitempty"`
+	IntrusionRetentionDays    *int                 `json:"intrusionRetentionDays,omitempty"`
+	Whitelist                 []WhitelistItem      `json:"whitelist,omitempty"`
+	ScreenAlarmSettings       *ScreenAlarmSettings `json:"screenAlarmSettings,omitempty"`
+}
+
+// WhitelistItem 描述允许在大屏中放行的目标身份。
+type WhitelistItem struct {
+	Serial    string    `json:"serial"`
+	Model     string    `json:"model,omitempty"`
+	Source    string    `json:"source,omitempty"`
+	CreatedAt time.Time `json:"createdAt,omitempty"`
+}
+
+// ScreenAlarmSettings 控制大屏未入白名单目标告警来源。
+type ScreenAlarmSettings struct {
+	Detection bool `json:"detection"`
+	Position  bool `json:"position"`
+	FPV       bool `json:"fpv"`
+	Sound     bool `json:"sound"`
 }
 
 const DefaultIntrusionRetentionDays = 90
@@ -108,7 +126,20 @@ func UserSettingsWithDefaults(settings UserSettings) UserSettings {
 		days := DefaultIntrusionRetentionDays
 		settings.IntrusionRetentionDays = &days
 	}
+	if settings.ScreenAlarmSettings == nil {
+		settings.ScreenAlarmSettings = DefaultScreenAlarmSettings()
+	}
 	return settings
+}
+
+// DefaultScreenAlarmSettings returns the public default alarm switches.
+func DefaultScreenAlarmSettings() *ScreenAlarmSettings {
+	return &ScreenAlarmSettings{
+		Detection: true,
+		Position:  true,
+		FPV:       true,
+		Sound:     true,
+	}
 }
 
 // UserSettingsIntrusionRetentionDays returns the effective target intrusion retention setting.
@@ -214,6 +245,57 @@ type DeceptionRecord struct {
 	Error       string    `json:"error,omitempty"`
 }
 
+// DeceptionReportStatus 描述诱骗报告生命周期状态。
+type DeceptionReportStatus string
+
+const (
+	DeceptionReportStatusRunning   DeceptionReportStatus = "running"
+	DeceptionReportStatusCompleted DeceptionReportStatus = "completed"
+	DeceptionReportStatusFailed    DeceptionReportStatus = "failed"
+	DeceptionReportStatusAbnormal  DeceptionReportStatus = "abnormal"
+)
+
+// DeceptionReportSummary 是诱骗报告列表使用的摘要记录。
+type DeceptionReportSummary struct {
+	ID              string                `json:"id"`
+	Status          DeceptionReportStatus `json:"status"`
+	StartedAt       time.Time             `json:"startedAt"`
+	EndedAt         *time.Time            `json:"endedAt,omitempty"`
+	DurationSeconds int64                 `json:"durationSeconds"`
+	TargetID        string                `json:"targetId,omitempty"`
+	Mode            string                `json:"mode,omitempty"`
+	Point           *GeoPoint             `json:"point,omitempty"`
+	AltitudeM       float64               `json:"altitudeM,omitempty"`
+	SignalMask      uint16                `json:"signalMask,omitempty"`
+	SignalNames     []string              `json:"signalNames,omitempty"`
+	StrengthPreset  string                `json:"strengthPreset,omitempty"`
+	AttenuationDB   int                   `json:"attenuationDB,omitempty"`
+	DelayMode       string                `json:"delayMode,omitempty"`
+	DelayNS         float64               `json:"delayNS,omitempty"`
+	PortName        string                `json:"portName,omitempty"`
+	Summary         string                `json:"summary,omitempty"`
+	LastError       string                `json:"lastError,omitempty"`
+	AbnormalReason  string                `json:"abnormalReason,omitempty"`
+	CreatedAt       time.Time             `json:"createdAt"`
+	UpdatedAt       time.Time             `json:"updatedAt"`
+}
+
+// DeceptionReport 保存一次诱骗操作的完整证据快照。
+type DeceptionReport struct {
+	DeceptionReportSummary
+	Request           ScreenDeceptionRequest       `json:"request"`
+	Session           DeceptionSessionResponse     `json:"session"`
+	StartState        *ScreenDeceptionState        `json:"startState,omitempty"`
+	EndState          *ScreenDeceptionState        `json:"endState,omitempty"`
+	StartDeviceStatus *ScreenDeceptionDeviceStatus `json:"startDeviceStatus,omitempty"`
+	BeforeStopStatus  *ScreenDeceptionDeviceStatus `json:"beforeStopStatus,omitempty"`
+	AfterStopStatus   *ScreenDeceptionDeviceStatus `json:"afterStopStatus,omitempty"`
+	RawDescriptions   map[string]string            `json:"rawDescriptions,omitempty"`
+	QueryErrors       map[string]string            `json:"queryErrors,omitempty"`
+	Records           []DeceptionRecord            `json:"records,omitempty"`
+	RecordCount       int                          `json:"recordCount"`
+}
+
 // DeceptionQueryResponse 返回 GNSS 诱骗设备调试查询结果。
 type DeceptionQueryResponse struct {
 	Item        string `json:"item"`
@@ -233,43 +315,46 @@ type ParsedMessage struct {
 
 // DetectionRecord 是侦测视图使用的标准化列表项。
 type DetectionRecord struct {
-	ID         string        `json:"id"`
-	SessionID  string        `json:"sessionId"`
-	PortName   string        `json:"portName"`
-	Kind       string        `json:"kind"`
-	ReceivedAt time.Time     `json:"receivedAt"`
-	Device     string        `json:"device,omitempty"`
-	Model      string        `json:"model,omitempty"`
-	Frequency  float64       `json:"frequency,omitempty"`
-	RSSI       float64       `json:"rssi,omitempty"`
-	Summary    string        `json:"summary"`
-	Parsed     ParsedMessage `json:"parsed"`
+	ID           string        `json:"id"`
+	SessionID    string        `json:"sessionId"`
+	PortName     string        `json:"portName"`
+	Kind         string        `json:"kind"`
+	ReceivedAt   time.Time     `json:"receivedAt"`
+	Device       string        `json:"device,omitempty"`
+	Model        string        `json:"model,omitempty"`
+	DisplayModel string        `json:"displayModel,omitempty"`
+	Frequency    float64       `json:"frequency,omitempty"`
+	RSSI         float64       `json:"rssi,omitempty"`
+	Summary      string        `json:"summary"`
+	Parsed       ParsedMessage `json:"parsed"`
 }
 
 // ScreenDetectionLastRecord 是大屏公开接口可返回的最近侦测摘要，不包含解析原文。
 type ScreenDetectionLastRecord struct {
-	ID         string    `json:"id"`
-	Kind       string    `json:"kind"`
-	ReceivedAt time.Time `json:"receivedAt"`
-	Device     string    `json:"device,omitempty"`
-	Model      string    `json:"model,omitempty"`
-	Frequency  float64   `json:"frequency,omitempty"`
-	RSSI       float64   `json:"rssi,omitempty"`
-	Summary    string    `json:"summary"`
+	ID           string    `json:"id"`
+	Kind         string    `json:"kind"`
+	ReceivedAt   time.Time `json:"receivedAt"`
+	Device       string    `json:"device,omitempty"`
+	Model        string    `json:"model,omitempty"`
+	DisplayModel string    `json:"displayModel,omitempty"`
+	Frequency    float64   `json:"frequency,omitempty"`
+	RSSI         float64   `json:"rssi,omitempty"`
+	Summary      string    `json:"summary"`
 }
 
 // ScreenDetectionTarget 是大屏侦测列表使用的合并目标。
 type ScreenDetectionTarget struct {
-	ID         string                    `json:"id"`
-	Serial     string                    `json:"serial,omitempty"`
-	Model      string                    `json:"model"`
-	Frequency  float64                   `json:"frequency"`
-	RSSI       float64                   `json:"rssi"`
-	Device     string                    `json:"device"`
-	FirstSeen  time.Time                 `json:"firstSeen"`
-	LastSeen   time.Time                 `json:"lastSeen"`
-	HitCount   int                       `json:"hitCount"`
-	LastRecord ScreenDetectionLastRecord `json:"lastRecord"`
+	ID           string                    `json:"id"`
+	Serial       string                    `json:"serial,omitempty"`
+	Model        string                    `json:"model"`
+	DisplayModel string                    `json:"displayModel,omitempty"`
+	Frequency    float64                   `json:"frequency"`
+	RSSI         float64                   `json:"rssi"`
+	Device       string                    `json:"device"`
+	FirstSeen    time.Time                 `json:"firstSeen"`
+	LastSeen     time.Time                 `json:"lastSeen"`
+	HitCount     int                       `json:"hitCount"`
+	LastRecord   ScreenDetectionLastRecord `json:"lastRecord"`
 }
 
 // ScreenPositionPoint 描述大屏定位目标中的一个坐标点。
@@ -301,30 +386,34 @@ type ScreenPositionLastRecord struct {
 
 // ScreenPositionTarget 是大屏定位列表使用的合并目标。
 type ScreenPositionTarget struct {
-	ID               string                     `json:"id"`
-	CorrelationID    string                     `json:"correlationId,omitempty"`
-	Serial           string                     `json:"serial"`
-	Model            string                     `json:"model"`
-	Source           string                     `json:"source"`
-	Sources          []string                   `json:"sources,omitempty"`
-	Frequency        float64                    `json:"frequency,omitempty"`
-	RSSI             float64                    `json:"rssi,omitempty"`
-	Device           string                     `json:"device"`
-	Drone            *ScreenPositionPoint       `json:"drone,omitempty"`
-	Pilot            *ScreenPositionPoint       `json:"pilot,omitempty"`
-	Home             *ScreenPositionPoint       `json:"home,omitempty"`
-	DroneTrajectory  []ScreenPositionTrackPoint `json:"droneTrajectory,omitempty"`
-	PilotTrajectory  []ScreenPositionTrackPoint `json:"pilotTrajectory,omitempty"`
-	TrajectorySpeed  *float64                   `json:"-"`
-	TrajectoryHeight *float64                   `json:"-"`
-	Height           *float64                   `json:"height,omitempty"`
-	Altitude         *float64                   `json:"altitude,omitempty"`
-	Speed            *float64                   `json:"speed,omitempty"`
-	Cracked          bool                       `json:"cracked,omitempty"`
-	FirstSeen        time.Time                  `json:"firstSeen"`
-	LastSeen         time.Time                  `json:"lastSeen"`
-	HitCount         int                        `json:"hitCount"`
-	LastRecord       ScreenPositionLastRecord   `json:"lastRecord"`
+	ID                 string                     `json:"id"`
+	CorrelationID      string                     `json:"correlationId,omitempty"`
+	Serial             string                     `json:"serial"`
+	Model              string                     `json:"model"`
+	Source             string                     `json:"source"`
+	Sources            []string                   `json:"sources,omitempty"`
+	Frequency          float64                    `json:"frequency,omitempty"`
+	RSSI               float64                    `json:"rssi,omitempty"`
+	Device             string                     `json:"device"`
+	Drone              *ScreenPositionPoint       `json:"drone,omitempty"`
+	Pilot              *ScreenPositionPoint       `json:"pilot,omitempty"`
+	Home               *ScreenPositionPoint       `json:"home,omitempty"`
+	DroneTrajectory    []ScreenPositionTrackPoint `json:"droneTrajectory,omitempty"`
+	PilotTrajectory    []ScreenPositionTrackPoint `json:"pilotTrajectory,omitempty"`
+	TrajectorySpeed    *float64                   `json:"-"`
+	TrajectoryHeight   *float64                   `json:"-"`
+	Height             *float64                   `json:"height,omitempty"`
+	Altitude           *float64                   `json:"altitude,omitempty"`
+	Speed              *float64                   `json:"speed,omitempty"`
+	Cracked            bool                       `json:"cracked,omitempty"`
+	FirstSeen          time.Time                  `json:"firstSeen"`
+	LastSeen           time.Time                  `json:"lastSeen"`
+	HitCount           int                        `json:"hitCount"`
+	LastRecord         ScreenPositionLastRecord   `json:"lastRecord"`
+	PilotDistanceM     *float64                   `json:"pilotDistanceM,omitempty"`
+	DroneDistanceM     *float64                   `json:"droneDistanceM,omitempty"`
+	DroneDirectionDeg  *float64                   `json:"droneDirectionDeg,omitempty"`
+	DeviceDirectionDeg *float64                   `json:"deviceDirectionDeg,omitempty"`
 }
 
 // IntrusionTargetType 标识归档目标来自侦测列表还是定位列表。
@@ -337,32 +426,37 @@ const (
 
 // IntrusionRecord 保存一个消失后的目标入侵历史。
 type IntrusionRecord struct {
-	ID              string                        `json:"id"`
-	TargetID        string                        `json:"targetId"`
-	TargetType      IntrusionTargetType           `json:"targetType"`
-	Model           string                        `json:"model,omitempty"`
-	Serial          string                        `json:"serial,omitempty"`
-	Device          string                        `json:"device,omitempty"`
-	Frequency       float64                       `json:"frequency,omitempty"`
-	RSSI            float64                       `json:"rssi,omitempty"`
-	FirstSeen       time.Time                     `json:"firstSeen"`
-	LastSeen        time.Time                     `json:"lastSeen"`
-	DurationSeconds int64                         `json:"durationSeconds"`
-	HitCount        int                           `json:"hitCount"`
-	Source          string                        `json:"source,omitempty"`
-	Sources         []string                      `json:"sources,omitempty"`
-	Cracked         bool                          `json:"cracked,omitempty"`
-	DeviceLocation  *ScreenDeviceLocationResponse `json:"deviceLocation,omitempty"`
-	Drone           *ScreenPositionPoint          `json:"drone,omitempty"`
-	Pilot           *ScreenPositionPoint          `json:"pilot,omitempty"`
-	Home            *ScreenPositionPoint          `json:"home,omitempty"`
-	DroneTrajectory []ScreenPositionTrackPoint    `json:"droneTrajectory,omitempty"`
-	PilotTrajectory []ScreenPositionTrackPoint    `json:"pilotTrajectory,omitempty"`
-	Height          *float64                      `json:"height,omitempty"`
-	Altitude        *float64                      `json:"altitude,omitempty"`
-	Speed           *float64                      `json:"speed,omitempty"`
-	LastRecord      any                           `json:"lastRecord,omitempty"`
-	ArchivedAt      time.Time                     `json:"archivedAt"`
+	ID                 string                        `json:"id"`
+	TargetID           string                        `json:"targetId"`
+	TargetType         IntrusionTargetType           `json:"targetType"`
+	Model              string                        `json:"model,omitempty"`
+	DisplayModel       string                        `json:"displayModel,omitempty"`
+	Serial             string                        `json:"serial,omitempty"`
+	Device             string                        `json:"device,omitempty"`
+	Frequency          float64                       `json:"frequency,omitempty"`
+	RSSI               float64                       `json:"rssi,omitempty"`
+	FirstSeen          time.Time                     `json:"firstSeen"`
+	LastSeen           time.Time                     `json:"lastSeen"`
+	DurationSeconds    int64                         `json:"durationSeconds"`
+	HitCount           int                           `json:"hitCount"`
+	Source             string                        `json:"source,omitempty"`
+	Sources            []string                      `json:"sources,omitempty"`
+	Cracked            bool                          `json:"cracked,omitempty"`
+	DeviceLocation     *ScreenDeviceLocationResponse `json:"deviceLocation,omitempty"`
+	Drone              *ScreenPositionPoint          `json:"drone,omitempty"`
+	Pilot              *ScreenPositionPoint          `json:"pilot,omitempty"`
+	Home               *ScreenPositionPoint          `json:"home,omitempty"`
+	DroneTrajectory    []ScreenPositionTrackPoint    `json:"droneTrajectory,omitempty"`
+	PilotTrajectory    []ScreenPositionTrackPoint    `json:"pilotTrajectory,omitempty"`
+	PilotDistanceM     *float64                      `json:"pilotDistanceM,omitempty"`
+	DroneDistanceM     *float64                      `json:"droneDistanceM,omitempty"`
+	DroneDirectionDeg  *float64                      `json:"droneDirectionDeg,omitempty"`
+	DeviceDirectionDeg *float64                      `json:"deviceDirectionDeg,omitempty"`
+	Height             *float64                      `json:"height,omitempty"`
+	Altitude           *float64                      `json:"altitude,omitempty"`
+	Speed              *float64                      `json:"speed,omitempty"`
+	LastRecord         any                           `json:"lastRecord,omitempty"`
+	ArchivedAt         time.Time                     `json:"archivedAt"`
 }
 
 // GpioChannel 描述一个 GPIO 控制通道及其运行状态。
@@ -627,6 +721,11 @@ type ScreenDeceptionDeviceStatus struct {
 type ScreenDeceptionResponse struct {
 	State   ScreenDeceptionState `json:"state"`
 	Message string               `json:"message"`
+}
+
+// DeceptionReportDeleteResponse 返回诱骗报告删除数量。
+type DeceptionReportDeleteResponse struct {
+	Deleted int64 `json:"deleted"`
 }
 
 // DeveloperLoginRequest 使用动态码换取短时开发者会话。

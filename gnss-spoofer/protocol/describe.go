@@ -32,11 +32,15 @@ func ParseAck(frame Frame) (Ack, error) {
 }
 
 func DescribeFrame(frame Frame) string {
+	return DescribeFrameLocale(frame, "zh-CN")
+}
+
+func DescribeFrameLocale(frame Frame, locale string) string {
 	cmd := frame.Command()
 	prefix := fmt.Sprintf("%s cmd=0x%02X(%s) src=0x%02X dst=0x%02X",
-		ControlName(frame.Control),
+		ControlNameLocale(frame.Control, locale),
 		cmd,
-		CommandName(frame.Control, cmd),
+		CommandNameLocale(frame.Control, cmd, locale),
 		frame.Source,
 		frame.Target,
 	)
@@ -45,14 +49,14 @@ func DescribeFrame(frame Frame) string {
 	case ControlAck:
 		ack, err := ParseAck(frame)
 		if err != nil {
-			return prefix + " " + err.Error()
+			return prefix + " " + LocalizeErrorText(err.Error(), locale)
 		}
 		if ack.Success() {
-			return fmt.Sprintf("%s 应答成功", prefix)
+			return fmt.Sprintf("%s %s", prefix, protocolText(locale, "ack_success"))
 		}
-		return fmt.Sprintf("%s 应答失败 return=%d error=%d(%s)", prefix, ack.ReturnValue, ack.ErrorCode, AckErrorText(ack.ErrorCode))
+		return fmt.Sprintf("%s %s return=%d error=%d(%s)", prefix, protocolText(locale, "ack_failed"), ack.ReturnValue, ack.ErrorCode, AckErrorTextLocale(ack.ErrorCode, locale))
 	case ControlReport:
-		if detail := describeReport(cmd, frame.Body); detail != "" {
+		if detail := describeReportLocale(cmd, frame.Body, locale); detail != "" {
 			return prefix + " " + detail
 		}
 	}
@@ -60,58 +64,70 @@ func DescribeFrame(frame Frame) string {
 }
 
 func ControlName(control ControlWord) string {
+	return ControlNameLocale(control, "zh-CN")
+}
+
+func ControlNameLocale(control ControlWord, locale string) string {
 	switch control {
 	case ControlSet:
-		return "设置"
+		return protocolText(locale, "control_set")
 	case ControlAck:
-		return "应答"
+		return protocolText(locale, "control_ack")
 	case ControlQuery:
-		return "查询"
+		return protocolText(locale, "control_query")
 	case ControlReport:
-		return "上报"
+		return protocolText(locale, "control_report")
 	case ControlDataSend:
-		return "数据发送"
+		return protocolText(locale, "control_data_send")
 	case ControlDataConfirm:
-		return "数据确认"
+		return protocolText(locale, "control_data_confirm")
 	default:
-		return fmt.Sprintf("未知控制字0x%02X", byte(control))
+		return fmt.Sprintf(protocolText(locale, "unknown_control"), byte(control))
 	}
 }
 
 func CommandName(control ControlWord, cmd byte) string {
+	return CommandNameLocale(control, cmd, "zh-CN")
+}
+
+func CommandNameLocale(control ControlWord, cmd byte, locale string) string {
 	if control == ControlQuery || control == ControlReport {
-		if name, ok := queryCommandNames[cmd]; ok {
+		if name, ok := commandNames(locale, true)[cmd]; ok {
 			return name
 		}
 	}
-	if name, ok := setCommandNames[cmd]; ok {
+	if name, ok := commandNames(locale, false)[cmd]; ok {
 		return name
 	}
-	return "未知命令"
+	return protocolText(locale, "unknown_command")
 }
 
 func AckErrorText(code uint16) string {
+	return AckErrorTextLocale(code, "zh-CN")
+}
+
+func AckErrorTextLocale(code uint16, locale string) string {
 	switch code {
 	case 0:
-		return "正确"
+		return protocolText(locale, "ack_error_0")
 	case 1:
-		return "格式错误"
+		return protocolText(locale, "ack_error_1")
 	case 2:
-		return "空间不足"
+		return protocolText(locale, "ack_error_2")
 	case 3:
-		return "数据帧超长"
+		return protocolText(locale, "ack_error_3")
 	case 4:
-		return "固件版本相同"
+		return protocolText(locale, "ack_error_4")
 	case 5:
-		return "命令 key 错误"
+		return protocolText(locale, "ack_error_5")
 	case 6:
-		return "参数无效"
+		return protocolText(locale, "ack_error_6")
 	case 7:
-		return "无效命令"
+		return protocolText(locale, "ack_error_7")
 	case 8:
-		return "设备地址不匹配"
+		return protocolText(locale, "ack_error_8")
 	default:
-		return "未知错误"
+		return protocolText(locale, "ack_error_unknown")
 	}
 }
 
@@ -127,9 +143,13 @@ func Hex(data []byte) string {
 }
 
 func FormatSignals(mask uint16) string {
+	return FormatSignalsLocale(mask, "zh-CN")
+}
+
+func FormatSignalsLocale(mask uint16, locale string) string {
 	names := SignalNames(mask)
 	if len(names) == 0 {
-		return "无"
+		return protocolText(locale, "none")
 	}
 	return strings.Join(names, "/")
 }
@@ -175,76 +195,80 @@ var queryCommandNames = map[byte]string{
 }
 
 func describeReport(cmd byte, body []byte) string {
+	return describeReportLocale(cmd, body, "zh-CN")
+}
+
+func describeReportLocale(cmd byte, body []byte, locale string) string {
 	switch cmd {
 	case QuerySimulatedPosition:
-		return describeLatLonAlt(body, 2, true)
+		return describeLatLonAlt(body, 2, true, locale)
 	case QueryTransmitSwitch:
 		if len(body) >= 4 {
 			mask := binary.LittleEndian.Uint16(body[2:4])
-			return fmt.Sprintf("发射信号: %s (0x%04X)", FormatSignals(mask), mask)
+			return fmt.Sprintf(protocolText(locale, "transmit_signals"), FormatSignalsLocale(mask, locale), mask)
 		}
 	case QueryDeviceStatus:
-		return describeDeviceStatus(body)
+		return describeDeviceStatus(body, locale)
 	case QueryFirmwareVersion:
-		return describeVersion(body)
+		return describeVersion(body, locale)
 	case QuerySystemTime:
 		return describeTime(body, 1)
 	case QueryPowerAttenuation:
 		return describePowerAttenuation(body)
 	case QueryTargetPosition:
-		return describeTargetPosition(body)
+		return describeTargetPosition(body, locale)
 	case QuerySpoofCircle:
-		return describeSpoofCircle(body)
+		return describeSpoofCircle(body, locale)
 	case QuerySuppression:
-		return describeSuppression(body)
+		return describeSuppression(body, locale)
 	case QueryDeviceSignal:
-		return describeSignalStatus(body)
+		return describeSignalStatus(body, locale)
 	case QueryDevicePosition:
-		return describeLatLonAlt(body, 2, true)
+		return describeLatLonAlt(body, 2, true, locale)
 	case QueryRandomPosition:
-		return describeRandomPosition(body)
+		return describeRandomPosition(body, locale)
 	case QuerySignalDelay:
 		return describeSignalDelay(body)
 	case QueryTimedSearch:
-		return describeTimedSearch(body)
+		return describeTimedSearch(body, locale)
 	}
 	return ""
 }
 
-func describeDeviceStatus(body []byte) string {
+func describeDeviceStatus(body []byte, locale string) string {
 	parts := []string{}
 	if len(body) >= 10 {
 		parts = append(parts, describeTime(body, 2))
-		parts = append(parts, fmt.Sprintf("授时同步=0x%02X", body[8]))
-		parts = append(parts, fmt.Sprintf("晶振=%d", body[9]))
+		parts = append(parts, fmt.Sprintf(protocolText(locale, "time_sync"), body[8]))
+		parts = append(parts, fmt.Sprintf(protocolText(locale, "oscillator"), body[9]))
 	}
 	if len(body) >= 30 {
 		lon := readFloat64(body, 10)
 		lat := readFloat64(body, 18)
 		height := readFloat32(body, 26)
-		parts = append(parts, fmt.Sprintf("当前定位=(%.6f, %.6f, %.1fm)", lon, lat, height))
+		parts = append(parts, fmt.Sprintf(protocolText(locale, "current_position"), lon, lat, height))
 	}
 	if len(body) >= 54 {
 		lon := readFloat64(body, 34)
 		lat := readFloat64(body, 42)
 		height := readFloat32(body, 50)
-		parts = append(parts, fmt.Sprintf("模拟定位=(%.6f, %.6f, %.1fm)", lon, lat, height))
+		parts = append(parts, fmt.Sprintf(protocolText(locale, "simulated_position"), lon, lat, height))
 	}
 	if len(body) >= 96 {
 		mask := binary.LittleEndian.Uint16(body[94:96])
-		parts = append(parts, fmt.Sprintf("信号导通=%s", FormatSignals(mask)))
+		parts = append(parts, fmt.Sprintf(protocolText(locale, "active_signals"), FormatSignalsLocale(mask, locale)))
 	}
-	return strings.Join(parts, "，")
+	return strings.Join(parts, protocolText(locale, "separator"))
 }
 
-func describeVersion(body []byte) string {
+func describeVersion(body []byte, locale string) string {
 	if len(body) < 14 {
 		return ""
 	}
 	software := binary.LittleEndian.Uint32(body[2:6])
 	fpga := binary.LittleEndian.Uint32(body[6:10])
 	protocol := binary.LittleEndian.Uint32(body[10:14])
-	return fmt.Sprintf("软件=%s FPGA=%s 协议=%s", formatVersion(software), formatVersion(fpga), formatVersion(protocol))
+	return fmt.Sprintf(protocolText(locale, "version"), formatVersion(software), formatVersion(fpga), formatVersion(protocol))
 }
 
 func describePowerAttenuation(body []byte) string {
@@ -254,11 +278,11 @@ func describePowerAttenuation(body []byte) string {
 	return fmt.Sprintf("GPS=%ddB BDS=%ddB GLO=%ddB GAL=%ddB", body[1], body[2], body[3], body[7])
 }
 
-func describeTargetPosition(body []byte) string {
+func describeTargetPosition(body []byte, locale string) string {
 	if len(body) < 18 {
 		return ""
 	}
-	return fmt.Sprintf("距离=%dm 高度=%dm 方向角=%.1f° 航向角=%.1f°",
+	return fmt.Sprintf(protocolText(locale, "target_position"),
 		int32(binary.LittleEndian.Uint32(body[2:6])),
 		int32(binary.LittleEndian.Uint32(body[6:10])),
 		readFloat32(body, 10),
@@ -266,11 +290,11 @@ func describeTargetPosition(body []byte) string {
 	)
 }
 
-func describeSpoofCircle(body []byte) string {
+func describeSpoofCircle(body []byte, locale string) string {
 	if len(body) < 30 {
 		return ""
 	}
-	return fmt.Sprintf("距离=%dm 高度=%dm 方向角=%.1f° 航向角=%.1f° 半径=%.1fm 周期=%.1fs 方向=%d",
+	return fmt.Sprintf(protocolText(locale, "spoof_circle"),
 		int32(binary.LittleEndian.Uint32(body[2:6])),
 		int32(binary.LittleEndian.Uint32(body[6:10])),
 		readFloat32(body, 10),
@@ -281,22 +305,22 @@ func describeSpoofCircle(body []byte) string {
 	)
 }
 
-func describeSuppression(body []byte) string {
+func describeSuppression(body []byte, locale string) string {
 	if len(body) < 10 {
 		return ""
 	}
-	return fmt.Sprintf("波形使能=0x%08X 发射=%d",
+	return fmt.Sprintf(protocolText(locale, "suppression"),
 		binary.LittleEndian.Uint32(body[2:6]),
 		binary.LittleEndian.Uint32(body[6:10]),
 	)
 }
 
-func describeSignalStatus(body []byte) string {
+func describeSignalStatus(body []byte, locale string) string {
 	if len(body) < 90 {
 		return ""
 	}
 	mask := binary.LittleEndian.Uint16(body[8:10])
-	return fmt.Sprintf("%s，时延=%.2fns，工作状态=0x%02X，发射=%d，衰减=%ddB，接收星数=%d，接收PRN=%v，发射星数=%d，发射PRN=%v",
+	return fmt.Sprintf(protocolText(locale, "signal_status"),
 		describeTime(body, 2),
 		readFloat32(body, 10),
 		body[14],
@@ -306,14 +330,15 @@ func describeSignalStatus(body []byte) string {
 		compactPRNs(body[18:42]),
 		body[66],
 		compactPRNs(body[67:91]),
-	) + fmt.Sprintf("，信号=%s", FormatSignals(mask))
+		FormatSignalsLocale(mask, locale),
+	)
 }
 
-func describeRandomPosition(body []byte) string {
+func describeRandomPosition(body []byte, locale string) string {
 	if len(body) < 14 {
 		return ""
 	}
-	return fmt.Sprintf("使能=%d 半径=%dm 刷新周期=%ds",
+	return fmt.Sprintf(protocolText(locale, "random_position"),
 		binary.LittleEndian.Uint32(body[2:6]),
 		binary.LittleEndian.Uint32(body[6:10]),
 		binary.LittleEndian.Uint32(body[10:14]),
@@ -332,14 +357,14 @@ func describeSignalDelay(body []byte) string {
 	)
 }
 
-func describeTimedSearch(body []byte) string {
+func describeTimedSearch(body []byte, locale string) string {
 	if len(body) < 2 {
 		return ""
 	}
-	return fmt.Sprintf("定时搜星=%d", body[1])
+	return fmt.Sprintf(protocolText(locale, "timed_search"), body[1])
 }
 
-func describeLatLonAlt(body []byte, offset int, latFirst bool) string {
+func describeLatLonAlt(body []byte, offset int, latFirst bool, locale string) string {
 	if len(body) < offset+20 {
 		return ""
 	}
@@ -347,9 +372,9 @@ func describeLatLonAlt(body []byte, offset int, latFirst bool) string {
 	second := readFloat64(body, offset+8)
 	alt := int32(binary.LittleEndian.Uint32(body[offset+16 : offset+20]))
 	if latFirst {
-		return fmt.Sprintf("纬度=%.6f 经度=%.6f 高度=%dm", first, second, alt)
+		return fmt.Sprintf(protocolText(locale, "lat_lon_alt"), first, second, alt)
 	}
-	return fmt.Sprintf("经度=%.6f 纬度=%.6f 高度=%dm", first, second, alt)
+	return fmt.Sprintf(protocolText(locale, "lon_lat_alt"), first, second, alt)
 }
 
 func describeTime(body []byte, offset int) string {

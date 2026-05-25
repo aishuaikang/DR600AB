@@ -3,9 +3,11 @@ package app
 
 import (
 	"context"
+	"time"
 
 	"dr600ab-api/internal/config"
 	"dr600ab-api/internal/deception"
+	"dr600ab-api/internal/deceptionreport"
 	"dr600ab-api/internal/detection"
 	"dr600ab-api/internal/developer"
 	"dr600ab-api/internal/gps"
@@ -34,6 +36,16 @@ func New(cfg config.Config) (*App, error) {
 	settingsStore := settings.NewStore(cfg.SettingsPath)
 	intrusionStore, err := intrusion.NewStore(cfg.IntrusionDBPath)
 	if err != nil {
+		return nil, err
+	}
+	reportStore, err := deceptionreport.NewStore(cfg.DeceptionReportDBPath)
+	if err != nil {
+		_ = intrusionStore.Close()
+		return nil, err
+	}
+	if _, err := reportStore.CloseRunning("abnormal_restart", time.Now()); err != nil {
+		_ = intrusionStore.Close()
+		_ = reportStore.Close()
 		return nil, err
 	}
 	state.SetIntrusionArchiver(intrusionStore)
@@ -79,6 +91,7 @@ func New(cfg config.Config) (*App, error) {
 		ReconnectInitialDelay: cfg.ReconnectInitialDelay,
 		ReconnectMaxDelay:     cfg.ReconnectMaxDelay,
 	})
+	deceptionSvc.SetReportStore(reportStore)
 
 	detectionSvc.RestoreSavedSettings(cfg.DefaultLocale)
 	gpsSvc.RestoreSavedSettings(cfg.DefaultLocale)
@@ -97,6 +110,7 @@ func New(cfg config.Config) (*App, error) {
 			deceptionSvc,
 			settingsStore,
 			intrusionStore,
+			reportStore,
 		),
 	}, nil
 }

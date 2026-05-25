@@ -206,8 +206,14 @@ func TestMemoryStoreScreenDetectionsNormalizesNumericModelPrefix(t *testing.T) {
 	if items[0].Model != "Air 2S" {
 		t.Fatalf("model = %q, want Air 2S", items[0].Model)
 	}
+	if items[0].DisplayModel != "Air 2S" {
+		t.Fatalf("display model = %q, want Air 2S", items[0].DisplayModel)
+	}
 	if items[0].LastRecord.Model != "Air 2S" {
 		t.Fatalf("last record model = %q, want Air 2S", items[0].LastRecord.Model)
+	}
+	if items[0].LastRecord.DisplayModel != "Air 2S" {
+		t.Fatalf("last record display model = %q, want Air 2S", items[0].LastRecord.DisplayModel)
 	}
 }
 
@@ -384,6 +390,103 @@ func TestMemoryStoreScreenPositionsTracksZeroSpeedAndHeight(t *testing.T) {
 	}
 	if items[0].Speed != nil || items[0].Height != nil {
 		t.Fatalf("list speed/height should keep existing zero-as-empty behavior, got speed=%#v height=%#v", items[0].Speed, items[0].Height)
+	}
+}
+
+func TestMemoryStoreScreenPositionsMergesTrajectoryJitter(t *testing.T) {
+	st := NewMemoryStore(10, 10)
+	base := time.Now()
+
+	first := screenPositionTarget("sn-1", "device-a", "DJI Mini", base)
+	first.Pilot = &model.ScreenPositionPoint{Latitude: 31.1, Longitude: 121.3}
+	first.Speed = floatPtr(8.5)
+	first.Height = floatPtr(30)
+	second := screenPositionTarget("sn-1", "device-a", "DJI Mini", base.Add(time.Second))
+	second.Drone = &model.ScreenPositionPoint{Latitude: 31.20002, Longitude: 121.4}
+	second.Pilot = &model.ScreenPositionPoint{Latitude: 31.10002, Longitude: 121.3}
+	second.Speed = floatPtr(0)
+	second.Height = floatPtr(45)
+
+	st.AddScreenPosition(first)
+	st.AddScreenPosition(second)
+
+	items := st.ListScreenPositions(10)
+	if len(items) != 1 {
+		t.Fatalf("screen positions count = %d, want 1", len(items))
+	}
+	if len(items[0].DroneTrajectory) != 1 {
+		t.Fatalf("drone trajectory count = %d, want 1: %#v", len(items[0].DroneTrajectory), items[0].DroneTrajectory)
+	}
+	if len(items[0].PilotTrajectory) != 1 {
+		t.Fatalf("pilot trajectory count = %d, want 1: %#v", len(items[0].PilotTrajectory), items[0].PilotTrajectory)
+	}
+
+	dronePoint := items[0].DroneTrajectory[0]
+	if dronePoint.Latitude != 31.20002 || dronePoint.Longitude != 121.4 {
+		t.Fatalf("drone trajectory point = %#v, want latest jitter coordinate", dronePoint)
+	}
+	if !dronePoint.Time.Equal(base.Add(time.Second)) {
+		t.Fatalf("drone trajectory time = %v, want %v", dronePoint.Time, base.Add(time.Second))
+	}
+	if dronePoint.Speed == nil || *dronePoint.Speed != 0 {
+		t.Fatalf("drone trajectory speed = %#v, want 0", dronePoint.Speed)
+	}
+	if dronePoint.Height == nil || *dronePoint.Height != 45 {
+		t.Fatalf("drone trajectory height = %#v, want 45", dronePoint.Height)
+	}
+}
+
+func TestMemoryStoreScreenPositionsKeepsTrajectoryPointWhenLatestValuesMissing(t *testing.T) {
+	st := NewMemoryStore(10, 10)
+	base := time.Now()
+
+	first := screenPositionTarget("sn-1", "device-a", "DJI Mini", base)
+	first.Speed = floatPtr(8.5)
+	first.Height = floatPtr(30)
+	second := screenPositionTarget("sn-1", "device-a", "DJI Mini", base.Add(time.Second))
+	second.Drone = &model.ScreenPositionPoint{Latitude: 31.20002, Longitude: 121.4}
+	second.Speed = nil
+	second.Height = nil
+
+	st.AddScreenPosition(first)
+	st.AddScreenPosition(second)
+
+	items := st.ListScreenPositions(10)
+	if len(items) != 1 {
+		t.Fatalf("screen positions count = %d, want 1", len(items))
+	}
+	if len(items[0].DroneTrajectory) != 1 {
+		t.Fatalf("drone trajectory count = %d, want 1: %#v", len(items[0].DroneTrajectory), items[0].DroneTrajectory)
+	}
+	point := items[0].DroneTrajectory[0]
+	if point.Latitude != 31.20002 || point.Longitude != 121.4 {
+		t.Fatalf("drone trajectory point = %#v, want latest jitter coordinate", point)
+	}
+	if point.Speed == nil || *point.Speed != 8.5 {
+		t.Fatalf("drone trajectory speed = %#v, want previous 8.5", point.Speed)
+	}
+	if point.Height == nil || *point.Height != 30 {
+		t.Fatalf("drone trajectory height = %#v, want previous 30", point.Height)
+	}
+}
+
+func TestMemoryStoreScreenPositionsKeepsTrajectoryMovement(t *testing.T) {
+	st := NewMemoryStore(10, 10)
+	base := time.Now()
+
+	first := screenPositionTarget("sn-1", "device-a", "DJI Mini", base)
+	second := screenPositionTarget("sn-1", "device-a", "DJI Mini", base.Add(time.Second))
+	second.Drone = &model.ScreenPositionPoint{Latitude: 31.20005, Longitude: 121.4}
+
+	st.AddScreenPosition(first)
+	st.AddScreenPosition(second)
+
+	items := st.ListScreenPositions(10)
+	if len(items) != 1 {
+		t.Fatalf("screen positions count = %d, want 1", len(items))
+	}
+	if len(items[0].DroneTrajectory) != 2 {
+		t.Fatalf("drone trajectory count = %d, want 2: %#v", len(items[0].DroneTrajectory), items[0].DroneTrajectory)
 	}
 }
 
@@ -721,6 +824,48 @@ func TestMemoryStoreScreenPositionsArchivesExpiredTargetsWithTrajectory(t *testi
 	}
 	if point.Speed == nil || *point.Speed != 10.5 {
 		t.Fatalf("archived trajectory speed = %#v, want 10.5", point.Speed)
+	}
+	if point.Height == nil || *point.Height != 45 {
+		t.Fatalf("archived trajectory height = %#v, want 45", point.Height)
+	}
+}
+
+func TestMemoryStoreScreenPositionsArchivesDeduplicatedTrajectory(t *testing.T) {
+	st := NewMemoryStore(10, 10)
+	archiver := &memoryIntrusionArchiver{}
+	st.SetIntrusionArchiver(archiver)
+	base := time.Now()
+
+	first := screenPositionTarget("sn-old", "device-a", "DJI Mini", base)
+	first.Speed = floatPtr(8.5)
+	first.Height = floatPtr(30)
+	second := screenPositionTarget("sn-old", "device-a", "DJI Mini", base.Add(time.Second))
+	second.Drone = &model.ScreenPositionPoint{Latitude: 31.20002, Longitude: 121.4}
+	second.Speed = floatPtr(0)
+	second.Height = floatPtr(45)
+	newTarget := screenPositionTarget("sn-new", "device-b", "DJI Mini 4", base.Add(screenPositionTTL+2*time.Second))
+
+	st.AddScreenPosition(first)
+	st.AddScreenPosition(second)
+	st.AddScreenPosition(newTarget)
+	st.ListScreenPositions(10)
+
+	if len(archiver.positions) != 1 {
+		t.Fatalf("archived positions count = %d, want 1", len(archiver.positions))
+	}
+	archived := archiver.positions[0]
+	if len(archived.DroneTrajectory) != 1 {
+		t.Fatalf("archived drone trajectory count = %d, want 1: %#v", len(archived.DroneTrajectory), archived.DroneTrajectory)
+	}
+	point := archived.DroneTrajectory[0]
+	if point.Latitude != 31.20002 || point.Longitude != 121.4 {
+		t.Fatalf("archived trajectory point = %#v, want latest jitter coordinate", point)
+	}
+	if !point.Time.Equal(base.Add(time.Second)) {
+		t.Fatalf("archived trajectory time = %v, want %v", point.Time, base.Add(time.Second))
+	}
+	if point.Speed == nil || *point.Speed != 0 {
+		t.Fatalf("archived trajectory speed = %#v, want 0", point.Speed)
 	}
 	if point.Height == nil || *point.Height != 45 {
 		t.Fatalf("archived trajectory height = %#v, want 45", point.Height)

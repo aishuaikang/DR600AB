@@ -108,6 +108,10 @@ CREATE TABLE IF NOT EXISTS intrusion_records (
 	home_json TEXT,
 	drone_trajectory_json TEXT,
 	pilot_trajectory_json TEXT,
+	pilot_distance_m REAL,
+	drone_distance_m REAL,
+	drone_direction_deg REAL,
+	device_direction_deg REAL,
 	height REAL,
 	altitude REAL,
 	speed REAL,
@@ -126,6 +130,18 @@ CREATE INDEX IF NOT EXISTS idx_intrusion_records_archived_at ON intrusion_record
 		return err
 	}
 	if err := s.ensureColumn("intrusion_records", "sources_json", "TEXT"); err != nil {
+		return err
+	}
+	if err := s.ensureColumn("intrusion_records", "pilot_distance_m", "REAL"); err != nil {
+		return err
+	}
+	if err := s.ensureColumn("intrusion_records", "drone_distance_m", "REAL"); err != nil {
+		return err
+	}
+	if err := s.ensureColumn("intrusion_records", "drone_direction_deg", "REAL"); err != nil {
+		return err
+	}
+	if err := s.ensureColumn("intrusion_records", "device_direction_deg", "REAL"); err != nil {
 		return err
 	}
 	return nil
@@ -169,11 +185,18 @@ func (s *Store) ArchiveDetection(target model.ScreenDetectionTarget) error {
 	if serial == "" {
 		serial = newDetectionSerial()
 	}
+	displayModel := model.DisplayModelName(target.Model)
+	targetDisplayModel := model.DisplayModelName(target.LastRecord.Model)
+	if targetDisplayModel == "" {
+		targetDisplayModel = displayModel
+	}
+	target.LastRecord.DisplayModel = targetDisplayModel
 	record := model.IntrusionRecord{
 		ID:              intrusionRecordID(model.IntrusionTargetTypeDetection, target.ID, target.FirstSeen),
 		TargetID:        target.ID,
 		TargetType:      model.IntrusionTargetTypeDetection,
 		Model:           strings.TrimSpace(target.Model),
+		DisplayModel:    displayModel,
 		Serial:          serial,
 		Device:          strings.TrimSpace(target.Device),
 		Frequency:       target.Frequency,
@@ -194,33 +217,43 @@ func (s *Store) ArchivePosition(target model.ScreenPositionTarget) error {
 	if s == nil || s.db == nil || strings.TrimSpace(target.ID) == "" {
 		return nil
 	}
+	deviceLocation := s.currentDeviceLocation()
+	pilotDistanceM, droneDistanceM, droneDirectionDeg, deviceDirectionDeg := model.ScreenPositionRelations(
+		deviceLocation,
+		target.Drone,
+		target.Pilot,
+	)
 	record := model.IntrusionRecord{
-		ID:              intrusionRecordID(model.IntrusionTargetTypePosition, target.ID, target.FirstSeen),
-		TargetID:        target.ID,
-		TargetType:      model.IntrusionTargetTypePosition,
-		Model:           strings.TrimSpace(target.Model),
-		Serial:          strings.TrimSpace(target.Serial),
-		Device:          strings.TrimSpace(target.Device),
-		Frequency:       target.Frequency,
-		RSSI:            target.RSSI,
-		FirstSeen:       target.FirstSeen,
-		LastSeen:        target.LastSeen,
-		DurationSeconds: durationSeconds(target.FirstSeen, target.LastSeen),
-		HitCount:        target.HitCount,
-		Source:          strings.TrimSpace(target.Source),
-		Sources:         cloneStrings(normalizeSources(target.Sources, target.Source)),
-		Cracked:         target.Cracked,
-		DeviceLocation:  s.currentDeviceLocation(),
-		Drone:           clonePoint(target.Drone),
-		Pilot:           clonePoint(target.Pilot),
-		Home:            clonePoint(target.Home),
-		DroneTrajectory: cloneTrajectory(target.DroneTrajectory),
-		PilotTrajectory: cloneTrajectory(target.PilotTrajectory),
-		Height:          cloneFloat(target.Height),
-		Altitude:        cloneFloat(target.Altitude),
-		Speed:           cloneFloat(target.Speed),
-		LastRecord:      target.LastRecord,
-		ArchivedAt:      time.Now(),
+		ID:                 intrusionRecordID(model.IntrusionTargetTypePosition, target.ID, target.FirstSeen),
+		TargetID:           target.ID,
+		TargetType:         model.IntrusionTargetTypePosition,
+		Model:              strings.TrimSpace(target.Model),
+		Serial:             strings.TrimSpace(target.Serial),
+		Device:             strings.TrimSpace(target.Device),
+		Frequency:          target.Frequency,
+		RSSI:               target.RSSI,
+		FirstSeen:          target.FirstSeen,
+		LastSeen:           target.LastSeen,
+		DurationSeconds:    durationSeconds(target.FirstSeen, target.LastSeen),
+		HitCount:           target.HitCount,
+		Source:             strings.TrimSpace(target.Source),
+		Sources:            cloneStrings(normalizeSources(target.Sources, target.Source)),
+		Cracked:            target.Cracked,
+		DeviceLocation:     deviceLocation,
+		Drone:              clonePoint(target.Drone),
+		Pilot:              clonePoint(target.Pilot),
+		Home:               clonePoint(target.Home),
+		DroneTrajectory:    cloneTrajectory(target.DroneTrajectory),
+		PilotTrajectory:    cloneTrajectory(target.PilotTrajectory),
+		PilotDistanceM:     cloneFloat(pilotDistanceM),
+		DroneDistanceM:     cloneFloat(droneDistanceM),
+		DroneDirectionDeg:  cloneFloat(droneDirectionDeg),
+		DeviceDirectionDeg: cloneFloat(deviceDirectionDeg),
+		Height:             cloneFloat(target.Height),
+		Altitude:           cloneFloat(target.Altitude),
+		Speed:              cloneFloat(target.Speed),
+		LastRecord:         target.LastRecord,
+		ArchivedAt:         time.Now(),
 	}
 	return s.insert(record)
 }
@@ -234,8 +267,9 @@ func (s *Store) insert(record model.IntrusionRecord) error {
 			id, target_id, target_type, model, serial, device, frequency, rssi,
 			first_seen, last_seen, duration_seconds, hit_count, source, sources_json, cracked,
 			device_location_json, drone_json, pilot_json, home_json, drone_trajectory_json, pilot_trajectory_json,
+			pilot_distance_m, drone_distance_m, drone_direction_deg, device_direction_deg,
 			height, altitude, speed, last_record_json, archived_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		record.ID,
 		record.TargetID,
 		string(record.TargetType),
@@ -257,6 +291,10 @@ func (s *Store) insert(record model.IntrusionRecord) error {
 		jsonString(record.Home),
 		jsonString(record.DroneTrajectory),
 		jsonString(record.PilotTrajectory),
+		nullableFloat(record.PilotDistanceM),
+		nullableFloat(record.DroneDistanceM),
+		nullableFloat(record.DroneDirectionDeg),
+		nullableFloat(record.DeviceDirectionDeg),
 		nullableFloat(record.Height),
 		nullableFloat(record.Altitude),
 		nullableFloat(record.Speed),
@@ -283,6 +321,7 @@ func (s *Store) List(options QueryOptions) ([]model.IntrusionRecord, error) {
 	query := `SELECT id, target_id, target_type, model, serial, device, frequency, rssi,
 		first_seen, last_seen, duration_seconds, hit_count, source, sources_json, cracked,
 		device_location_json, drone_json, pilot_json, home_json, drone_trajectory_json, pilot_trajectory_json,
+		pilot_distance_m, drone_distance_m, drone_direction_deg, device_direction_deg,
 		height, altitude, speed, last_record_json, archived_at
 		FROM intrusion_records`
 	if options.TargetType != "" {
@@ -378,6 +417,7 @@ func scanRecord(rows *sql.Rows) (model.IntrusionRecord, error) {
 	var deviceLocationJSON sql.NullString
 	var droneJSON, pilotJSON, homeJSON sql.NullString
 	var droneTrajectoryJSON, pilotTrajectoryJSON sql.NullString
+	var pilotDistanceM, droneDistanceM, droneDirectionDeg, deviceDirectionDeg sql.NullFloat64
 	var height, altitude, speed sql.NullFloat64
 	var lastRecordJSON sql.NullString
 
@@ -403,6 +443,10 @@ func scanRecord(rows *sql.Rows) (model.IntrusionRecord, error) {
 		&homeJSON,
 		&droneTrajectoryJSON,
 		&pilotTrajectoryJSON,
+		&pilotDistanceM,
+		&droneDistanceM,
+		&droneDirectionDeg,
+		&deviceDirectionDeg,
 		&height,
 		&altitude,
 		&speed,
@@ -425,10 +469,17 @@ func scanRecord(rows *sql.Rows) (model.IntrusionRecord, error) {
 	record.Home = decodeJSONPtr[model.ScreenPositionPoint](homeJSON)
 	record.DroneTrajectory = decodeJSONSlice[model.ScreenPositionTrackPoint](droneTrajectoryJSON)
 	record.PilotTrajectory = decodeJSONSlice[model.ScreenPositionTrackPoint](pilotTrajectoryJSON)
+	record.PilotDistanceM = floatPtr(pilotDistanceM)
+	record.DroneDistanceM = floatPtr(droneDistanceM)
+	record.DroneDirectionDeg = floatPtr(droneDirectionDeg)
+	record.DeviceDirectionDeg = floatPtr(deviceDirectionDeg)
 	record.Height = floatPtr(height)
 	record.Altitude = floatPtr(altitude)
 	record.Speed = floatPtr(speed)
 	record.LastRecord = decodeLastRecord(record.TargetType, lastRecordJSON)
+	if record.TargetType == model.IntrusionTargetTypeDetection {
+		record.DisplayModel = model.DisplayModelName(record.Model)
+	}
 	return record, nil
 }
 
@@ -543,7 +594,8 @@ func validGeoPoint(point *model.GeoPoint) bool {
 		point.Latitude >= -90 &&
 		point.Latitude <= 90 &&
 		point.Longitude >= -180 &&
-		point.Longitude <= 180
+		point.Longitude <= 180 &&
+		!(point.Latitude == 0 && point.Longitude == 0)
 }
 
 func cloneTrajectory(points []model.ScreenPositionTrackPoint) []model.ScreenPositionTrackPoint {

@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"math"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 )
@@ -176,6 +177,38 @@ func TestParseAck(t *testing.T) {
 	}
 	if !ack.Success() || ack.Command != CmdTransmitSwitch {
 		t.Fatalf("ack = %+v, want success for transmit switch", ack)
+	}
+}
+
+func TestDescribeFrameLocaleEnglish(t *testing.T) {
+	body := make([]byte, 96)
+	body[0] = QueryDeviceStatus
+	body[2] = 26
+	body[3] = 5
+	body[4] = 20
+	body[5] = 1
+	body[6] = 2
+	body[7] = 3
+	body[8] = 0x8F
+	body[9] = 3
+	putFloat64(body, 10, 116.994057)
+	putFloat64(body, 18, 28.170931)
+	putFloat32(body, 26, 12.5)
+	putFloat64(body, 34, 117.123456)
+	putFloat64(body, 42, 29.654321)
+	putFloat32(body, 50, 88.5)
+	binary.LittleEndian.PutUint16(body[94:96], SignalGPSL1CA|SignalBDSB1I)
+
+	description := DescribeFrameLocale(mustReportFrame(t, body), "en-US")
+	for _, want := range []string{"report", "device status", "current position", "simulated position", "active signals"} {
+		if !strings.Contains(description, want) {
+			t.Fatalf("description = %q, want %q", description, want)
+		}
+	}
+	for _, forbidden := range []string{"上报", "设备状态", "当前定位", "模拟位置", "工作信号"} {
+		if strings.Contains(description, forbidden) {
+			t.Fatalf("description = %q, must not contain Chinese text %q", description, forbidden)
+		}
 	}
 }
 

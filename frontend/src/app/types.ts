@@ -5,12 +5,14 @@ import type { DebugRecord, DebugRecordPage } from "../types";
 
 export type Page =
   | DebugRecordPage
+  | "deception-reports"
   | "developer-settings"
   | "gps-records"
   | "intrusions"
   | "interference"
   | "network-settings"
   | "settings"
+  | "whitelist"
   | "screen";
 
 export type Tone = "neutral" | "success" | "warning" | "error" | "info";

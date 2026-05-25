@@ -3,6 +3,7 @@ package deception
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -82,6 +83,13 @@ type SettingsStore interface {
 	SaveDeception(model.DeceptionSessionRequest) error
 }
 
+// ReportStore 持久化诱骗操作证据报告。
+type ReportStore interface {
+	Create(model.DeceptionReport) (model.DeceptionReport, error)
+	CreateRunning(model.DeceptionReport) (model.DeceptionReport, error)
+	Update(model.DeceptionReport) error
+}
+
 // Service 管理 GNSS 诱骗设备串口会话、命令 ACK 和大屏诱骗状态。
 type Service struct {
 	mu                sync.RWMutex
@@ -90,12 +98,15 @@ type Service struct {
 	store      *store.MemoryStore
 	translator *i18n.Translator
 	settings   SettingsStore
+	reports    ReportStore
 	options    Options
 	openPort   SerialOpener
 
-	current  *session
-	sequence uint64
-	records  []model.DeceptionRecord
+	current        *session
+	sequence       uint64
+	records        []model.DeceptionRecord
+	activeReport   *model.DeceptionReport
+	activeReportID string
 
 	deceptionActive         bool
 	deceptionTargetID       string
@@ -160,6 +171,13 @@ func (s *Service) SetSerialOpener(open SerialOpener) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.openPort = open
+}
+
+// SetReportStore 设置诱骗报告持久化存储。
+func (s *Service) SetReportStore(reports ReportStore) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.reports = reports
 }
 
 // Settings 加载已持久化的 GNSS 诱骗串口设置。
@@ -236,7 +254,7 @@ func (s *Service) Start(req model.DeceptionSessionRequest, locale string) (model
 		}
 	}
 
-	client, err := s.connectOnce(&cfg)
+	client, err := s.connectOnce(&cfg, locale)
 	if err == nil {
 		if !s.assignConnectedClient(seq, sess, client) {
 			client.Close()
@@ -247,9 +265,10 @@ func (s *Service) Start(req model.DeceptionSessionRequest, locale string) (model
 		return response, nil
 	}
 
-	s.setSessionFailure(seq, sess, "connecting", err.Error())
+	localizedErr := localizedDisplayError(locale, err.Error())
+	s.setSessionFailure(seq, sess, "connecting", localizedErr)
 	response := s.responseForSession(sess, locale, s.translator.T(locale, "common", "deception.session.inactive"))
-	response.LastError = err.Error()
+	response.LastError = localizedErr
 	response.Active = false
 	s.publish("deception.session.connecting", response)
 	return response, nil
@@ -274,7 +293,7 @@ func (s *Service) Stop(locale string) model.DeceptionSessionResponse {
 
 	prev.cancel()
 	if prev.client != nil {
-		s.stopAllTransmitBestEffort(prev.client)
+		s.stopAllTransmitBestEffort(prev.client, prev.locale)
 		prev.client.Close()
 	}
 
@@ -325,7 +344,7 @@ func (s *Service) Query(item string, locale string) (model.DeceptionQueryRespons
 	}
 	client, err := s.activeClient()
 	if err != nil {
-		s.setScreenLastError(err.Error())
+		s.setScreenLastError(localizedDisplayError(locale, err.Error()))
 		return model.DeceptionQueryResponse{}, s.localizedError(locale, "deception_serial_inactive")
 	}
 
@@ -337,7 +356,7 @@ func (s *Service) Query(item string, locale string) (model.DeceptionQueryRespons
 		Item:        strings.TrimSpace(item),
 		Command:     fmt.Sprintf("0x%02X", query),
 		RawHex:      protocol.Hex(raw),
-		Description: protocol.DescribeFrame(frame),
+		Description: protocol.DescribeFrameLocale(frame, locale),
 		Message:     s.translator.T(locale, "common", "deception.query.ok"),
 	}, nil
 }
@@ -385,24 +404,24 @@ func (s *Service) ScreenDeviceStatus(locale string) model.ScreenDeceptionDeviceS
 	status.UpdatedAt = &updatedAt
 
 	query := func(name string, command byte, apply func(protocol.Frame) error) {
-		status.RawDescriptions[name] = formatQueryRawDescription(command, nil, fmt.Errorf("等待响应"))
+		status.RawDescriptions[name] = formatQueryRawDescription(command, nil, fmt.Errorf("%s", protocol.TextLocale(locale, "waiting_response")), locale)
 		frame, raw, err := client.SendQuery(context.Background(), command)
 		if err != nil {
-			status.QueryErrors[name] = err.Error()
-			status.RawDescriptions[name] = formatQueryRawDescription(command, nil, err)
+			status.QueryErrors[name] = protocol.LocalizeErrorText(err.Error(), locale)
+			status.RawDescriptions[name] = formatQueryRawDescription(command, nil, err, locale)
 			return
 		}
-		status.RawDescriptions[name] = formatQueryRawDescription(command, raw, nil)
+		status.RawDescriptions[name] = formatQueryRawDescription(command, raw, nil, locale)
 		if err := apply(frame); err != nil {
-			status.QueryErrors[name] = err.Error()
+			status.QueryErrors[name] = protocol.LocalizeErrorText(err.Error(), locale)
 		}
 	}
 	queryBurst := func(name string, command byte, apply func([]protocol.Frame) error) {
-		status.RawDescriptions[name] = formatQueryRawDescription(command, nil, fmt.Errorf("等待响应"))
+		status.RawDescriptions[name] = formatQueryRawDescription(command, nil, fmt.Errorf("%s", protocol.TextLocale(locale, "waiting_response")), locale)
 		frames, raws, err := client.SendQueryBurst(context.Background(), command, deceptionQueryBurstIdleTimeout)
 		if err != nil {
-			status.QueryErrors[name] = err.Error()
-			status.RawDescriptions[name] = formatQueryRawDescription(command, nil, err)
+			status.QueryErrors[name] = protocol.LocalizeErrorText(err.Error(), locale)
+			status.RawDescriptions[name] = formatQueryRawDescription(command, nil, err, locale)
 			return
 		}
 		descriptions := make([]string, 0, len(frames))
@@ -413,9 +432,9 @@ func (s *Service) ScreenDeviceStatus(locale string) model.ScreenDeceptionDeviceS
 			}
 			description := ""
 			if index < len(raws) {
-				description = formatQueryRawDescription(command, raws[index], nil)
+				description = formatQueryRawDescription(command, raws[index], nil, locale)
 			} else {
-				description = formatQueryRawDescription(command, nil, nil)
+				description = formatQueryRawDescription(command, nil, nil, locale)
 			}
 			status.RawDescriptions[rawKey] = description
 			descriptions = append(descriptions, description)
@@ -424,7 +443,7 @@ func (s *Service) ScreenDeviceStatus(locale string) model.ScreenDeceptionDeviceS
 			status.RawDescriptions[name] = strings.Join(descriptions, "\n\n")
 		}
 		if err := apply(frames); err != nil {
-			status.QueryErrors[name] = err.Error()
+			status.QueryErrors[name] = protocol.LocalizeErrorText(err.Error(), locale)
 		}
 	}
 
@@ -589,6 +608,8 @@ func (s *Service) SetScreenDeception(
 
 // Shutdown 关闭发射并释放串口。
 func (s *Service) Shutdown() {
+	s.CloseActiveReportAbnormal("service_shutdown")
+
 	s.mu.Lock()
 	prev := s.current
 	s.sequence++
@@ -599,10 +620,36 @@ func (s *Service) Shutdown() {
 	if prev != nil {
 		prev.cancel()
 		if prev.client != nil {
-			s.stopAllTransmitBestEffort(prev.client)
+			s.stopAllTransmitBestEffort(prev.client, prev.locale)
 			prev.client.Close()
 		}
 	}
+}
+
+// CloseActiveReportAbnormal marks the in-memory running report abnormal.
+func (s *Service) CloseActiveReportAbnormal(reason string) {
+	report := s.currentActiveReport()
+	if report.ID == "" {
+		return
+	}
+	endedAt := time.Now()
+	state := s.ScreenState()
+	report.Status = model.DeceptionReportStatusAbnormal
+	report.EndedAt = &endedAt
+	report.EndState = cloneScreenState(&state)
+	report.AbnormalReason = strings.TrimSpace(reason)
+	if report.AbnormalReason == "" {
+		report.AbnormalReason = "abnormal"
+	}
+	if report.LastError == "" {
+		report.LastError = report.AbnormalReason
+	}
+	if records := s.activeReportRecords(report.ID); records != nil {
+		report.Records = records
+	}
+	report.RecordCount = len(report.Records)
+	_ = s.updateReport(report)
+	s.clearActiveReportID(report.ID)
 }
 
 func (s *Service) startScreenDeception(
@@ -612,21 +659,25 @@ func (s *Service) startScreenDeception(
 	hasDevicePoint bool,
 	locale string,
 ) (model.ScreenDeceptionState, error) {
-	config, err := normalizeScreenDeceptionRequest(req, devicePoint, hasDevicePoint)
+	config, err := normalizeScreenDeceptionRequest(req, devicePoint, hasDevicePoint, locale)
 	if err != nil {
 		return s.ScreenState(), s.localizedError(locale, errorCodeForNormalizeError(err))
 	}
 
 	client, err := s.activeClient()
 	if err != nil {
-		s.setScreenLastError(err.Error())
+		s.setScreenLastError(localizedDisplayError(locale, err.Error()))
 		return s.ScreenState(), s.localizedError(locale, "deception_serial_inactive")
 	}
+
+	startedAt := time.Now()
+	recordStart := s.recordCount()
+	sessionResponse := s.Current(locale)
 
 	s.serialOperationMu.Lock()
 	var commands []commandFrame
 	if requiresQueriedStatusPosition(config.mode) {
-		config.devicePosition, err = queryCurrentPositionForMotion(client)
+		config.devicePosition, err = queryCurrentPositionForMotion(client, locale)
 		if err == nil {
 			config.longitude = config.devicePosition.Longitude
 			config.latitude = config.devicePosition.Latitude
@@ -634,20 +685,22 @@ func (s *Service) startScreenDeception(
 		}
 	}
 	if err == nil {
-		commands, err = buildStartCommands(config)
+		commands, err = buildStartCommands(config, locale)
 	}
 	var lastAck string
 	if err == nil {
-		lastAck, err = s.sendCommandSequence(client, commands)
+		lastAck, err = s.sendCommandSequence(client, commands, locale)
 	}
 	s.serialOperationMu.Unlock()
 	if err != nil {
+		records := s.recordsSince(recordStart)
+		s.createFailedReport(req, sessionResponse, startedAt, config.summary, records, err, locale)
 		if len(commands) > 0 {
 			s.serialOperationMu.Lock()
-			_, _ = s.sendStopForMode(client, config.mode)
+			_, _ = s.sendStopForMode(client, config.mode, locale)
 			s.serialOperationMu.Unlock()
 		}
-		s.setScreenLastError(err.Error())
+		s.setScreenLastError(localizedDisplayError(locale, err.Error()))
 		return s.ScreenState(), err
 	}
 
@@ -670,7 +723,7 @@ func (s *Service) startScreenDeception(
 	s.deceptionDelayMode = config.delayMode
 	s.deceptionDelayNS = config.delayNS
 	s.deceptionDistanceM = config.distanceM
-	s.deceptionSummary = config.summary
+	s.deceptionSummary = ""
 	s.deceptionCircle = cloneCircleParams(config.circle)
 	s.deceptionLinear = cloneLinearParams(config.linear)
 	s.deceptionRandom = nil
@@ -680,6 +733,19 @@ func (s *Service) startScreenDeception(
 	state := s.screenStateLocked()
 	s.mu.Unlock()
 
+	report := s.createRunningReport(req, sessionResponse, state, startedAt, config.summary, recordStart, locale)
+	if report.ID != "" {
+		startStatus := s.ScreenDeviceStatus(locale)
+		report.StartDeviceStatus = cloneDeviceStatus(&startStatus)
+		report.RawDescriptions = mergeStringMaps(report.RawDescriptions, startStatus.RawDescriptions)
+		report.QueryErrors = mergeStringMaps(report.QueryErrors, startStatus.QueryErrors)
+		report.Records = s.recordsSince(recordStart)
+		report.RecordCount = len(report.Records)
+		if err := s.updateReport(report); err == nil {
+			s.setActiveReport(report)
+		}
+	}
+
 	s.publishScreenDeception(state)
 	return state, nil
 }
@@ -688,10 +754,17 @@ func (s *Service) stopScreenDeception(locale string) (model.ScreenDeceptionState
 	client, err := s.activeClient()
 	var stopErr error
 	var lastAck string
+	report := s.currentActiveReport()
+	if report.ID != "" {
+		beforeStatus := s.ScreenDeviceStatus(locale)
+		report.BeforeStopStatus = cloneDeviceStatus(&beforeStatus)
+		report.RawDescriptions = mergeStringMaps(report.RawDescriptions, prefixStringMap("before_stop.", beforeStatus.RawDescriptions))
+		report.QueryErrors = mergeStringMaps(report.QueryErrors, prefixStringMap("before_stop.", beforeStatus.QueryErrors))
+	}
 	if err == nil {
 		mode := s.currentScreenDeceptionMode()
 		s.serialOperationMu.Lock()
-		lastAck, stopErr = s.sendStopForMode(client, mode)
+		lastAck, stopErr = s.sendStopForMode(client, mode, locale)
 		s.serialOperationMu.Unlock()
 	} else if !errors.Is(err, errSerialInactive) {
 		stopErr = err
@@ -703,16 +776,38 @@ func (s *Service) stopScreenDeception(locale string) (model.ScreenDeceptionState
 		s.lastAck = lastAck
 	}
 	if stopErr != nil {
-		s.lastError = stopErr.Error()
+		s.lastError = localizedDisplayError(locale, stopErr.Error())
 	}
 	state := s.screenStateLocked()
 	s.mu.Unlock()
+
+	if report.ID != "" {
+		report.EndState = cloneScreenState(&state)
+		endedAt := time.Now()
+		report.EndedAt = &endedAt
+		report.Status = model.DeceptionReportStatusCompleted
+		if stopErr != nil {
+			report.LastError = localizedDisplayError(locale, stopErr.Error())
+		}
+		if err == nil {
+			afterStatus := s.ScreenDeviceStatus(locale)
+			report.AfterStopStatus = cloneDeviceStatus(&afterStatus)
+			report.RawDescriptions = mergeStringMaps(report.RawDescriptions, prefixStringMap("after_stop.", afterStatus.RawDescriptions))
+			report.QueryErrors = mergeStringMaps(report.QueryErrors, prefixStringMap("after_stop.", afterStatus.QueryErrors))
+		}
+		if records := s.activeReportRecords(report.ID); records != nil {
+			report.Records = records
+		}
+		report.RecordCount = len(report.Records)
+		_ = s.updateReport(report)
+		s.clearActiveReportID(report.ID)
+	}
 
 	s.publishScreenDeception(state)
 	return state, stopErr
 }
 
-func (s *Service) connectOnce(cfg *serialport.Config) (*serialClient, error) {
+func (s *Service) connectOnce(cfg *serialport.Config, locale string) (*serialClient, error) {
 	s.mu.RLock()
 	openPort := s.openPort
 	s.mu.RUnlock()
@@ -721,7 +816,7 @@ func (s *Service) connectOnce(cfg *serialport.Config) (*serialClient, error) {
 	if err != nil {
 		return nil, err
 	}
-	client := newSerialClient(port, cfg.PortName, s.options.CommandTimeout, s.record)
+	client := newSerialClient(port, cfg.PortName, s.options.CommandTimeout, locale, s.record)
 	client.Start()
 	return client, nil
 }
@@ -851,58 +946,58 @@ func (s *Service) messageForState(state, locale string) string {
 	}
 }
 
-func (s *Service) sendCommandSequence(client *serialClient, commands []commandFrame) (string, error) {
+func (s *Service) sendCommandSequence(client *serialClient, commands []commandFrame, locale string) (string, error) {
 	lastAck := ""
 	for _, command := range commands {
 		ack, err := client.SendAndWaitAck(context.Background(), command.code, command.frame)
 		if err != nil {
-			return lastAck, fmt.Errorf("%s失败: %w", command.name, err)
+			return lastAck, fmt.Errorf("%s", protocol.TextLocale(locale, "command_failed", command.name, protocol.LocalizeErrorText(err.Error(), locale)))
 		}
-		lastAck = fmt.Sprintf("%s ACK return=%d error=%d", command.name, ack.ReturnValue, ack.ErrorCode)
+		lastAck = protocol.TextLocale(locale, "ack_result", command.name, ack.ReturnValue, ack.ErrorCode)
 		if !ack.Success() {
-			return lastAck, fmt.Errorf("%s应答失败: %s", command.name, protocol.AckErrorText(ack.ErrorCode))
+			return lastAck, fmt.Errorf("%s", protocol.TextLocale(locale, "command_ack_failed", command.name, protocol.AckErrorTextLocale(ack.ErrorCode, locale)))
 		}
 	}
 	return lastAck, nil
 }
 
-func queryCurrentPositionForMotion(client *serialClient) (*protocol.PositionReport, error) {
+func queryCurrentPositionForMotion(client *serialClient, locale string) (*protocol.PositionReport, error) {
 	frame, _, err := client.SendQuery(context.Background(), protocol.QueryDeviceStatus)
 	if err != nil {
-		return nil, fmt.Errorf("查询设备状态失败: %w", err)
+		return nil, fmt.Errorf("%s", protocol.TextLocale(locale, "query_status_failed", protocol.LocalizeErrorText(err.Error(), locale)))
 	}
 	report, err := protocol.ParseDeviceStatusReport(frame)
 	if err != nil {
-		return nil, fmt.Errorf("解析设备状态失败: %w", err)
+		return nil, fmt.Errorf("%s", protocol.TextLocale(locale, "parse_status_failed", protocol.LocalizeErrorText(err.Error(), locale)))
 	}
 	if report.CurrentPosition == nil {
-		return nil, fmt.Errorf("设备状态缺少当前定位")
+		return nil, fmt.Errorf("%s", protocol.TextLocale(locale, "status_missing_pos"))
 	}
 	if !validLocation(report.CurrentPosition.Longitude, report.CurrentPosition.Latitude) {
-		return nil, fmt.Errorf("设备状态当前定位经纬度无效")
+		return nil, fmt.Errorf("%s", protocol.TextLocale(locale, "status_invalid_pos"))
 	}
 	return report.CurrentPosition, nil
 }
 
-func formatQueryRawDescription(command byte, responseRaw []byte, err error) string {
+func formatQueryRawDescription(command byte, responseRaw []byte, err error, locale string) string {
 	queryFrame, buildErr := protocol.BuildQuery(command)
 	parts := []string{}
 	if buildErr == nil {
 		parts = append(parts, fmt.Sprintf("TX %s", protocol.Hex(queryFrame)))
 	} else {
-		parts = append(parts, fmt.Sprintf("TX 构建失败: %s", buildErr.Error()))
+		parts = append(parts, protocol.TextLocale(locale, "tx_build_failed", protocol.LocalizeErrorText(buildErr.Error(), locale)))
 	}
 	if len(responseRaw) > 0 {
 		if frame, parseErr := protocol.ParseFrame(responseRaw); parseErr == nil {
 			parts = append(parts, fmt.Sprintf("RX %s", protocol.Hex(responseRaw)))
-			parts = append(parts, protocol.DescribeFrame(frame))
+			parts = append(parts, protocol.DescribeFrameLocale(frame, locale))
 		} else {
 			parts = append(parts, fmt.Sprintf("RX %s", protocol.Hex(responseRaw)))
-			parts = append(parts, fmt.Sprintf("解析失败: %s", parseErr.Error()))
+			parts = append(parts, protocol.TextLocale(locale, "parse_failed", protocol.LocalizeErrorText(parseErr.Error(), locale)))
 		}
 	}
 	if err != nil {
-		parts = append(parts, fmt.Sprintf("ERR %s", err.Error()))
+		parts = append(parts, fmt.Sprintf("ERR %s", protocol.LocalizeErrorText(err.Error(), locale)))
 	}
 	return strings.Join(parts, "\n")
 }
@@ -911,7 +1006,7 @@ func requiresQueriedStatusPosition(mode string) bool {
 	return mode == deceptionModeCircle || mode == deceptionModeLinear
 }
 
-func (s *Service) sendStopTransmit(client *serialClient) (string, error) {
+func (s *Service) sendStopTransmit(client *serialClient, locale string) (string, error) {
 	frame, err := protocol.BuildSetTransmitSwitch(0)
 	if err != nil {
 		return "", err
@@ -920,24 +1015,25 @@ func (s *Service) sendStopTransmit(client *serialClient) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	result := fmt.Sprintf("关闭发射 ACK return=%d error=%d", ack.ReturnValue, ack.ErrorCode)
+	commandName := protocol.TextLocale(locale, "stop_transmit")
+	result := protocol.TextLocale(locale, "ack_result", commandName, ack.ReturnValue, ack.ErrorCode)
 	if !ack.Success() {
-		return result, fmt.Errorf("关闭发射应答失败: %s", protocol.AckErrorText(ack.ErrorCode))
+		return result, fmt.Errorf("%s", protocol.TextLocale(locale, "command_ack_failed", commandName, protocol.AckErrorTextLocale(ack.ErrorCode, locale)))
 	}
 	return result, nil
 }
 
-func (s *Service) sendStopForMode(client *serialClient, mode string) (string, error) {
-	return s.sendStopTransmit(client)
+func (s *Service) sendStopForMode(client *serialClient, mode string, locale string) (string, error) {
+	return s.sendStopTransmit(client, locale)
 }
 
-func (s *Service) stopAllTransmitBestEffort(client *serialClient) {
+func (s *Service) stopAllTransmitBestEffort(client *serialClient, locale string) {
 	if client == nil {
 		return
 	}
 	s.serialOperationMu.Lock()
 	defer s.serialOperationMu.Unlock()
-	_, _ = s.sendStopTransmit(client)
+	_, _ = s.sendStopTransmit(client, locale)
 }
 
 func (s *Service) currentScreenDeceptionMode() string {
@@ -991,6 +1087,70 @@ func (s *Service) clearScreenDeceptionLocked() {
 	s.unsupportedReason = ""
 }
 
+func cloneScreenState(state *model.ScreenDeceptionState) *model.ScreenDeceptionState {
+	if state == nil {
+		return nil
+	}
+	cloned := *state
+	cloned.Point = cloneGeoPoint(state.Point)
+	cloned.Circle = cloneCircleParams(state.Circle)
+	cloned.Linear = cloneLinearParams(state.Linear)
+	cloned.Random = cloneRandomParams(state.Random)
+	return &cloned
+}
+
+func cloneDeviceStatus(status *model.ScreenDeceptionDeviceStatus) *model.ScreenDeceptionDeviceStatus {
+	if status == nil {
+		return nil
+	}
+	data, err := json.Marshal(status)
+	if err != nil {
+		return nil
+	}
+	var cloned model.ScreenDeceptionDeviceStatus
+	if err := json.Unmarshal(data, &cloned); err != nil {
+		return nil
+	}
+	return &cloned
+}
+
+func cloneReport(report model.DeceptionReport) model.DeceptionReport {
+	data, err := json.Marshal(report)
+	if err != nil {
+		return report
+	}
+	var cloned model.DeceptionReport
+	if err := json.Unmarshal(data, &cloned); err != nil {
+		return report
+	}
+	return cloned
+}
+
+func mergeStringMaps(base map[string]string, extra map[string]string) map[string]string {
+	if len(base) == 0 && len(extra) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(base)+len(extra))
+	for key, value := range base {
+		out[key] = value
+	}
+	for key, value := range extra {
+		out[key] = value
+	}
+	return out
+}
+
+func prefixStringMap(prefix string, values map[string]string) map[string]string {
+	if len(values) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(values))
+	for key, value := range values {
+		out[prefix+key] = value
+	}
+	return out
+}
+
 func (s *Service) publishScreenDeception(state model.ScreenDeceptionState) {
 	s.publish(screenDeceptionEventType, state)
 }
@@ -1000,6 +1160,150 @@ func (s *Service) publish(eventType string, payload any) {
 		return
 	}
 	s.store.Publish(model.Event{Type: eventType, Time: time.Now(), Payload: payload})
+}
+
+func (s *Service) recordCount() int {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return len(s.records)
+}
+
+func (s *Service) recordsSince(index int) []model.DeceptionRecord {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if index < 0 {
+		index = 0
+	}
+	if index > len(s.records) {
+		index = len(s.records)
+	}
+	out := make([]model.DeceptionRecord, len(s.records[index:]))
+	copy(out, s.records[index:])
+	return out
+}
+
+func (s *Service) currentReportStore() ReportStore {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.reports
+}
+
+func (s *Service) createRunningReport(
+	req model.ScreenDeceptionRequest,
+	session model.DeceptionSessionResponse,
+	state model.ScreenDeceptionState,
+	startedAt time.Time,
+	summary string,
+	recordStart int,
+	locale string,
+) model.DeceptionReport {
+	reports := s.currentReportStore()
+	if reports == nil {
+		return model.DeceptionReport{}
+	}
+	records := s.recordsSince(recordStart)
+	report := model.DeceptionReport{
+		DeceptionReportSummary: model.DeceptionReportSummary{
+			Status:    model.DeceptionReportStatusRunning,
+			StartedAt: startedAt,
+			PortName:  session.PortName,
+			Summary:   strings.TrimSpace(summary),
+		},
+		Request:     req,
+		Session:     session,
+		StartState:  cloneScreenState(&state),
+		Records:     records,
+		RecordCount: len(records),
+	}
+	report.RawDescriptions = map[string]string{}
+	report.QueryErrors = map[string]string{}
+	created, err := reports.CreateRunning(report)
+	if err != nil {
+		s.setScreenLastError(localizedDisplayError(locale, err.Error()))
+		return model.DeceptionReport{}
+	}
+	return created
+}
+
+func (s *Service) createFailedReport(
+	req model.ScreenDeceptionRequest,
+	session model.DeceptionSessionResponse,
+	startedAt time.Time,
+	summary string,
+	records []model.DeceptionRecord,
+	cause error,
+	locale string,
+) {
+	reports := s.currentReportStore()
+	if reports == nil || cause == nil {
+		return
+	}
+	endedAt := time.Now()
+	report := model.DeceptionReport{
+		DeceptionReportSummary: model.DeceptionReportSummary{
+			Status:    model.DeceptionReportStatusFailed,
+			StartedAt: startedAt,
+			EndedAt:   &endedAt,
+			PortName:  session.PortName,
+			Summary:   strings.TrimSpace(summary),
+			LastError: localizedDisplayError(locale, cause.Error()),
+		},
+		Request:     req,
+		Session:     session,
+		Records:     records,
+		RecordCount: len(records),
+	}
+	created, err := reports.Create(report)
+	if err != nil {
+		s.setScreenLastError(localizedDisplayError(locale, err.Error()))
+		return
+	}
+	_ = created
+}
+
+func (s *Service) updateReport(report model.DeceptionReport) error {
+	reports := s.currentReportStore()
+	if reports == nil || report.ID == "" {
+		return nil
+	}
+	return reports.Update(report)
+}
+
+func (s *Service) setActiveReport(report model.DeceptionReport) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.activeReportID = report.ID
+	cloned := cloneReport(report)
+	s.activeReport = &cloned
+}
+
+func (s *Service) currentActiveReport() model.DeceptionReport {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.activeReport == nil {
+		return model.DeceptionReport{}
+	}
+	return cloneReport(*s.activeReport)
+}
+
+func (s *Service) clearActiveReportID(id string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.activeReportID == id {
+		s.activeReportID = ""
+		s.activeReport = nil
+	}
+}
+
+func (s *Service) activeReportRecords(id string) []model.DeceptionRecord {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.activeReportID != id || s.activeReport == nil {
+		return nil
+	}
+	out := make([]model.DeceptionRecord, len(s.activeReport.Records))
+	copy(out, s.activeReport.Records)
+	return out
 }
 
 func applyDeviceStatusReport(status *model.ScreenDeceptionDeviceStatus, report protocol.DeviceStatusReport) {
@@ -1119,6 +1423,10 @@ func (s *Service) record(record model.DeceptionRecord) {
 	}
 	s.mu.Lock()
 	s.records = appendBounded(s.records, record, maxDeceptionRecords)
+	if s.activeReport != nil {
+		s.activeReport.Records = append(s.activeReport.Records, record)
+		s.activeReport.RecordCount = len(s.activeReport.Records)
+	}
 	s.mu.Unlock()
 	s.publish("deception.record", record)
 }
@@ -1128,6 +1436,10 @@ func (s *Service) localizedError(locale string, code string) error {
 		code:    code,
 		message: s.translator.T(locale, "errors", code),
 	}
+}
+
+func localizedDisplayError(locale string, message string) string {
+	return protocol.LocalizeErrorText(message, locale)
 }
 
 type codedError struct {
@@ -1172,7 +1484,7 @@ type screenDeceptionConfig struct {
 	linear         *model.ScreenDeceptionLinearParams
 }
 
-func buildStartCommands(config screenDeceptionConfig) ([]commandFrame, error) {
+func buildStartCommands(config screenDeceptionConfig, locale string) ([]commandFrame, error) {
 	commands := make([]commandFrame, 0, 5)
 
 	if config.mode == deceptionModeFixedPoint {
@@ -1185,7 +1497,7 @@ func buildStartCommands(config screenDeceptionConfig) ([]commandFrame, error) {
 			return nil, err
 		}
 		commands = append(commands, commandFrame{
-			name:  "设置模拟位置",
+			name:  protocol.CommandNameLocale(protocol.ControlSet, protocol.CmdSimulatedPosition, locale),
 			code:  protocol.CmdSimulatedPosition,
 			frame: frame,
 		})
@@ -1193,12 +1505,12 @@ func buildStartCommands(config screenDeceptionConfig) ([]commandFrame, error) {
 
 	switch config.mode {
 	case deceptionModeCircle:
-		frame, err := buildSimulatedPositionFromDevicePosition(config.devicePosition)
+		frame, err := buildSimulatedPositionFromDevicePosition(config.devicePosition, locale)
 		if err != nil {
 			return nil, err
 		}
 		commands = append(commands, commandFrame{
-			name:  "设置模拟位置",
+			name:  protocol.CommandNameLocale(protocol.ControlSet, protocol.CmdSimulatedPosition, locale),
 			code:  protocol.CmdSimulatedPosition,
 			frame: frame,
 		})
@@ -1216,17 +1528,17 @@ func buildStartCommands(config screenDeceptionConfig) ([]commandFrame, error) {
 			return nil, err
 		}
 		commands = append(commands, commandFrame{
-			name:  "设置模拟圆周运动",
+			name:  protocol.CommandNameLocale(protocol.ControlSet, protocol.CmdSimulatedCircle, locale),
 			code:  protocol.CmdSimulatedCircle,
 			frame: frame,
 		})
 	case deceptionModeLinear:
-		frame, err := buildSimulatedPositionFromDevicePosition(config.devicePosition)
+		frame, err := buildSimulatedPositionFromDevicePosition(config.devicePosition, locale)
 		if err != nil {
 			return nil, err
 		}
 		commands = append(commands, commandFrame{
-			name:  "设置模拟位置",
+			name:  protocol.CommandNameLocale(protocol.ControlSet, protocol.CmdSimulatedPosition, locale),
 			code:  protocol.CmdSimulatedPosition,
 			frame: frame,
 		})
@@ -1239,7 +1551,7 @@ func buildStartCommands(config screenDeceptionConfig) ([]commandFrame, error) {
 			return nil, err
 		}
 		commands = append(commands, commandFrame{
-			name:  "设置模拟初速度",
+			name:  protocol.CommandNameLocale(protocol.ControlSet, protocol.CmdInitialVelocity, locale),
 			code:  protocol.CmdInitialVelocity,
 			frame: frame,
 		})
@@ -1249,7 +1561,7 @@ func buildStartCommands(config screenDeceptionConfig) ([]commandFrame, error) {
 			return nil, err
 		}
 		commands = append(commands, commandFrame{
-			name:  "设置最大速度",
+			name:  protocol.CommandNameLocale(protocol.ControlSet, protocol.CmdMaxSpeed, locale),
 			code:  protocol.CmdMaxSpeed,
 			frame: frame,
 		})
@@ -1260,16 +1572,16 @@ func buildStartCommands(config screenDeceptionConfig) ([]commandFrame, error) {
 		return nil, err
 	}
 	commands = append(commands, commandFrame{
-		name:  "打开发射",
+		name:  protocol.CommandNameLocale(protocol.ControlSet, protocol.CmdTransmitSwitch, locale),
 		code:  protocol.CmdTransmitSwitch,
 		frame: frame,
 	})
 	return commands, nil
 }
 
-func buildSimulatedPositionFromDevicePosition(position *protocol.PositionReport) ([]byte, error) {
+func buildSimulatedPositionFromDevicePosition(position *protocol.PositionReport, locale string) ([]byte, error) {
 	if position == nil {
-		return nil, fmt.Errorf("设备状态当前定位未查询")
+		return nil, fmt.Errorf("%s", protocol.TextLocale(locale, "status_pos_required"))
 	}
 	return protocol.BuildSetSimulatedPosition(
 		position.Longitude,
@@ -1282,6 +1594,7 @@ func normalizeScreenDeceptionRequest(
 	req model.ScreenDeceptionRequest,
 	devicePoint model.GeoPoint,
 	hasDevicePoint bool,
+	locale string,
 ) (screenDeceptionConfig, error) {
 	mode := strings.TrimSpace(req.Mode)
 	if mode == "" {
@@ -1362,7 +1675,7 @@ func normalizeScreenDeceptionRequest(
 		}
 		config.linear = linear
 	}
-	config.summary = buildDeceptionSummary(config)
+	config.summary = buildDeceptionSummary(config, locale)
 	return config, nil
 }
 
@@ -1477,12 +1790,12 @@ func rotateDirectionValue(direction string) (int32, error) {
 	}
 }
 
-func buildDeceptionSummary(config screenDeceptionConfig) string {
-	signals := protocol.FormatSignals(config.signalMask)
+func buildDeceptionSummary(config screenDeceptionConfig, locale string) string {
+	signals := protocol.FormatSignalsLocale(config.signalMask, locale)
 	switch config.mode {
 	case deceptionModeCircle:
 		return fmt.Sprintf(
-			"圆周运动 %.0fm / %.0fs / %s / %ddB / %s",
+			"%.0fm / %.0fs / %s / %ddB / %s",
 			config.circle.RadiusM,
 			config.circle.PeriodSeconds,
 			strings.ToUpper(config.circle.Direction),
@@ -1491,14 +1804,14 @@ func buildDeceptionSummary(config screenDeceptionConfig) string {
 		)
 	case deceptionModeLinear:
 		return fmt.Sprintf(
-			"匀加速运动 %.1fm/s / %.0f° / %ddB / %s",
+			"%.1fm/s / %.0fdeg / %ddB / %s",
 			config.linear.SpeedMPS,
 			*config.linear.DirectionDeg,
 			config.attenuationDB,
 			signals,
 		)
 	default:
-		return fmt.Sprintf("模拟禁飞区 %.6f, %.6f / %.0fm / %ddB / %s", config.longitude, config.latitude, config.altitudeM, config.attenuationDB, signals)
+		return fmt.Sprintf("%.6f, %.6f / %.0fm / %ddB / %s", config.longitude, config.latitude, config.altitudeM, config.attenuationDB, signals)
 	}
 }
 

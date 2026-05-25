@@ -2,6 +2,7 @@ package intrusion
 
 import (
 	"database/sql"
+	"math"
 	"path/filepath"
 	"testing"
 	"time"
@@ -88,9 +89,16 @@ func TestStoreArchivesAndListsRecords(t *testing.T) {
 	if items[0].TargetType != model.IntrusionTargetTypePosition {
 		t.Fatalf("first type = %q, want position", items[0].TargetType)
 	}
+	if items[0].DisplayModel != "" {
+		t.Fatalf("position display model = %q, want empty", items[0].DisplayModel)
+	}
 	if items[0].Drone == nil || items[0].Drone.Latitude != 31.2 {
 		t.Fatalf("position drone = %#v, want archived point", items[0].Drone)
 	}
+	assertFloatApprox(t, "pilot distance", items[0].PilotDistanceM, 1_189_983.0, 1)
+	assertFloatApprox(t, "drone distance", items[0].DroneDistanceM, 1_204_595.0, 1)
+	assertFloatApprox(t, "drone direction", items[0].DroneDirectionDeg, 40.1, 0.1)
+	assertFloatApprox(t, "device direction", items[0].DeviceDirectionDeg, 220.1, 0.1)
 	if items[0].DeviceLocation == nil || items[0].DeviceLocation.Point == nil {
 		t.Fatalf("position device location = %#v, want archived device location", items[0].DeviceLocation)
 	}
@@ -121,6 +129,9 @@ func TestStoreArchivesAndListsRecords(t *testing.T) {
 	if detections[0].Model != "PAL Analog" {
 		t.Fatalf("detection model = %q, want PAL Analog", detections[0].Model)
 	}
+	if detections[0].DisplayModel != "Analog PAL" {
+		t.Fatalf("detection display model = %q, want Analog PAL", detections[0].DisplayModel)
+	}
 	if detections[0].Serial != "DET-ABC123" {
 		t.Fatalf("detection serial = %q, want generated serial", detections[0].Serial)
 	}
@@ -129,6 +140,13 @@ func TestStoreArchivesAndListsRecords(t *testing.T) {
 	}
 	if detections[0].DeviceLocation == nil || detections[0].DeviceLocation.Point == nil {
 		t.Fatalf("detection device location = %#v, want archived device location", detections[0].DeviceLocation)
+	}
+	lastRecord, ok := detections[0].LastRecord.(model.ScreenDetectionLastRecord)
+	if !ok {
+		t.Fatalf("detection last record type = %T, want ScreenDetectionLastRecord", detections[0].LastRecord)
+	}
+	if lastRecord.DisplayModel != "Analog PAL" {
+		t.Fatalf("detection last record display model = %q, want Analog PAL", lastRecord.DisplayModel)
 	}
 }
 
@@ -143,6 +161,11 @@ func TestStoreMigratesDeviceLocationColumn(t *testing.T) {
 	}
 	if _, err := store.db.Exec(`ALTER TABLE intrusion_records DROP COLUMN sources_json`); err != nil {
 		t.Fatalf("drop sources_json error = %v", err)
+	}
+	for _, column := range []string{"pilot_distance_m", "drone_distance_m", "drone_direction_deg", "device_direction_deg"} {
+		if _, err := store.db.Exec(`ALTER TABLE intrusion_records DROP COLUMN ` + column); err != nil {
+			t.Fatalf("drop %s error = %v", column, err)
+		}
 	}
 	if err := store.Close(); err != nil {
 		t.Fatalf("Close() error = %v", err)
@@ -165,6 +188,12 @@ func TestStoreMigratesDeviceLocationColumn(t *testing.T) {
 
 	foundDeviceLocation := false
 	foundSources := false
+	foundRelationColumns := map[string]bool{
+		"pilot_distance_m":     false,
+		"drone_distance_m":     false,
+		"drone_direction_deg":  false,
+		"device_direction_deg": false,
+	}
 	for rows.Next() {
 		var cid int
 		var name, dataType string
@@ -180,6 +209,9 @@ func TestStoreMigratesDeviceLocationColumn(t *testing.T) {
 		if name == "sources_json" {
 			foundSources = true
 		}
+		if _, ok := foundRelationColumns[name]; ok {
+			foundRelationColumns[name] = true
+		}
 	}
 	if err := rows.Err(); err != nil {
 		t.Fatalf("rows error = %v", err)
@@ -189,6 +221,11 @@ func TestStoreMigratesDeviceLocationColumn(t *testing.T) {
 	}
 	if !foundSources {
 		t.Fatalf("sources_json column not migrated")
+	}
+	for column, found := range foundRelationColumns {
+		if !found {
+			t.Fatalf("%s column not migrated", column)
+		}
 	}
 }
 
@@ -416,4 +453,14 @@ func stringSlicesEqual(left, right []string) bool {
 		}
 	}
 	return true
+}
+
+func assertFloatApprox(t *testing.T, name string, got *float64, want float64, tolerance float64) {
+	t.Helper()
+	if got == nil {
+		t.Fatalf("%s is nil, want %.3f", name, want)
+	}
+	if math.Abs(*got-want) > tolerance {
+		t.Fatalf("%s = %.6f, want %.6f ± %.6f", name, *got, want, tolerance)
+	}
 }

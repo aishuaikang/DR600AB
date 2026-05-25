@@ -99,6 +99,8 @@ export interface DeceptionQueryResponse {
   message: string;
 }
 
+export type DeceptionReportStatus = "running" | "completed" | "failed" | "abnormal";
+
 export interface GPSFix {
   latitude: number;
   longitude: number;
@@ -129,6 +131,22 @@ export interface UserSettings {
   manualDeviceLocation?: GeoPoint;
   screenStrikeChannelLabels?: string[];
   intrusionRetentionDays?: number;
+  whitelist?: WhitelistItem[];
+  screenAlarmSettings?: ScreenAlarmSettings;
+}
+
+export interface WhitelistItem {
+  serial: string;
+  model?: string;
+  source?: string;
+  createdAt?: string;
+}
+
+export interface ScreenAlarmSettings {
+  detection: boolean;
+  position: boolean;
+  fpv: boolean;
+  sound: boolean;
 }
 
 export interface ScreenDeviceLocationResponse {
@@ -428,6 +446,7 @@ export interface DetectionRecord {
   receivedAt: string;
   device: string;
   model?: string;
+  displayModel?: string;
   frequency?: number;
   rssi?: number;
   summary: string;
@@ -440,6 +459,7 @@ export interface ScreenDetectionLastRecord {
   receivedAt: string;
   device: string;
   model?: string;
+  displayModel?: string;
   frequency?: number;
   rssi?: number;
   summary: string;
@@ -449,6 +469,7 @@ export interface ScreenDetectionTarget {
   id: string;
   serial?: string;
   model: string;
+  displayModel?: string;
   frequency: number;
   rssi: number;
   device?: string;
@@ -498,6 +519,10 @@ export interface ScreenPositionTarget {
   height?: number;
   altitude?: number;
   speed?: number;
+  pilotDistanceM?: number;
+  droneDistanceM?: number;
+  droneDirectionDeg?: number;
+  deviceDirectionDeg?: number;
   cracked?: boolean;
   firstSeen: string;
   lastSeen: string;
@@ -512,6 +537,7 @@ export interface IntrusionRecord {
   targetId: string;
   targetType: IntrusionTargetType;
   model?: string;
+  displayModel?: string;
   serial?: string;
   device?: string;
   frequency?: number;
@@ -532,6 +558,10 @@ export interface IntrusionRecord {
   height?: number;
   altitude?: number;
   speed?: number;
+  pilotDistanceM?: number;
+  droneDistanceM?: number;
+  droneDirectionDeg?: number;
+  deviceDirectionDeg?: number;
   lastRecord?: unknown;
   archivedAt: string;
 }
@@ -542,6 +572,58 @@ export interface IntrusionDeleteRequest {
 
 export interface IntrusionDeleteResponse {
   deleted: number;
+}
+
+export interface DeceptionReportDeleteResponse {
+  deleted: number;
+}
+
+export interface DeceptionRecord {
+  time: string;
+  direction: string;
+  command?: string;
+  control?: string;
+  rawHex?: string;
+  description?: string;
+  error?: string;
+}
+
+export interface DeceptionReportSummary {
+  id: string;
+  status: DeceptionReportStatus;
+  startedAt: string;
+  endedAt?: string;
+  durationSeconds: number;
+  targetId?: string;
+  mode?: ScreenDeceptionMode | string;
+  point?: GeoPoint;
+  altitudeM?: number;
+  signalMask?: number;
+  signalNames?: string[];
+  strengthPreset?: ScreenDeceptionStrengthPreset | string;
+  attenuationDB?: number;
+  delayMode?: ScreenDeceptionDelayMode | string;
+  delayNS?: number;
+  portName?: string;
+  summary?: string;
+  lastError?: string;
+  abnormalReason?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface DeceptionReport extends DeceptionReportSummary {
+  request: ScreenDeceptionRequest;
+  session: DeceptionSessionResponse;
+  startState?: ScreenDeceptionState;
+  endState?: ScreenDeceptionState;
+  startDeviceStatus?: ScreenDeceptionDeviceStatus;
+  beforeStopStatus?: ScreenDeceptionDeviceStatus;
+  afterStopStatus?: ScreenDeceptionDeviceStatus;
+  rawDescriptions?: Record<string, string>;
+  queryErrors?: Record<string, string>;
+  records?: DeceptionRecord[];
+  recordCount: number;
 }
 
 export type DebugRecord = DetectionRecord | ParsedMessage;

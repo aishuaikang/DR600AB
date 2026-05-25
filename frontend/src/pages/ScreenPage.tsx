@@ -1,8 +1,8 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import type { TFunction } from "i18next";
 import type L from "leaflet";
-import { Activity, ChevronDown, ChevronLeft, ChevronRight, Cpu, Globe2, Inbox, Loader2, MapPin, Orbit, QrCode, Radar, Radio, RadioTower, RefreshCw, Route, SatelliteDish, ScanSearch, Settings2, Shield, Square, Thermometer, TimerReset, X, Zap } from "lucide-react";
+import { Activity, BellRing, ChevronDown, ChevronLeft, ChevronRight, Cpu, Globe2, Inbox, Loader2, MapPin, Orbit, QrCode, Radar, Radio, RadioTower, RefreshCw, Route, SatelliteDish, ScanSearch, Settings2, Shield, ShieldCheck, ShieldMinus, ShieldPlus, Square, Thermometer, TimerReset, Volume2, X, Zap } from "lucide-react";
 import * as QRCode from "qrcode";
 
 import {
@@ -42,8 +42,14 @@ import { noFlyZonePresets } from "../data/noFlyZones";
 import type { NoFlyZonePreset } from "../data/noFlyZones";
 import { gps84ToGcj02 } from "../utils/leafletCoordConverter";
 import { compactLocaleName } from "../utils/locales";
-import { readDeveloperSession } from "../utils/developer";
-import { ScreenMap } from "./ScreenMap";
+import { resolveDisplayModel } from "../utils/models";
+import {
+  isSerialWhitelisted,
+  removeWhitelistSerial,
+  resolveScreenAlarmSettings,
+  upsertWhitelistItem,
+} from "../utils/whitelist";
+import { ScreenMap, ScreenMapLegend } from "./ScreenMap";
 import type { ReferenceMapLayer, ScreenAlertKind } from "./screenData";
 
 const screenDetectionLimit = 100;
@@ -95,6 +101,10 @@ type NavigationQRCodeState = {
 type NoFlyZonePresetWithDistance = NoFlyZonePreset & {
   distanceM?: number;
 };
+type ScreenAlarmSourceCount = {
+  kind: ScreenAlertKind;
+  count: number;
+};
 const droneImageModules = import.meta.glob("../assets/images/drone/*.png", {
   eager: true,
   query: "?url",
@@ -136,6 +146,10 @@ function getPositionDroneImageUrl(model: string) {
 
 function isFpvTarget(target: ScreenDetectionTarget) {
   return target.model.trim() === "PAL Analog";
+}
+
+function countUnwhitelistedSerials<T extends { serial?: string }>(items: T[], whitelist: UserSettings["whitelist"]) {
+  return items.reduce((count, item) => count + (isSerialWhitelisted(item.serial, whitelist) ? 0 : 1), 0);
 }
 
 function formatFrequency(value: number) {
@@ -256,6 +270,10 @@ function formatPresetDistance(distanceM?: number) {
     return `${(distanceM / 1000).toFixed(distanceM >= 100_000 ? 0 : 1)}km`;
   }
   return `${Math.round(distanceM)}m`;
+}
+
+function formatPositionDistance(value?: number) {
+  return formatPresetDistance(value);
 }
 
 function getNoFlyZoneDistanceOrigin(
@@ -576,6 +594,13 @@ function formatOnOff(value: boolean | undefined, t: TFunction) {
 	return t(value ? "statusOn" : "statusOff", { ns: "screen" });
 }
 
+function formatOnlineOffline(value: boolean | undefined, t: TFunction) {
+	if (typeof value !== "boolean") {
+		return "-";
+	}
+	return t(value ? "online" : "offline", { ns: "screen" });
+}
+
 function formatDurationSeconds(value: number | undefined) {
 	if (typeof value !== "number" || !Number.isFinite(value)) {
 		return "-";
@@ -595,6 +620,25 @@ function formatDurationSeconds(value: number | undefined) {
 
 function formatSignalList(signals?: string[]) {
 	return signals && signals.length > 0 ? signals.join(" / ") : "-";
+}
+
+function getOscillatorHealthy(state: ScreenDeceptionDeviceStatus["oscillatorState"]) {
+	if (!state || state === "unknown") {
+		return undefined;
+	}
+	return state === "locked" || state === "hold";
+}
+
+function isSignalWorkNormal(status: ScreenDeceptionSignalWorkStatus | undefined) {
+	if (!status) {
+		return undefined;
+	}
+	return status.clockOk &&
+		status.ephemerisValid &&
+		status.rfModuleOk &&
+		status.signalTransmit &&
+		status.transmitChannel &&
+		status.fpgaOk;
 }
 
 function getDeceptionDeviceStatusTone(
@@ -626,6 +670,10 @@ function getTargetTimeTone(lastSeen: string, now: Date) {
     return "stale";
   }
   return "old";
+}
+
+function shouldShowDisappearCountdown(tone: string) {
+  return tone === "old";
 }
 
 function getTargetTimeToneTitle(tone: string, t: TFunction) {
@@ -711,6 +759,9 @@ function ScreenHeader({
   now,
   locale,
   localeOptions,
+  alarmCounts,
+  soundBlocked,
+  onEnableSound,
   onLocaleChange,
   onEnterAdmin,
 }: {
@@ -719,11 +770,19 @@ function ScreenHeader({
   now: Date;
   locale: string;
   localeOptions: string[];
+  alarmCounts: ScreenAlarmSourceCount[];
+  soundBlocked: boolean;
+  onEnableSound: () => void;
   onLocaleChange: (locale: string) => void;
   onEnterAdmin: () => void;
 }) {
   const [languageOpen, setLanguageOpen] = useState(false);
   const languageLabel = compactLocaleName(locale);
+  const totalAlarmCount = alarmCounts.reduce((count, item) => count + item.count, 0);
+  const alarmSummary = alarmCounts
+    .filter((item) => item.count > 0)
+    .map((item) => t(`tabs.${item.kind}`, { ns: "screen" }) + ` ${item.count}`)
+    .join(" / ");
 
   return (
     <header className="screen-header">
@@ -735,9 +794,27 @@ function ScreenHeader({
 
       <div className="screen-header__title">
         <h1>{appTitle}</h1>
+        {totalAlarmCount > 0 ? (
+          <div className="screen-alarm-banner" role="alert">
+            <BellRing size={14} aria-hidden="true" />
+            <strong>{t("whitelistAlarmTitle", { ns: "screen", count: totalAlarmCount })}</strong>
+            <span>{alarmSummary}</span>
+            {soundBlocked ? (
+              <button
+                className="screen-alarm-banner__sound"
+                type="button"
+                onClick={onEnableSound}
+              >
+                <Volume2 size={13} aria-hidden="true" />
+                {t("enableSoundAlarm", { ns: "screen" })}
+              </button>
+            ) : null}
+          </div>
+        ) : null}
       </div>
 
       <div className="screen-header__right">
+        <ScreenMapLegend t={t} />
         <div
           className={cx("screen-language-switch", languageOpen && "screen-language-switch--open")}
           onBlur={(event) => {
@@ -806,11 +883,12 @@ function DetectionTargetCard({
   now: Date;
   onSelect: (target: ScreenDetectionTarget) => void;
 }) {
-  const title = target.model || t("unknownTarget", { ns: "screen" });
+  const title = resolveDisplayModel(target) || t("unknownTarget", { ns: "screen" });
   const imageUrl = getDroneImageUrl(target.model);
   const timeTone = getTargetTimeTone(target.lastSeen, now);
   const timeToneTitle = getTargetTimeToneTitle(timeTone, t);
   const remainingSeconds = targetDisappearRemainingSeconds(target.lastSeen, now);
+  const showCountdown = shouldShowDisappearCountdown(timeTone);
   const [freshnessOpen, setFreshnessOpen] = useState(false);
 
   return (
@@ -863,11 +941,13 @@ function DetectionTargetCard({
           </span>
         </div>
 
-        <span className={`screen-target-countdown screen-target-countdown--${timeTone}`}>
-          <TimerReset size={12} aria-hidden="true" />
-          <em>{t("targetDisappearCountdown", { ns: "screen" })}</em>
-          <strong>{remainingSeconds === null ? "--:--" : formatCountdown(remainingSeconds)}</strong>
-        </span>
+        {showCountdown ? (
+          <span className={`screen-target-countdown screen-target-countdown--${timeTone}`}>
+            <TimerReset size={12} aria-hidden="true" />
+            <em>{t("targetDisappearCountdown", { ns: "screen" })}</em>
+            <strong>{remainingSeconds === null ? "--:--" : formatCountdown(remainingSeconds)}</strong>
+          </span>
+        ) : null}
 
         {freshnessOpen ? (
           <span className={`screen-detection-card__freshness screen-detection-card__freshness--${timeTone}`}>
@@ -883,13 +963,11 @@ function FpvTargetTable({
   targets,
   selectedId,
   t,
-  now,
   onSelect,
 }: {
   targets: ScreenDetectionTarget[];
   selectedId: string;
   t: TFunction;
-  now: Date;
   onSelect: (target: ScreenDetectionTarget) => void;
 }) {
   return (
@@ -898,14 +976,11 @@ function FpvTargetTable({
         <span>{t("signal", { ns: "screen" })}</span>
         <span>{t("frequency", { ns: "screen" })}</span>
         <span>{t("signalStrength", { ns: "screen" })}</span>
-        <span>{t("targetDisappearCountdown", { ns: "screen" })}</span>
       </div>
 
       <div className="screen-fpv-table__body">
         {targets.map((target) => {
           const signalPercent = getRSSIPercent(target.rssi);
-          const timeTone = getTargetTimeTone(target.lastSeen, now);
-          const remainingSeconds = targetDisappearRemainingSeconds(target.lastSeen, now);
 
           return (
             <button
@@ -917,7 +992,7 @@ function FpvTargetTable({
               <span className="screen-fpv-row__signal">
                 <span>
                   <strong>{t("fpvSignalTransmission", { ns: "screen" })}</strong>
-                  <em>{target.model || t("unknownTarget", { ns: "screen" })}</em>
+                  <em>{resolveDisplayModel(target) || t("unknownTarget", { ns: "screen" })}</em>
                 </span>
               </span>
 
@@ -928,11 +1003,6 @@ function FpvTargetTable({
                 <span className="screen-fpv-row__meter" aria-hidden="true">
                   <span style={{ width: `${signalPercent}%` }} />
                 </span>
-              </span>
-
-              <span className={`screen-fpv-row__countdown screen-target-countdown--${timeTone}`}>
-                <TimerReset size={12} aria-hidden="true" />
-                <strong>{remainingSeconds === null ? "--:--" : formatCountdown(remainingSeconds)}</strong>
               </span>
             </button>
           );
@@ -1001,16 +1071,22 @@ function PositionPointRow({
 function PositionTargetCard({
   target,
   selected,
+  whitelisted,
+  whitelistBusy,
   t,
   now,
   onSelect,
+  onToggleWhitelist,
   onOpenNavigationQRCode,
 }: {
   target: ScreenPositionTarget;
   selected: boolean;
+  whitelisted: boolean;
+  whitelistBusy: boolean;
   t: TFunction;
   now: Date;
   onSelect: (target: ScreenPositionTarget) => void;
+  onToggleWhitelist: (target: ScreenPositionTarget) => void;
   onOpenNavigationQRCode?: (label: string, point: ScreenPositionPoint) => void;
 }) {
   const timeTone = getTargetTimeTone(target.lastSeen, now);
@@ -1018,6 +1094,7 @@ function PositionTargetCard({
   const imageUrl = getPositionDroneImageUrl(target.model);
   const pendingEncrypted = target.source === "did_encrypted" && target.model === "DJI-Drone" && !target.cracked;
   const remainingSeconds = targetDisappearRemainingSeconds(target.lastSeen, now);
+  const showCountdown = shouldShowDisappearCountdown(timeTone);
 
   return (
     <article
@@ -1028,6 +1105,12 @@ function PositionTargetCard({
         <span className="screen-position-card__identity">
           <span className="screen-position-card__title-row">
             <strong>{target.model || t("unknownTarget", { ns: "screen" })}</strong>
+            {whitelisted ? (
+              <span className="screen-position-card__whitelist-badge">
+                <ShieldCheck size={11} aria-hidden="true" />
+                {t("whitelist", { ns: "screen" })}
+              </span>
+            ) : null}
             {pendingEncrypted ? (
               <span className="screen-position-card__parsing">
                 <span aria-hidden="true" />
@@ -1037,22 +1120,39 @@ function PositionTargetCard({
           </span>
           <em>{t("deviceSn", { ns: "screen" })}: {target.serial || "-"}</em>
         </span>
-        <button
-          className={`screen-detection-card__time screen-detection-card__time--${timeTone}`}
-          type="button"
-          title={timeToneTitle}
-          aria-label={timeToneTitle}
-          onClick={(event) => event.stopPropagation()}
-        >
-          {formatTargetTime(target.lastSeen)}
-        </button>
+        <span className="screen-position-card__actions">
+          <button
+            className={`screen-detection-card__time screen-detection-card__time--${timeTone}`}
+            type="button"
+            title={timeToneTitle}
+            aria-label={timeToneTitle}
+            onClick={(event) => event.stopPropagation()}
+          >
+            {formatTargetTime(target.lastSeen)}
+          </button>
+          <button
+            className={cx("screen-whitelist-button", whitelisted && "screen-whitelist-button--active")}
+            type="button"
+            disabled={whitelistBusy || !target.serial.trim()}
+            title={whitelisted ? t("removeFromWhitelist", { ns: "screen" }) : t("addToWhitelist", { ns: "screen" })}
+            onClick={(event) => {
+              event.stopPropagation();
+              onToggleWhitelist(target);
+            }}
+          >
+            {whitelisted ? <ShieldMinus size={12} aria-hidden="true" /> : <ShieldPlus size={12} aria-hidden="true" />}
+            <span>{whitelisted ? t("removeFromWhitelistShort", { ns: "screen" }) : t("addToWhitelist", { ns: "screen" })}</span>
+          </button>
+        </span>
       </div>
 
-      <span className={`screen-target-countdown screen-target-countdown--${timeTone}`}>
-        <TimerReset size={12} aria-hidden="true" />
-        <em>{t("targetDisappearCountdown", { ns: "screen" })}</em>
-        <strong>{remainingSeconds === null ? "--:--" : formatCountdown(remainingSeconds)}</strong>
-      </span>
+      {showCountdown ? (
+        <span className={`screen-target-countdown screen-target-countdown--${timeTone}`}>
+          <TimerReset size={12} aria-hidden="true" />
+          <em>{t("targetDisappearCountdown", { ns: "screen" })}</em>
+          <strong>{remainingSeconds === null ? "--:--" : formatCountdown(remainingSeconds)}</strong>
+        </span>
+      ) : null}
 
       {pendingEncrypted ? (
         <div className="screen-position-card__metrics screen-position-card__metrics--pending screen-target-readouts">
@@ -1101,6 +1201,17 @@ function PositionTargetCard({
                 onOpenNavigationQRCode={onOpenNavigationQRCode}
               />
             </div>
+          </div>
+
+          <div className="screen-position-card__relations screen-target-readouts">
+            <span className="screen-target-readout">
+              <em>{t("positionPilotDistance", { ns: "screen" })}</em>
+              <strong>{formatPositionDistance(target.pilotDistanceM)}</strong>
+            </span>
+            <span className="screen-target-readout">
+              <em>{t("positionDroneDistance", { ns: "screen" })}</em>
+              <strong>{formatPositionDistance(target.droneDistanceM)}</strong>
+            </span>
           </div>
 
           <div className="screen-position-card__metrics screen-target-readouts">
@@ -1231,6 +1342,7 @@ function DeceptionDeviceStatusModal({
 	status,
 	loading,
 	error,
+	developerActive,
 	t,
 	onRefresh,
 	onClose,
@@ -1238,14 +1350,20 @@ function DeceptionDeviceStatusModal({
 	status: ScreenDeceptionDeviceStatus | null;
 	loading: boolean;
 	error: string;
+	developerActive: boolean;
 	t: TFunction;
 	onRefresh: () => void;
 	onClose: () => void;
 }) {
 	const rawEntries = Object.entries(status?.rawDescriptions ?? {});
 	const queryErrorEntries = Object.entries(status?.queryErrors ?? {});
-	const [rawDescriptionsOpen, setRawDescriptionsOpen] = useState(rawEntries.length > 0);
+	const shouldOpenRawDescriptions = developerActive && rawEntries.length > 0 && queryErrorEntries.length === 0;
+	const [rawDescriptionsOpen, setRawDescriptionsOpen] = useState(shouldOpenRawDescriptions);
 	const tone = getDeceptionDeviceStatusTone(status, loading);
+	const serialActive = typeof status?.serialActive === "boolean" ? status.serialActive : undefined;
+	const transmitActive = typeof status?.transmitMask === "number" ? status.transmitMask > 0 : undefined;
+	const pseudoSignalActive = typeof status?.deviceSignal?.transmitSwitch === "boolean" ? status.deviceSignal.transmitSwitch : undefined;
+	const oscillatorHealthy = getOscillatorHealthy(status?.oscillatorState);
 	const transmitMask = typeof status?.transmitMask === "number"
 		? `0x${status.transmitMask.toString(16).toUpperCase().padStart(4, "0")}`
 		: "-";
@@ -1259,10 +1377,8 @@ function DeceptionDeviceStatusModal({
 			: [];
 
 	useEffect(() => {
-		if (rawEntries.length > 0) {
-			setRawDescriptionsOpen(true);
-		}
-	}, [rawEntries.length]);
+		setRawDescriptionsOpen(shouldOpenRawDescriptions);
+	}, [shouldOpenRawDescriptions]);
 
 	return (
 		<div className="screen-navigation-modal app-modal-backdrop" role="presentation" onClick={onClose}>
@@ -1290,149 +1406,139 @@ function DeceptionDeviceStatusModal({
 						{loading ? <Loader2 className="app-spinner" size={13} aria-hidden="true" /> : <RefreshCw size={13} aria-hidden="true" />}
 						<span>{t("refresh", { ns: "common" })}</span>
 					</button>
+					<span className={cx("screen-device-status-modal__tone", `screen-device-status-modal__tone--${tone}`)} aria-hidden="true" />
 				</div>
 
-				<div className="screen-device-status-modal__summary">
-					<StatusSummaryItem
-						icon={<RadioTower size={15} />}
-						label={t("deceptionStatusConnection", { ns: "screen" })}
-						value={status?.serialActive ? t("online", { ns: "screen" }) : t("offline", { ns: "screen" })}
-						tone={status?.serialActive ? "normal" : "offline"}
-					/>
-					<StatusSummaryItem
-						icon={<SatelliteDish size={15} />}
-						label={t("deceptionStatusTransmit", { ns: "screen" })}
-						value={formatOnOff((status?.transmitMask ?? 0) > 0, t)}
-						tone={(status?.transmitMask ?? 0) > 0 ? "active" : "offline"}
-					/>
-					<StatusSummaryItem
-						icon={<ClockIcon />}
-						label={t("deceptionStatusSync", { ns: "screen" })}
-						value={formatBooleanStatus(status?.syncStatus?.timeSynced, t)}
-						tone={status?.syncStatus?.timeSynced ? "normal" : "warning"}
-					/>
-					<StatusSummaryItem
-						icon={<Cpu size={15} />}
-						label={t("deceptionStatusOscillator", { ns: "screen" })}
-						value={status?.oscillatorState ? t(`deceptionOscillator.${status.oscillatorState}`, { ns: "screen" }) : "-"}
-						tone={status?.oscillatorState === "locked" || status?.oscillatorState === "hold" ? "normal" : "warning"}
-					/>
-					<StatusSummaryItem
-						icon={<Thermometer size={15} />}
-						label={t("deceptionStatusTemperature", { ns: "screen" })}
-						value={formatOptionalNumber(status?.temperatureC, "°C", 1)}
-						tone="neutral"
-					/>
-					<StatusSummaryItem
-						icon={<ScanSearch size={15} />}
-						label={t("deceptionStatusPseudoSignals", { ns: "screen" })}
-						value={formatSignalList(status?.deviceSignal?.signalNames)}
-						tone={status?.deviceSignal?.transmitSwitch ? "active" : "neutral"}
-					/>
+				<div className="screen-device-status-modal__scroll">
+					<div className="screen-device-status-modal__summary">
+						<StatusSummaryItem
+							icon={<RadioTower size={15} />}
+							label={t("deceptionStatusConnection", { ns: "screen" })}
+							value={<StatusLight value={serialActive} label={formatOnlineOffline(serialActive, t)} />}
+							tone={status?.serialActive ? "normal" : "offline"}
+						/>
+						<StatusSummaryItem
+							icon={<SatelliteDish size={15} />}
+							label={t("deceptionStatusTransmit", { ns: "screen" })}
+							value={<StatusLight value={transmitActive} label={formatOnOff(transmitActive, t)} />}
+							tone={(status?.transmitMask ?? 0) > 0 ? "active" : "offline"}
+						/>
+						<StatusSummaryItem
+							icon={<ClockIcon />}
+							label={t("deceptionStatusSync", { ns: "screen" })}
+							value={<StatusLight value={status?.syncStatus?.timeSynced} label={formatBooleanStatus(status?.syncStatus?.timeSynced, t)} />}
+							tone={status?.syncStatus?.timeSynced ? "normal" : "warning"}
+						/>
+						<StatusSummaryItem
+							icon={<Cpu size={15} />}
+							label={t("deceptionStatusOscillator", { ns: "screen" })}
+							value={<StatusLight value={oscillatorHealthy} label={status?.oscillatorState ? t(`deceptionOscillator.${status.oscillatorState}`, { ns: "screen" }) : "-"} />}
+							tone={status?.oscillatorState === "locked" || status?.oscillatorState === "hold" ? "normal" : "warning"}
+						/>
+						<StatusSummaryItem
+							icon={<Thermometer size={15} />}
+							label={t("deceptionStatusTemperature", { ns: "screen" })}
+							value={formatOptionalNumber(status?.temperatureC, "°C", 1)}
+							tone="neutral"
+						/>
+						<StatusSummaryItem
+							icon={<ScanSearch size={15} />}
+							label={t("deceptionStatusPseudoSignals", { ns: "screen" })}
+							value={<StatusLight value={pseudoSignalActive} label={formatSignalList(status?.deviceSignal?.signalNames)} />}
+							tone={status?.deviceSignal?.transmitSwitch ? "active" : "neutral"}
+						/>
+					</div>
+
+					{error || status?.lastError ? (
+						<p className="screen-device-status-modal__error">{error || status?.lastError}</p>
+					) : null}
+
+					<div className="screen-device-status-modal__sections">
+						<StatusSection title={t("deceptionStatusOverview", { ns: "screen" })}>
+							<StatusRow label={t("deceptionStatusConnection", { ns: "screen" })} value={<StatusLight value={serialActive} label={formatOnlineOffline(serialActive, t)} />} />
+							<StatusRow label={t("deceptionStatusTransmit", { ns: "screen" })} value={<StatusLight value={transmitActive} label={formatOnOff(transmitActive, t)} detail={transmitMask} />} />
+							<StatusRow label={t("deceptionStatusAmplifier", { ns: "screen" })} value={<OnOffStatusLight value={status?.amplifierOn} t={t} />} />
+							<StatusRow label={t("deceptionStatusAutoTransmit", { ns: "screen" })} value={<OnOffStatusLight value={status?.autoTransmit} t={t} />} />
+							<StatusRow label={t("deceptionStatusTimedSearch", { ns: "screen" })} value={<OnOffStatusLight value={status?.timedSearch} t={t} />} />
+						</StatusSection>
+
+						<StatusSection title={t("deceptionStatusPositioning", { ns: "screen" })}>
+							<StatusRow label={t("deceptionStatusCurrentPosition", { ns: "screen" })} value={formatStatusPoint(status?.currentPosition)} />
+							<StatusRow label={t("deceptionStatusSimulatedPosition", { ns: "screen" })} value={formatStatusPoint(status?.simulatedPosition)} />
+							<StatusRow label={t("deceptionStatusQueriedDevicePosition", { ns: "screen" })} value={formatStatusPoint(status?.queriedDevicePosition)} />
+							<StatusRow label={t("deceptionStatusQueriedSimulatedPosition", { ns: "screen" })} value={formatStatusPoint(status?.queriedSimulatedPosition)} />
+							<StatusRow label={t("deceptionStatusTargetPosition", { ns: "screen" })} value={formatTargetPosition(status?.targetPosition)} />
+							<StatusRow label={t("deceptionStatusReceiverWorking", { ns: "screen" })} value={<BooleanStatusLight value={status?.syncStatus?.receiverWorking} t={t} />} />
+							<StatusRow label={t("deceptionStatusReceiverPositioned", { ns: "screen" })} value={<BooleanStatusLight value={status?.syncStatus?.receiverPositioned} t={t} />} />
+							<StatusRow label={t("deceptionStatusAntenna", { ns: "screen" })} value={<BooleanStatusLight value={status?.syncStatus?.antennaOk} t={t} />} />
+							<StatusRow label={t("deceptionStatusTimeSynced", { ns: "screen" })} value={<BooleanStatusLight value={status?.syncStatus?.timeSynced} t={t} />} />
+						</StatusSection>
+
+						<StatusSection title={t("deceptionStatusSignals", { ns: "screen" })}>
+							<StatusRow label={t("deceptionStatusTransmitSignals", { ns: "screen" })} value={<StatusLight value={transmitActive} label={formatSignalList(status?.transmitSignals)} detail={transmitMask} />} />
+							<StatusRow label={t("deceptionStatusSignalMask", { ns: "screen" })} value={deviceSignalMask} />
+							<StatusRow label={t("deceptionStatusAttenuation", { ns: "screen" })} value={formatAttenuation(status?.attenuation)} />
+							<StatusRow label={t("deceptionStatusDelay", { ns: "screen" })} value={formatDelay(status?.delayBySignalNs, status?.delayNS)} />
+							<StatusRow label={t("deceptionStatusSuppression", { ns: "screen" })} value={<StatusLight value={status?.suppression?.transmitOn} label={formatSuppression(status?.suppression, t)} />} />
+						</StatusSection>
+
+						<StatusSection title={t("deceptionStatusPseudoSignals", { ns: "screen" })} className="screen-device-status-section--wide">
+							<DeviceSignalStatusTable signals={deviceSignals} t={t} />
+						</StatusSection>
+
+						<StatusSection title={t("deceptionStatusMotion", { ns: "screen" })}>
+							<StatusRow label={t("deceptionStatusMaxSpeed", { ns: "screen" })} value={formatOptionalNumber(status?.motion?.maxSpeedMps, "m/s", 1)} />
+							<StatusRow label={t("deceptionStatusInitialSpeed", { ns: "screen" })} value={formatOptionalNumber(status?.motion?.initialSpeedMps, "m/s", 1)} />
+							<StatusRow label={t("deceptionStatusInitialDirection", { ns: "screen" })} value={formatOptionalNumber(status?.motion?.initialDirectionDeg, "°", 0)} />
+							<StatusRow label={t("deceptionStatusAcceleration", { ns: "screen" })} value={formatOptionalNumber(status?.motion?.accelerationMps2, "m/s²", 1)} />
+							<StatusRow label={t("deceptionStatusAccelerationDirection", { ns: "screen" })} value={formatOptionalNumber(status?.motion?.accelerationDirectionDeg, "°", 0)} />
+							<StatusRow label={t("deceptionStatusCircle", { ns: "screen" })} value={formatCircleMotion(status?.motion, t)} />
+							<StatusRow label={t("deceptionStatusSpoofCircle", { ns: "screen" })} value={formatSpoofCircle(status?.spoofCircle, t)} />
+							<StatusRow label={t("deceptionStatusRandomPosition", { ns: "screen" })} value={<StatusLight value={status?.random?.enabled} label={formatRandomPosition(status?.random, t)} />} />
+						</StatusSection>
+
+						<StatusSection title={t("deceptionStatusSystem", { ns: "screen" })}>
+							<StatusRow label={t("deceptionStatusSystemTime", { ns: "screen" })} value={formatStatusTime(status?.systemTime)} />
+							<StatusRow label={t("deceptionStatusReportedSystemTime", { ns: "screen" })} value={formatStatusTime(status?.reportedSystemTime)} />
+							<StatusRow label={t("deceptionStatusVersion", { ns: "screen" })} value={formatVersionStatus(status?.version)} />
+							<StatusRow label={t("deceptionStatusTimePrecision", { ns: "screen" })} value={formatOptionalNumber(status?.timePrecisionNs, "ns", 1)} />
+							<StatusRow label={t("deceptionStatusUptime", { ns: "screen" })} value={formatDurationSeconds(status?.uptimeSeconds)} />
+							<StatusRow label={t("deceptionStatusLeapSecond", { ns: "screen" })} value={<BooleanStatusLight value={status?.syncStatus?.leapSecondValid} t={t} />} />
+							<StatusRow label={t("deceptionStatusFirstTimeSynced", { ns: "screen" })} value={<BooleanStatusLight value={status?.firstTimeSynced} t={t} />} />
+						</StatusSection>
+					</div>
+
+					{queryErrorEntries.length > 0 ? (
+						<details className="screen-device-status-modal__raw screen-device-status-modal__raw--errors">
+							<summary>{t("deceptionStatusQueryErrors", { ns: "screen" })}</summary>
+							{queryErrorEntries.map(([key, value]) => (
+								<code key={key}>
+									<strong>{t(`deceptionStatusRaw.${key}`, { ns: "screen", defaultValue: key })}</strong>
+									<span>{value}</span>
+								</code>
+							))}
+						</details>
+					) : null}
+
+					{developerActive ? (
+						<details
+							className="screen-device-status-modal__raw"
+							open={rawDescriptionsOpen}
+							onToggle={(event) => setRawDescriptionsOpen(event.currentTarget.open)}
+						>
+							<summary>
+								<span>{t("deceptionStatusRawDescriptions", { ns: "screen" })}</span>
+								<em>{rawEntries.length}</em>
+							</summary>
+							{rawEntries.length > 0 ? rawEntries.map(([key, value]) => (
+								<code key={key}>
+									<strong>{t(`deceptionStatusRaw.${key}`, { ns: "screen", defaultValue: key })}</strong>
+									<pre>{value}</pre>
+								</code>
+							)) : <span>{t("noData", { ns: "screen" })}</span>}
+						</details>
+					) : null}
 				</div>
-
-				{error || status?.lastError ? (
-					<p className="screen-device-status-modal__error">{error || status?.lastError}</p>
-				) : null}
-
-				<div className="screen-device-status-modal__sections">
-					<StatusSection title={t("deceptionStatusOverview", { ns: "screen" })}>
-						<StatusRow label={t("deceptionStatusConnection", { ns: "screen" })} value={status?.serialActive ? t("online", { ns: "screen" }) : t("offline", { ns: "screen" })} />
-						<StatusRow label={t("deceptionStatusTransmit", { ns: "screen" })} value={`${formatOnOff((status?.transmitMask ?? 0) > 0, t)} / ${transmitMask}`} />
-						<StatusRow label={t("deceptionStatusAmplifier", { ns: "screen" })} value={formatOnOff(status?.amplifierOn, t)} />
-						<StatusRow label={t("deceptionStatusAutoTransmit", { ns: "screen" })} value={formatOnOff(status?.autoTransmit, t)} />
-						<StatusRow label={t("deceptionStatusTimedSearch", { ns: "screen" })} value={formatOnOff(status?.timedSearch, t)} />
-					</StatusSection>
-
-					<StatusSection title={t("deceptionStatusPositioning", { ns: "screen" })}>
-						<StatusRow label={t("deceptionStatusCurrentPosition", { ns: "screen" })} value={formatStatusPoint(status?.currentPosition)} />
-						<StatusRow label={t("deceptionStatusSimulatedPosition", { ns: "screen" })} value={formatStatusPoint(status?.simulatedPosition)} />
-						<StatusRow label={t("deceptionStatusQueriedDevicePosition", { ns: "screen" })} value={formatStatusPoint(status?.queriedDevicePosition)} />
-						<StatusRow label={t("deceptionStatusQueriedSimulatedPosition", { ns: "screen" })} value={formatStatusPoint(status?.queriedSimulatedPosition)} />
-						<StatusRow label={t("deceptionStatusTargetPosition", { ns: "screen" })} value={formatTargetPosition(status?.targetPosition)} />
-						<StatusRow label={t("deceptionStatusReceiverWorking", { ns: "screen" })} value={formatBooleanStatus(status?.syncStatus?.receiverWorking, t)} />
-						<StatusRow label={t("deceptionStatusReceiverPositioned", { ns: "screen" })} value={formatBooleanStatus(status?.syncStatus?.receiverPositioned, t)} />
-						<StatusRow label={t("deceptionStatusAntenna", { ns: "screen" })} value={formatBooleanStatus(status?.syncStatus?.antennaOk, t)} />
-						<StatusRow label={t("deceptionStatusTimeSynced", { ns: "screen" })} value={formatBooleanStatus(status?.syncStatus?.timeSynced, t)} />
-					</StatusSection>
-
-					<StatusSection title={t("deceptionStatusSignals", { ns: "screen" })}>
-						<StatusRow label={t("deceptionStatusTransmitSignals", { ns: "screen" })} value={`${formatSignalList(status?.transmitSignals)} / ${transmitMask}`} />
-						<StatusRow label={t("deceptionStatusSignalMask", { ns: "screen" })} value={deviceSignalMask} />
-						<StatusRow label={t("deceptionStatusAttenuation", { ns: "screen" })} value={formatAttenuation(status?.attenuation)} />
-						<StatusRow label={t("deceptionStatusDelay", { ns: "screen" })} value={formatDelay(status?.delayBySignalNs, status?.delayNS)} />
-						<StatusRow label={t("deceptionStatusSuppression", { ns: "screen" })} value={formatSuppression(status?.suppression, t)} />
-					</StatusSection>
-
-					<StatusSection title={t("deceptionStatusPseudoSignals", { ns: "screen" })}>
-						<StatusRow label={t("deceptionStatusPseudoSignals", { ns: "screen" })} value={formatSignalList(status?.deviceSignal?.signalNames)} />
-						<StatusRow label={t("deceptionStatusPseudoTransmit", { ns: "screen" })} value={formatOnOff(status?.deviceSignal?.transmitSwitch, t)} />
-						<StatusRow label={t("deceptionStatusSignalWork", { ns: "screen" })} value={formatSignalWorkStatus(status?.deviceSignal?.workStatus, t)} />
-						<StatusRow label={t("deceptionStatusReceivedSatellites", { ns: "screen" })} value={formatSatelliteStatus(status?.deviceSignal?.receivedSatelliteCount, status?.deviceSignal?.receivedPrns)} />
-						<StatusRow label={t("deceptionStatusReceivedCn0", { ns: "screen" })} value={formatNumberList(status?.deviceSignal?.receivedCn0)} />
-						<StatusRow label={t("deceptionStatusTransmittedSatellites", { ns: "screen" })} value={formatSatelliteStatus(status?.deviceSignal?.transmittedCount, status?.deviceSignal?.transmittedPrns)} />
-						<StatusRow label={t("deceptionStatusDeviceSignalDelay", { ns: "screen" })} value={formatOptionalNumber(status?.deviceSignal?.delayNs, "ns", 1)} />
-						{deviceSignals.map((signal) => (
-							<StatusRow
-								key={`${signal.signalMask}-${signal.workStatus.raw}`}
-								label={formatSignalList(signal.signalNames)}
-								value={formatDeviceSignalDetail(signal, t)}
-							/>
-						))}
-					</StatusSection>
-
-					<StatusSection title={t("deceptionStatusMotion", { ns: "screen" })}>
-						<StatusRow label={t("deceptionStatusMaxSpeed", { ns: "screen" })} value={formatOptionalNumber(status?.motion?.maxSpeedMps, "m/s", 1)} />
-						<StatusRow label={t("deceptionStatusInitialSpeed", { ns: "screen" })} value={formatOptionalNumber(status?.motion?.initialSpeedMps, "m/s", 1)} />
-						<StatusRow label={t("deceptionStatusInitialDirection", { ns: "screen" })} value={formatOptionalNumber(status?.motion?.initialDirectionDeg, "°", 0)} />
-						<StatusRow label={t("deceptionStatusAcceleration", { ns: "screen" })} value={formatOptionalNumber(status?.motion?.accelerationMps2, "m/s²", 1)} />
-						<StatusRow label={t("deceptionStatusAccelerationDirection", { ns: "screen" })} value={formatOptionalNumber(status?.motion?.accelerationDirectionDeg, "°", 0)} />
-						<StatusRow label={t("deceptionStatusCircle", { ns: "screen" })} value={formatCircleMotion(status?.motion, t)} />
-						<StatusRow label={t("deceptionStatusSpoofCircle", { ns: "screen" })} value={formatSpoofCircle(status?.spoofCircle, t)} />
-						<StatusRow label={t("deceptionStatusRandomPosition", { ns: "screen" })} value={formatRandomPosition(status?.random, t)} />
-					</StatusSection>
-
-					<StatusSection title={t("deceptionStatusSystem", { ns: "screen" })}>
-						<StatusRow label={t("deceptionStatusSystemTime", { ns: "screen" })} value={formatStatusTime(status?.systemTime)} />
-						<StatusRow label={t("deceptionStatusReportedSystemTime", { ns: "screen" })} value={formatStatusTime(status?.reportedSystemTime)} />
-						<StatusRow label={t("deceptionStatusVersion", { ns: "screen" })} value={formatVersionStatus(status?.version)} />
-						<StatusRow label={t("deceptionStatusTimePrecision", { ns: "screen" })} value={formatOptionalNumber(status?.timePrecisionNs, "ns", 1)} />
-						<StatusRow label={t("deceptionStatusUptime", { ns: "screen" })} value={formatDurationSeconds(status?.uptimeSeconds)} />
-						<StatusRow label={t("deceptionStatusLeapSecond", { ns: "screen" })} value={formatBooleanStatus(status?.syncStatus?.leapSecondValid, t)} />
-						<StatusRow label={t("deceptionStatusFirstTimeSynced", { ns: "screen" })} value={formatBooleanStatus(status?.firstTimeSynced, t)} />
-					</StatusSection>
-				</div>
-
-				{queryErrorEntries.length > 0 ? (
-					<details className="screen-device-status-modal__raw screen-device-status-modal__raw--errors">
-						<summary>{t("deceptionStatusQueryErrors", { ns: "screen" })}</summary>
-						{queryErrorEntries.map(([key, value]) => (
-							<code key={key}>
-								<strong>{t(`deceptionStatusRaw.${key}`, { ns: "screen", defaultValue: key })}</strong>
-								<span>{value}</span>
-							</code>
-						))}
-					</details>
-				) : null}
-
-					<details
-						className="screen-device-status-modal__raw"
-						open={rawDescriptionsOpen}
-						onToggle={(event) => setRawDescriptionsOpen(event.currentTarget.open)}
-					>
-						<summary>
-							<span>{t("deceptionStatusRawDescriptions", { ns: "screen" })}</span>
-							<em>{rawEntries.length}</em>
-						</summary>
-						{rawEntries.length > 0 ? rawEntries.map(([key, value]) => (
-							<code key={key}>
-								<strong>{t(`deceptionStatusRaw.${key}`, { ns: "screen", defaultValue: key })}</strong>
-								<pre>{value}</pre>
-							</code>
-						)) : <span>{t("noData", { ns: "screen" })}</span>}
-					</details>
-
-				<span className={cx("screen-device-status-modal__tone", `screen-device-status-modal__tone--${tone}`)} aria-hidden="true" />
 			</section>
 		</div>
 	);
@@ -1450,7 +1556,7 @@ function StatusSummaryItem({
 }: {
 	icon: ReactNode;
 	label: string;
-	value: string;
+	value: ReactNode;
 	tone: "normal" | "active" | "warning" | "offline" | "neutral";
 }) {
 	return (
@@ -1465,24 +1571,114 @@ function StatusSummaryItem({
 function StatusSection({
 	title,
 	children,
+	className,
 }: {
 	title: string;
 	children: ReactNode;
+	className?: string;
 }) {
 	return (
-		<section className="screen-device-status-section">
+		<section className={cx("screen-device-status-section", className)}>
 			<h3>{title}</h3>
 			<div>{children}</div>
 		</section>
 	);
 }
 
-function StatusRow({ label, value }: { label: string; value: string }) {
+function StatusRow({ label, value }: { label: string; value: ReactNode }) {
 	return (
 		<span className="screen-device-status-row">
 			<em>{label}</em>
 			<strong>{value}</strong>
 		</span>
+	);
+}
+
+function StatusLight({
+	value,
+	label,
+	detail,
+	tone,
+}: {
+	value: boolean | undefined;
+	label: string;
+	detail?: string;
+	tone?: "on" | "off" | "warning" | "unknown";
+}) {
+	const resolvedTone = tone ?? (typeof value === "boolean" ? (value ? "on" : "off") : "unknown");
+
+	return (
+		<span className={cx("screen-device-status-light", `screen-device-status-light--${resolvedTone}`)}>
+			<span className="screen-device-status-light__dot" aria-hidden="true" />
+			<span className="screen-device-status-light__label">{label}</span>
+			{detail ? <span className="screen-device-status-light__detail">{detail}</span> : null}
+		</span>
+	);
+}
+
+function OnOffStatusLight({ value, t }: { value: boolean | undefined; t: TFunction }) {
+	return <StatusLight value={value} label={formatOnOff(value, t)} />;
+}
+
+function BooleanStatusLight({ value, t }: { value: boolean | undefined; t: TFunction }) {
+	return <StatusLight value={value} label={formatBooleanStatus(value, t)} />;
+}
+
+function SignalWorkStatusLight({
+	status,
+	t,
+}: {
+	status: ScreenDeceptionSignalWorkStatus | undefined;
+	t: TFunction;
+}) {
+	const normal = isSignalWorkNormal(status);
+	return <StatusLight value={normal} label={formatSignalWorkStatus(status, t)} />;
+}
+
+function DeviceSignalStatusTable({
+	signals,
+	t,
+}: {
+	signals: ScreenDeceptionDeviceSignalStatus[];
+	t: TFunction;
+}) {
+	if (signals.length === 0) {
+		return <span className="screen-device-status-table__empty">{t("noData", { ns: "screen" })}</span>;
+	}
+
+	return (
+		<div className="screen-device-status-table" role="table" aria-label={t("deceptionStatusPseudoSignals", { ns: "screen" })}>
+			<div className="screen-device-status-table__head" role="row">
+				<span role="columnheader">{t("signal", { ns: "screen" })}</span>
+				<span role="columnheader">{t("deceptionStatusSignalMask", { ns: "screen" })}</span>
+				<span role="columnheader">{t("deceptionStatusPseudoTransmit", { ns: "screen" })}</span>
+				<span role="columnheader">{t("deceptionStatusSignalWork", { ns: "screen" })}</span>
+				<span role="columnheader">{t("deceptionStatusReceivedSatellites", { ns: "screen" })}</span>
+				<span role="columnheader">{t("deceptionStatusReceivedCn0", { ns: "screen" })}</span>
+				<span role="columnheader">{t("deceptionStatusTransmittedSatellites", { ns: "screen" })}</span>
+				<span role="columnheader">{t("deceptionStatusDeviceSignalDelay", { ns: "screen" })}</span>
+				<span role="columnheader">{t("deceptionStatusAttenuation", { ns: "screen" })}</span>
+			</div>
+			<div className="screen-device-status-table__body" role="rowgroup">
+				{signals.map((signal, index) => (
+					<div
+						key={`${index}-${signal.signalMask}-${signal.workStatus.raw}`}
+						className="screen-device-status-table__row"
+						role="row"
+					>
+						<span role="cell">{formatSignalList(signal.signalNames)}</span>
+						<span role="cell">{formatDeviceSignalMask(signal.signalMask)}</span>
+						<span role="cell"><OnOffStatusLight value={signal.transmitSwitch} t={t} /></span>
+						<span role="cell"><SignalWorkStatusLight status={signal.workStatus} t={t} /></span>
+						<span role="cell">{formatSatelliteStatus(signal.receivedSatelliteCount, signal.receivedPrns)}</span>
+						<span role="cell">{formatNumberList(signal.receivedCn0)}</span>
+						<span role="cell">{formatSatelliteStatus(signal.transmittedCount, signal.transmittedPrns)}</span>
+						<span role="cell">{formatOptionalNumber(signal.delayNs, "ns", 1)}</span>
+						<span role="cell">{formatOptionalNumber(signal.attenuationDb, "dB", 1)}</span>
+					</div>
+				))}
+			</div>
+		</div>
 	);
 }
 
@@ -1549,15 +1745,8 @@ function formatSignalWorkStatus(
 	return abnormal.join(" / ");
 }
 
-function formatDeviceSignalDetail(signal: ScreenDeceptionDeviceSignalStatus, t: TFunction) {
-	const mask = `0x${signal.signalMask.toString(16).toUpperCase().padStart(4, "0")}`;
-	return [
-		`${t("deceptionStatusSignalMask", { ns: "screen" })} ${mask}`,
-		`${t("deceptionStatusPseudoTransmit", { ns: "screen" })} ${formatOnOff(signal.transmitSwitch, t)}`,
-		`${t("deceptionStatusSignalWork", { ns: "screen" })} ${formatSignalWorkStatus(signal.workStatus, t)}`,
-		`${t("deceptionStatusDeviceSignalDelay", { ns: "screen" })} ${formatOptionalNumber(signal.delayNs, "ns", 1)}`,
-		`${t("deceptionStatusAttenuation", { ns: "screen" })} ${signal.attenuationDb}dB`,
-	].join(" / ");
+function formatDeviceSignalMask(mask: number) {
+	return `0x${mask.toString(16).toUpperCase().padStart(4, "0")}`;
 }
 
 function formatCircleMotion(motion: ScreenDeceptionDeviceStatus["motion"], t: TFunction) {
@@ -1634,6 +1823,7 @@ function ScreenStrikePanel({
 	onDeceptionStateChange,
 	onOpenDeceptionStatus,
 	onRefreshDeceptionStatus,
+	onOperationTabChange,
 	onToggleCollapsed,
 }: {
 	state: ScreenStrikeState | null;
@@ -1651,6 +1841,7 @@ function ScreenStrikePanel({
 	onDeceptionStateChange: (state: ScreenDeceptionState) => void;
 	onOpenDeceptionStatus: () => void;
 	onRefreshDeceptionStatus: () => void;
+	onOperationTabChange: (tab: ScreenOperationTab) => void;
 	onToggleCollapsed: () => void;
 }) {
   const [hovered, setHovered] = useState(false);
@@ -1727,11 +1918,14 @@ function ScreenStrikePanel({
     : "";
   const hasDeceptionPanelMessages = Boolean(
     deceptionDisabledReason ||
-    deceptionState?.summary ||
     deceptionState?.unsupportedReason ||
     deceptionState?.lastError ||
     error,
   );
+
+  useEffect(() => {
+    onOperationTabChange(operationTab);
+  }, [onOperationTabChange, operationTab]);
 
   useEffect(() => {
     if (operationTab === "deception" && !deceptionConfigured) {
@@ -2015,9 +2209,6 @@ function ScreenStrikePanel({
                   {deceptionDisabledReason ? (
                     <p className="screen-strike-panel__hint">{deceptionDisabledReason}</p>
                   ) : null}
-                  {deceptionState?.summary ? (
-                    <p className="screen-strike-panel__hint">{deceptionState.summary}</p>
-                  ) : null}
                   {deceptionState?.unsupportedReason ? (
                     <p className="screen-strike-panel__error">{deceptionState.unsupportedReason}</p>
                   ) : null}
@@ -2255,10 +2446,14 @@ function RightList({
   targets,
   positions,
   screenStatus,
+  userSettings,
+  whitelistBusySerial,
+  alarmCounts,
   now,
   collapsed,
   onSelectTarget,
   onSelectPosition,
+  onToggleWhitelist,
   onOpenNavigationQRCode,
   onToggleCollapsed,
 }: {
@@ -2267,10 +2462,14 @@ function RightList({
   targets: ScreenDetectionTarget[];
   positions: ScreenPositionTarget[];
   screenStatus: ScreenRuntimeStatus | null;
+  userSettings: UserSettings;
+  whitelistBusySerial: string;
+  alarmCounts: ScreenAlarmSourceCount[];
   now: Date;
   collapsed: boolean;
   onSelectTarget: (target: ScreenDetectionTarget) => void;
   onSelectPosition: (target: ScreenPositionTarget) => void;
+  onToggleWhitelist: (target: ScreenPositionTarget) => void;
   onOpenNavigationQRCode: (label: string, point: ScreenPositionPoint) => void;
   onToggleCollapsed: () => void;
 }) {
@@ -2299,6 +2498,7 @@ function RightList({
   const activeLabel = availableTabs.length > 0
     ? t(`tabs.${tab}`, { ns: "screen" })
     : t("targetList", { ns: "screen" });
+  const activeAlarmCount = alarmCounts.find((item) => item.kind === tab)?.count ?? 0;
 
   if (!detectionConfigured) {
     return null;
@@ -2331,7 +2531,15 @@ function RightList({
               <strong>{activeLabel}</strong>
             </span>
           </div>
-          <strong className="screen-info-list__count">{activeCount}</strong>
+          <span className="screen-info-list__counts">
+            {activeAlarmCount > 0 ? (
+              <strong className="screen-info-list__alarm-count">
+                <BellRing size={12} aria-hidden="true" />
+                {activeAlarmCount}
+              </strong>
+            ) : null}
+            <strong className="screen-info-list__count">{activeCount}</strong>
+          </span>
         </div>
 
         <div className="screen-list">
@@ -2346,7 +2554,6 @@ function RightList({
               targets={visibleTargets}
               selectedId={selectedId}
               t={t}
-              now={now}
               onSelect={onSelectTarget}
             />
           ) : tab === "position" && positions.length ? (
@@ -2355,9 +2562,12 @@ function RightList({
                 key={target.id}
                 target={target}
                 selected={selectedId === target.id}
+                whitelisted={isSerialWhitelisted(target.serial, userSettings.whitelist)}
+                whitelistBusy={whitelistBusySerial === target.serial.trim().toLowerCase()}
                 t={t}
                 now={now}
                 onSelect={onSelectPosition}
+                onToggleWhitelist={onToggleWhitelist}
                 onOpenNavigationQRCode={onOpenNavigationQRCode}
               />
             ))
@@ -2391,6 +2601,9 @@ function RightList({
                 <span>{t(`tabs.${item}`, { ns: "screen" })}</span>
                 <strong>
                   <span>{getTabCount(item)}</span>
+                  {(alarmCounts.find((count) => count.kind === item)?.count ?? 0) > 0 ? (
+                    <em>{alarmCounts.find((count) => count.kind === item)?.count}</em>
+                  ) : null}
                 </strong>
               </button>
             );
@@ -2420,22 +2633,103 @@ function useNow() {
   return now;
 }
 
+function useScreenAlarmSound(active: boolean) {
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const timerRef = useRef<number | null>(null);
+  const [blocked, setBlocked] = useState(false);
+
+  const stop = useCallback(() => {
+    if (timerRef.current !== null) {
+      window.clearInterval(timerRef.current);
+      timerRef.current = null;
+    }
+  }, []);
+
+  const beep = useCallback(async () => {
+    const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+    if (!AudioContextClass) {
+      return;
+    }
+    const context = audioContextRef.current ?? new AudioContextClass();
+    audioContextRef.current = context;
+    if (context.state === "suspended") {
+      await context.resume();
+    }
+    const oscillator = context.createOscillator();
+    const gain = context.createGain();
+    oscillator.type = "sine";
+    oscillator.frequency.value = 880;
+    gain.gain.setValueAtTime(0.0001, context.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.08, context.currentTime + 0.02);
+    gain.gain.exponentialRampToValueAtTime(0.0001, context.currentTime + 0.32);
+    oscillator.connect(gain);
+    gain.connect(context.destination);
+    oscillator.start();
+    oscillator.stop(context.currentTime + 0.34);
+  }, []);
+
+  const start = useCallback(async () => {
+    try {
+      await beep();
+      setBlocked(false);
+      if (timerRef.current === null) {
+        timerRef.current = window.setInterval(() => {
+          void beep().catch(() => {
+            stop();
+            setBlocked(true);
+          });
+        }, 2600);
+      }
+    } catch {
+      stop();
+      setBlocked(true);
+    }
+  }, [beep, stop]);
+
+  useEffect(() => {
+    if (!active) {
+      stop();
+      setBlocked(false);
+      return;
+    }
+    void start();
+    return stop;
+  }, [active, start, stop]);
+
+  useEffect(() => {
+    return () => {
+      stop();
+      void audioContextRef.current?.close();
+      audioContextRef.current = null;
+    };
+  }, [stop]);
+
+  return {
+    blocked: active && blocked,
+    enable: start,
+  };
+}
+
 export function ScreenPage({
   appTitle,
   t,
   locale,
   localeOptions,
+  developerActive,
   visibleMapLayers,
   onLocaleChange,
   userSettings,
+  onUserSettingsChange,
 }: {
   appTitle: string;
   t: TFunction;
   locale: string;
   localeOptions: string[];
+  developerActive: boolean;
   visibleMapLayers: ReferenceMapLayer[];
   onLocaleChange: (locale: string) => void;
   userSettings: UserSettings;
+  onUserSettingsChange: (settings: UserSettings) => Promise<UserSettings>;
 }) {
   const mapRef = useRef<L.Map | null>(null);
   const [selectedId, setSelectedId] = useState("");
@@ -2452,11 +2746,36 @@ export function ScreenPage({
   const [navigationQRCodeError, setNavigationQRCodeError] = useState("");
   const navigationQRCodeRequestRef = useRef(0);
   const [deceptionDeviceStatus, setDeceptionDeviceStatus] = useState<ScreenDeceptionDeviceStatus | null>(null);
+  const [deceptionPanelActive, setDeceptionPanelActive] = useState(false);
   const [deceptionStatusOpen, setDeceptionStatusOpen] = useState(false);
   const [deceptionStatusLoading, setDeceptionStatusLoading] = useState(false);
   const [deceptionStatusError, setDeceptionStatusError] = useState("");
+  const [whitelistBusySerial, setWhitelistBusySerial] = useState("");
   const deceptionStatusSyncingRef = useRef(false);
   const now = useNow();
+  const fpvTargets = useMemo(() => targets.filter(isFpvTarget), [targets]);
+  const alarmSettings = useMemo(
+    () => resolveScreenAlarmSettings(userSettings.screenAlarmSettings),
+    [userSettings.screenAlarmSettings],
+  );
+  const alarmCounts = useMemo<ScreenAlarmSourceCount[]>(() => {
+    return [
+      {
+        kind: "detection",
+        count: alarmSettings.detection ? countUnwhitelistedSerials(targets, userSettings.whitelist) : 0,
+      },
+      {
+        kind: "position",
+        count: alarmSettings.position ? countUnwhitelistedSerials(positions, userSettings.whitelist) : 0,
+      },
+      {
+        kind: "fpv",
+        count: alarmSettings.fpv ? countUnwhitelistedSerials(fpvTargets, userSettings.whitelist) : 0,
+      },
+    ];
+  }, [alarmSettings.detection, alarmSettings.fpv, alarmSettings.position, fpvTargets, positions, targets, userSettings.whitelist]);
+  const alarmActive = alarmCounts.some((item) => item.count > 0);
+  const alarmSound = useScreenAlarmSound(alarmActive && alarmSettings.sound);
 
   const handleMapReady = useCallback((map: L.Map | null) => {
     mapRef.current = map;
@@ -2473,6 +2792,30 @@ export function ScreenPage({
       mapRef.current.setView([point.latitude, point.longitude], Math.max(mapRef.current.getZoom(), 14), { animate: false });
     }
   }, []);
+
+  const handleToggleWhitelist = useCallback(async (target: ScreenPositionTarget) => {
+    const serial = target.serial.trim();
+    if (!serial) {
+      return;
+    }
+    setWhitelistBusySerial(serial.toLowerCase());
+    try {
+      const whitelisted = isSerialWhitelisted(serial, userSettings.whitelist);
+      const nextWhitelist = whitelisted
+        ? removeWhitelistSerial(userSettings.whitelist, serial)
+        : upsertWhitelistItem(userSettings.whitelist, {
+          serial,
+          model: target.model,
+          source: "screen_position",
+        });
+      await onUserSettingsChange({
+        ...userSettings,
+        whitelist: nextWhitelist,
+      });
+    } finally {
+      setWhitelistBusySerial("");
+    }
+  }, [onUserSettingsChange, userSettings]);
 
   const selectedPosition = positions.find((target) => target.id === selectedId) ?? null;
 
@@ -2561,6 +2904,10 @@ export function ScreenPage({
 
   const handleCloseDeceptionStatus = useCallback(() => {
     setDeceptionStatusOpen(false);
+  }, []);
+
+  const handleOperationTabChange = useCallback((tab: ScreenOperationTab) => {
+    setDeceptionPanelActive(tab === "deception");
   }, []);
 
   useEffect(() => {
@@ -2781,7 +3128,7 @@ export function ScreenPage({
   }, [locale]);
 
   useEffect(() => {
-    if (!deceptionStatusOpen) {
+    if (!deceptionStatusOpen && !deceptionPanelActive) {
       return;
     }
     void syncDeceptionDeviceStatus();
@@ -2789,7 +3136,7 @@ export function ScreenPage({
       void syncDeceptionDeviceStatus();
     }, 2000);
     return () => window.clearInterval(timer);
-  }, [deceptionStatusOpen, syncDeceptionDeviceStatus]);
+  }, [deceptionPanelActive, deceptionStatusOpen, syncDeceptionDeviceStatus]);
 
   useEffect(() => {
     if (screenStatus?.detection.configured === false) {
@@ -2835,6 +3182,7 @@ export function ScreenPage({
         t={t}
         selectedId={selectedId}
         positions={screenStatus?.detection.configured === false ? [] : positions}
+        whitelist={userSettings.whitelist}
         deviceLocation={deviceLocation}
         visibleMapLayers={visibleMapLayers}
         onSelectPosition={handleSelectPosition}
@@ -2847,6 +3195,9 @@ export function ScreenPage({
         now={now}
         locale={locale}
         localeOptions={localeOptions}
+        alarmCounts={alarmCounts}
+        soundBlocked={alarmSound.blocked}
+        onEnableSound={() => void alarmSound.enable()}
         onLocaleChange={onLocaleChange}
         onEnterAdmin={enterAdmin}
       />
@@ -2867,6 +3218,7 @@ export function ScreenPage({
         onDeceptionStateChange={setDeceptionState}
         onOpenDeceptionStatus={handleOpenDeceptionStatus}
         onRefreshDeceptionStatus={syncDeceptionDeviceStatus}
+        onOperationTabChange={handleOperationTabChange}
         onToggleCollapsed={() => setStrikeCollapsed((value) => !value)}
       />
 
@@ -2876,10 +3228,14 @@ export function ScreenPage({
         targets={targets}
         positions={positions}
         screenStatus={screenStatus}
+        userSettings={userSettings}
+        whitelistBusySerial={whitelistBusySerial}
+        alarmCounts={alarmCounts}
         now={now}
         collapsed={rightCollapsed}
         onSelectTarget={handleSelectTarget}
         onSelectPosition={handleSelectPosition}
+        onToggleWhitelist={handleToggleWhitelist}
         onOpenNavigationQRCode={handleOpenNavigationQRCode}
         onToggleCollapsed={() => setRightCollapsed((value) => !value)}
       />
@@ -2898,6 +3254,7 @@ export function ScreenPage({
           status={deceptionDeviceStatus}
           loading={deceptionStatusLoading}
           error={deceptionStatusError}
+          developerActive={developerActive}
           t={t}
           onRefresh={() => void syncDeceptionDeviceStatus()}
           onClose={handleCloseDeceptionStatus}
