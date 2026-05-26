@@ -9,6 +9,7 @@ export type Page =
   | "developer-settings"
   | "gps-records"
   | "intrusions"
+  | "interference-reports"
   | "interference"
   | "network-settings"
   | "settings"

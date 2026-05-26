@@ -25,6 +25,7 @@ import type {
   ScreenDeceptionSignalWorkStatus,
   ScreenDeceptionState,
   ScreenDeviceLocationResponse,
+  ScreenAlarmSettings,
   ScreenPositionPoint,
   ScreenPositionTarget,
   ScreenRuntimeStatus,
@@ -36,6 +37,7 @@ import type {
 import { cx } from "../utils/classnames";
 import footerBg from "../assets/images/screen/footerBg.svg?raw";
 import headerBg from "../assets/images/screen/headerBg.svg?raw";
+import screenAlarmAudio from "../assets/images/screen/audio.mp3";
 import mini2Image from "../assets/images/uav/mini2.png";
 import i18n from "../i18n";
 import { noFlyZonePresets } from "../data/noFlyZones";
@@ -43,6 +45,7 @@ import type { NoFlyZonePreset } from "../data/noFlyZones";
 import { gps84ToGcj02 } from "../utils/leafletCoordConverter";
 import { compactLocaleName } from "../utils/locales";
 import { resolveDisplayModel } from "../utils/models";
+import { extractErrorMessage } from "../utils/session";
 import {
   isSerialWhitelisted,
   removeWhitelistSerial,
@@ -759,9 +762,6 @@ function ScreenHeader({
   now,
   locale,
   localeOptions,
-  alarmCounts,
-  soundBlocked,
-  onEnableSound,
   onLocaleChange,
   onEnterAdmin,
 }: {
@@ -770,19 +770,11 @@ function ScreenHeader({
   now: Date;
   locale: string;
   localeOptions: string[];
-  alarmCounts: ScreenAlarmSourceCount[];
-  soundBlocked: boolean;
-  onEnableSound: () => void;
   onLocaleChange: (locale: string) => void;
   onEnterAdmin: () => void;
 }) {
   const [languageOpen, setLanguageOpen] = useState(false);
   const languageLabel = compactLocaleName(locale);
-  const totalAlarmCount = alarmCounts.reduce((count, item) => count + item.count, 0);
-  const alarmSummary = alarmCounts
-    .filter((item) => item.count > 0)
-    .map((item) => t(`tabs.${item.kind}`, { ns: "screen" }) + ` ${item.count}`)
-    .join(" / ");
 
   return (
     <header className="screen-header">
@@ -794,23 +786,6 @@ function ScreenHeader({
 
       <div className="screen-header__title">
         <h1>{appTitle}</h1>
-        {totalAlarmCount > 0 ? (
-          <div className="screen-alarm-banner" role="alert">
-            <BellRing size={14} aria-hidden="true" />
-            <strong>{t("whitelistAlarmTitle", { ns: "screen", count: totalAlarmCount })}</strong>
-            <span>{alarmSummary}</span>
-            {soundBlocked ? (
-              <button
-                className="screen-alarm-banner__sound"
-                type="button"
-                onClick={onEnableSound}
-              >
-                <Volume2 size={13} aria-hidden="true" />
-                {t("enableSoundAlarm", { ns: "screen" })}
-              </button>
-            ) : null}
-          </div>
-        ) : null}
       </div>
 
       <div className="screen-header__right">
@@ -1381,7 +1356,7 @@ function DeceptionDeviceStatusModal({
 	}, [shouldOpenRawDescriptions]);
 
 	return (
-		<div className="screen-navigation-modal app-modal-backdrop" role="presentation" onClick={onClose}>
+		<div className="screen-navigation-modal screen-device-status-modal-shell app-modal-backdrop" role="presentation" onClick={onClose}>
 			<section
 				className="screen-navigation-modal__card screen-device-status-modal app-modal-card"
 				role="dialog"
@@ -1808,8 +1783,8 @@ function formatDegrees(value: number | undefined) {
 }
 
 function ScreenStrikePanel({
-	state,
-	deceptionState,
+  state,
+  deceptionState,
 	deceptionDeviceStatus,
 	deceptionDeviceStatusLoading,
   screenStatus,
@@ -2440,6 +2415,79 @@ function ScreenStrikePanel({
   );
 }
 
+type ScreenAlarmSettingKey = keyof ScreenAlarmSettings;
+type ScreenAlarmSettingsMessage = { kind: "idle" | "success" | "error"; text: string };
+const screenAlarmOptionSpecs: Array<{
+  key: ScreenAlarmSettingKey;
+  labelKey: string;
+  Icon: typeof BellRing;
+}> = [
+  { key: "detection", labelKey: "screenAlarmDetection", Icon: BellRing },
+  { key: "position", labelKey: "screenAlarmPosition", Icon: ShieldCheck },
+  { key: "fpv", labelKey: "screenAlarmFpv", Icon: Radio },
+  { key: "sound", labelKey: "screenAlarmSound", Icon: Volume2 },
+];
+
+function ScreenAlarmSettingsPanel({
+  t,
+  settings,
+  saving,
+  message,
+  soundBlocked,
+  onToggle,
+  onEnableSound,
+}: {
+  t: TFunction;
+  settings: ScreenAlarmSettings;
+  saving: boolean;
+  message: ScreenAlarmSettingsMessage;
+  soundBlocked: boolean;
+  onToggle: (key: ScreenAlarmSettingKey, value: boolean) => void;
+  onEnableSound: () => void;
+}) {
+  return (
+    <div className="screen-alarm-settings-panel">
+      <div className="screen-alarm-settings-panel__head">
+        <strong>{t("screenAlarmTitle", { ns: "settings" })}</strong>
+      </div>
+      <div className="screen-alarm-settings-grid">
+        {screenAlarmOptionSpecs.map(({ key, labelKey, Icon }) => {
+          const active = settings[key];
+          return (
+            <button
+              key={key}
+              className={cx("screen-alarm-setting", active && "screen-alarm-setting--active")}
+              type="button"
+              aria-pressed={active}
+              disabled={saving}
+              onClick={() => onToggle(key, !active)}
+            >
+              <Icon size={13} aria-hidden="true" />
+              <span>{t(labelKey, { ns: "settings" })}</span>
+              <em aria-hidden="true" />
+            </button>
+          );
+        })}
+      </div>
+      {soundBlocked ? (
+        <button
+          className="screen-alarm-settings-panel__sound"
+          type="button"
+          onClick={onEnableSound}
+        >
+          <Volume2 size={13} aria-hidden="true" />
+          {t("enableSoundAlarm", { ns: "screen" })}
+        </button>
+      ) : null}
+      {message.text ? (
+        <p className={cx("screen-alarm-settings-panel__message", message.kind === "error" && "screen-alarm-settings-panel__message--error")}>
+          {message.text}
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
 function RightList({
   t,
   selectedId,
@@ -2449,11 +2497,17 @@ function RightList({
   userSettings,
   whitelistBusySerial,
   alarmCounts,
+  alarmSettings,
+  alarmSaving,
+  alarmMessage,
+  soundBlocked,
   now,
   collapsed,
   onSelectTarget,
   onSelectPosition,
   onToggleWhitelist,
+  onToggleAlarmSetting,
+  onEnableSound,
   onOpenNavigationQRCode,
   onToggleCollapsed,
 }: {
@@ -2465,16 +2519,23 @@ function RightList({
   userSettings: UserSettings;
   whitelistBusySerial: string;
   alarmCounts: ScreenAlarmSourceCount[];
+  alarmSettings: ScreenAlarmSettings;
+  alarmSaving: boolean;
+  alarmMessage: ScreenAlarmSettingsMessage;
+  soundBlocked: boolean;
   now: Date;
   collapsed: boolean;
   onSelectTarget: (target: ScreenDetectionTarget) => void;
   onSelectPosition: (target: ScreenPositionTarget) => void;
   onToggleWhitelist: (target: ScreenPositionTarget) => void;
+  onToggleAlarmSetting: (key: ScreenAlarmSettingKey, value: boolean) => void;
+  onEnableSound: () => void;
   onOpenNavigationQRCode: (label: string, point: ScreenPositionPoint) => void;
   onToggleCollapsed: () => void;
 }) {
   const [tab, setTab] = useState<ScreenAlertKind>("detection");
   const [hovered, setHovered] = useState(false);
+  const [alarmSettingsOpen, setAlarmSettingsOpen] = useState(false);
   const detectionConfigured = screenStatus?.detection.configured !== false;
   const detectionActive = screenStatus ? screenStatus.detection.active : true;
   const detectionOfflineMessage = screenCapabilityOfflineMessage(screenStatus?.detection, t);
@@ -2538,9 +2599,30 @@ function RightList({
                 {activeAlarmCount}
               </strong>
             ) : null}
+            <button
+              className={cx("screen-alarm-settings-toggle", alarmSettingsOpen && "screen-alarm-settings-toggle--active")}
+              type="button"
+              aria-label={t("screenAlarmTitle", { ns: "settings" })}
+              aria-expanded={alarmSettingsOpen}
+              onClick={() => setAlarmSettingsOpen((value) => !value)}
+            >
+              <Settings2 size={13} aria-hidden="true" />
+            </button>
             <strong className="screen-info-list__count">{activeCount}</strong>
           </span>
         </div>
+
+        {alarmSettingsOpen ? (
+          <ScreenAlarmSettingsPanel
+            t={t}
+            settings={alarmSettings}
+            saving={alarmSaving}
+            message={alarmMessage}
+            soundBlocked={soundBlocked}
+            onToggle={onToggleAlarmSetting}
+            onEnableSound={onEnableSound}
+          />
+        ) : null}
 
         <div className="screen-list">
           {!detectionActive ? (
@@ -2634,57 +2716,34 @@ function useNow() {
 }
 
 function useScreenAlarmSound(active: boolean) {
-  const audioContextRef = useRef<AudioContext | null>(null);
-  const timerRef = useRef<number | null>(null);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
   const [blocked, setBlocked] = useState(false);
 
   const stop = useCallback(() => {
-    if (timerRef.current !== null) {
-      window.clearInterval(timerRef.current);
-      timerRef.current = null;
+    const audio = audioRef.current;
+    if (audio) {
+      audio.pause();
+      audio.currentTime = 0;
     }
-  }, []);
-
-  const beep = useCallback(async () => {
-    const AudioContextClass = window.AudioContext || window.webkitAudioContext;
-    if (!AudioContextClass) {
-      return;
-    }
-    const context = audioContextRef.current ?? new AudioContextClass();
-    audioContextRef.current = context;
-    if (context.state === "suspended") {
-      await context.resume();
-    }
-    const oscillator = context.createOscillator();
-    const gain = context.createGain();
-    oscillator.type = "sine";
-    oscillator.frequency.value = 880;
-    gain.gain.setValueAtTime(0.0001, context.currentTime);
-    gain.gain.exponentialRampToValueAtTime(0.08, context.currentTime + 0.02);
-    gain.gain.exponentialRampToValueAtTime(0.0001, context.currentTime + 0.32);
-    oscillator.connect(gain);
-    gain.connect(context.destination);
-    oscillator.start();
-    oscillator.stop(context.currentTime + 0.34);
   }, []);
 
   const start = useCallback(async () => {
+    let audio = audioRef.current;
+    if (!audio) {
+      audio = new Audio(screenAlarmAudio);
+      audio.loop = true;
+      audio.preload = "auto";
+      audio.volume = 0.9;
+      audioRef.current = audio;
+    }
     try {
-      await beep();
+      await audio.play();
       setBlocked(false);
-      if (timerRef.current === null) {
-        timerRef.current = window.setInterval(() => {
-          void beep().catch(() => {
-            stop();
-            setBlocked(true);
-          });
-        }, 2600);
-      }
     } catch {
       stop();
       setBlocked(true);
     }
-  }, [beep, stop]);
+  }, [stop]);
 
   useEffect(() => {
     if (!active) {
@@ -2699,8 +2758,7 @@ function useScreenAlarmSound(active: boolean) {
   useEffect(() => {
     return () => {
       stop();
-      void audioContextRef.current?.close();
-      audioContextRef.current = null;
+      audioRef.current = null;
     };
   }, [stop]);
 
@@ -2737,6 +2795,7 @@ export function ScreenPage({
   const [positions, setPositions] = useState<ScreenPositionTarget[]>([]);
   const [deviceLocation, setDeviceLocation] = useState<ScreenDeviceLocationResponse | null>(null);
   const [screenStatus, setScreenStatus] = useState<ScreenRuntimeStatus | null>(null);
+  const [liveCompassHeading, setLiveCompassHeading] = useState<{ headingDeg: number; updatedAt: string } | null>(null);
   const [strikeState, setStrikeState] = useState<ScreenStrikeState | null>(null);
   const [deceptionState, setDeceptionState] = useState<ScreenDeceptionState | null>(null);
   const [rightCollapsed, setRightCollapsed] = useState(false);
@@ -2751,6 +2810,11 @@ export function ScreenPage({
   const [deceptionStatusLoading, setDeceptionStatusLoading] = useState(false);
   const [deceptionStatusError, setDeceptionStatusError] = useState("");
   const [whitelistBusySerial, setWhitelistBusySerial] = useState("");
+  const [alarmSaving, setAlarmSaving] = useState(false);
+  const [alarmMessage, setAlarmMessage] = useState<ScreenAlarmSettingsMessage>({
+    kind: "idle",
+    text: "",
+  });
   const deceptionStatusSyncingRef = useRef(false);
   const now = useNow();
   const fpvTargets = useMemo(() => targets.filter(isFpvTarget), [targets]);
@@ -2816,6 +2880,25 @@ export function ScreenPage({
       setWhitelistBusySerial("");
     }
   }, [onUserSettingsChange, userSettings]);
+
+  const handleToggleAlarmSetting = useCallback(async (key: ScreenAlarmSettingKey, value: boolean) => {
+    setAlarmSaving(true);
+    setAlarmMessage({ kind: "idle", text: "" });
+    try {
+      await onUserSettingsChange({
+        ...userSettings,
+        screenAlarmSettings: {
+          ...alarmSettings,
+          [key]: value,
+        },
+      });
+      setAlarmMessage({ kind: "success", text: t("screenAlarmSaved", { ns: "settings" }) });
+    } catch (error) {
+      setAlarmMessage({ kind: "error", text: extractErrorMessage(error, t("unexpectedError", { ns: "common" })) });
+    } finally {
+      setAlarmSaving(false);
+    }
+  }, [alarmSettings, onUserSettingsChange, t, userSettings]);
 
   const selectedPosition = positions.find((target) => target.id === selectedId) ?? null;
 
@@ -2938,6 +3021,33 @@ export function ScreenPage({
         }
         setDeceptionState(event.payload);
       },
+      onCompassRecord: (event) => {
+        if (!event.payload) {
+          return;
+        }
+        const payload = event.payload;
+        setLiveCompassHeading({
+          headingDeg: payload.heading,
+          updatedAt: payload.receivedAt,
+        });
+        setScreenStatus((status) => {
+          if (!status) {
+            return status;
+          }
+          return {
+            ...status,
+            compass: {
+              ...status.compass,
+              configured: true,
+              active: true,
+              state: "connected",
+              portName: payload.portName || status.compass?.portName,
+              headingDeg: payload.heading,
+              headingUpdatedAt: payload.receivedAt,
+            },
+          };
+        });
+      },
     });
   }, []);
 
@@ -2954,6 +3064,9 @@ export function ScreenPage({
         const response = await getScreenStatus(locale);
         if (!cancelled) {
           setScreenStatus(response);
+          if (response.compass?.configured === false || response.compass?.active === false) {
+            setLiveCompassHeading(null);
+          }
         }
       } catch {
         // Keep the last visible runtime status during a transient polling failure.
@@ -3184,6 +3297,7 @@ export function ScreenPage({
         positions={screenStatus?.detection.configured === false ? [] : positions}
         whitelist={userSettings.whitelist}
         deviceLocation={deviceLocation}
+        deviceHeadingDeg={liveCompassHeading?.headingDeg ?? screenStatus?.compass?.headingDeg}
         visibleMapLayers={visibleMapLayers}
         onSelectPosition={handleSelectPosition}
         onMapReady={handleMapReady}
@@ -3195,9 +3309,6 @@ export function ScreenPage({
         now={now}
         locale={locale}
         localeOptions={localeOptions}
-        alarmCounts={alarmCounts}
-        soundBlocked={alarmSound.blocked}
-        onEnableSound={() => void alarmSound.enable()}
         onLocaleChange={onLocaleChange}
         onEnterAdmin={enterAdmin}
       />
@@ -3231,11 +3342,17 @@ export function ScreenPage({
         userSettings={userSettings}
         whitelistBusySerial={whitelistBusySerial}
         alarmCounts={alarmCounts}
+        alarmSettings={alarmSettings}
+        alarmSaving={alarmSaving}
+        alarmMessage={alarmMessage}
+        soundBlocked={alarmSound.blocked}
         now={now}
         collapsed={rightCollapsed}
         onSelectTarget={handleSelectTarget}
         onSelectPosition={handleSelectPosition}
         onToggleWhitelist={handleToggleWhitelist}
+        onToggleAlarmSetting={(key, value) => void handleToggleAlarmSetting(key, value)}
+        onEnableSound={() => void alarmSound.enable()}
         onOpenNavigationQRCode={handleOpenNavigationQRCode}
         onToggleCollapsed={() => setRightCollapsed((value) => !value)}
       />

@@ -25,5 +25,11 @@
   "deception.session.inactive": "No active spoofing serial session",
   "deception.started": "Spoofing started",
   "deception.stopped": "Spoofing stopped",
-  "deception.query.ok": "Spoofing device query succeeded"
+  "deception.query.ok": "Spoofing device query succeeded",
+  "compass.session.connecting": "3D compass serial session is connecting",
+  "compass.session.started": "3D compass serial session started",
+  "compass.session.reconnecting": "3D compass connection was lost, reconnecting automatically",
+  "compass.session.stopped": "3D compass serial session stopped",
+  "compass.session.inactive": "No active 3D compass serial session",
+  "compass.session.disconnected": "3D compass serial connection was lost"
 }

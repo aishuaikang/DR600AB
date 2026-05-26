@@ -1,6 +1,7 @@
 {
   "screen": "态势大屏",
   "intrusions": "目标入侵",
+  "interferenceReports": "干扰报告",
   "deceptionReports": "诱骗报告",
   "detectionRecords": "侦测数据",
   "parsedRecords": "解析数据",

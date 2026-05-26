@@ -235,7 +235,7 @@ func openSamplerPorts(s1Port, s2Port string, baudRate int) (serial.Port, serial.
 	s1Cfg.PortName = s1Port
 	s1, err := serialport.Open(&s1Cfg)
 	if err != nil {
-		return nil, nil, fmt.Errorf("打开 S1 失败: %w", err)
+		return nil, nil, err
 	}
 
 	s2Cfg := serialport.DefaultConfig(baudRate)
@@ -243,7 +243,7 @@ func openSamplerPorts(s1Port, s2Port string, baudRate int) (serial.Port, serial.
 	s2, err := serialport.Open(&s2Cfg)
 	if err != nil {
 		s1.Close()
-		return nil, nil, fmt.Errorf("打开 S2 失败: %w", err)
+		return nil, nil, err
 	}
 
 	return s1, s2, nil

@@ -1,12 +1,14 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { TFunction } from "i18next";
-import { Plus, ShieldCheck, Trash2 } from "lucide-react";
+import { Check, ChevronDown, Pencil, Plus, ShieldCheck, Trash2, X } from "lucide-react";
 
 import { Panel, PanelBody } from "../components/Panel";
 import { SectionHeader } from "../components/SectionHeader";
 import type { UserSettings } from "../types";
 import { extractErrorMessage } from "../utils/session";
-import { removeWhitelistSerial, upsertWhitelistItem } from "../utils/whitelist";
+import { removeWhitelistSerial, updateWhitelistItem, upsertWhitelistItem } from "../utils/whitelist";
+
+const whitelistPageSize = 50;
 
 function formatWhitelistDate(value: string | undefined, locale: string) {
   if (!value) {
@@ -17,20 +19,6 @@ function formatWhitelistDate(value: string | undefined, locale: string) {
     return "-";
   }
   return date.toLocaleString(locale.startsWith("zh") ? "zh-CN" : "en-US", { hour12: false });
-}
-
-function formatWhitelistSource(value: string | undefined, t: TFunction) {
-  const source = value?.trim();
-  if (!source) {
-    return "-";
-  }
-  if (source === "manual") {
-    return t("whitelistSourceManual", { ns: "settings" });
-  }
-  if (source === "screen_position") {
-    return t("whitelistSourceScreenPosition", { ns: "settings" });
-  }
-  return source;
 }
 
 export function WhitelistPage({
@@ -46,13 +34,15 @@ export function WhitelistPage({
 }) {
   const [serialDraft, setSerialDraft] = useState("");
   const [modelDraft, setModelDraft] = useState("");
+  const [editingSerial, setEditingSerial] = useState("");
+  const [editSerialDraft, setEditSerialDraft] = useState("");
+  const [editModelDraft, setEditModelDraft] = useState("");
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<{ kind: "idle" | "success" | "error"; text: string }>({
     kind: "idle",
     text: "",
   });
   const whitelist = userSettings.whitelist ?? [];
-  const serial = serialDraft.trim();
   const sortedWhitelist = useMemo(() => {
     return [...whitelist].sort((left, right) => {
       const leftTime = left.createdAt ? new Date(left.createdAt).getTime() : 0;
@@ -60,6 +50,14 @@ export function WhitelistPage({
       return rightTime - leftTime || left.serial.localeCompare(right.serial);
     });
   }, [whitelist]);
+  const [visibleLimit, setVisibleLimit] = useState(whitelistPageSize);
+  const visibleWhitelist = sortedWhitelist.slice(0, visibleLimit);
+  const hasMoreWhitelist = visibleLimit < sortedWhitelist.length;
+  const serial = serialDraft.trim();
+
+  useEffect(() => {
+    setVisibleLimit((current) => Math.min(current, Math.max(sortedWhitelist.length, whitelistPageSize)));
+  }, [sortedWhitelist.length]);
 
   const addWhitelistItem = async () => {
     if (!serial) {
@@ -87,6 +85,44 @@ export function WhitelistPage({
     }
   };
 
+  const startEditWhitelistItem = (targetSerial: string, targetModel: string | undefined) => {
+    setEditingSerial(targetSerial);
+    setEditSerialDraft(targetSerial);
+    setEditModelDraft(targetModel ?? "");
+    setMessage({ kind: "idle", text: "" });
+  };
+
+  const cancelEditWhitelistItem = () => {
+    setEditingSerial("");
+    setEditSerialDraft("");
+    setEditModelDraft("");
+  };
+
+  const saveEditWhitelistItem = async () => {
+    const nextSerial = editSerialDraft.trim();
+    if (!nextSerial) {
+      setMessage({ kind: "error", text: t("whitelistSerialRequired", { ns: "settings" }) });
+      return;
+    }
+    setSaving(true);
+    setMessage({ kind: "idle", text: "" });
+    try {
+      await onUserSettingsChange({
+        ...userSettings,
+        whitelist: updateWhitelistItem(whitelist, editingSerial, {
+          serial: nextSerial,
+          model: editModelDraft,
+        }),
+      });
+      cancelEditWhitelistItem();
+      setMessage({ kind: "success", text: t("whitelistSaved", { ns: "settings" }) });
+    } catch (error) {
+      setMessage({ kind: "error", text: extractErrorMessage(error, t("unexpectedError", { ns: "common" })) });
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const deleteWhitelistItem = async (targetSerial: string) => {
     setSaving(true);
     setMessage({ kind: "idle", text: "" });
@@ -95,6 +131,9 @@ export function WhitelistPage({
         ...userSettings,
         whitelist: removeWhitelistSerial(whitelist, targetSerial),
       });
+      if (editingSerial === targetSerial) {
+        cancelEditWhitelistItem();
+      }
       setMessage({ kind: "success", text: t("whitelistDeleted", { ns: "settings" }) });
     } catch (error) {
       setMessage({ kind: "error", text: extractErrorMessage(error, t("unexpectedError", { ns: "common" })) });
@@ -169,33 +208,91 @@ export function WhitelistPage({
                 <tr>
                   <th>{t("whitelistSerial", { ns: "settings" })}</th>
                   <th>{t("whitelistModel", { ns: "settings" })}</th>
-                  <th>{t("whitelistSource", { ns: "settings" })}</th>
                   <th>{t("whitelistCreatedAt", { ns: "settings" })}</th>
                   <th className="text-right">{t("whitelistActions", { ns: "settings" })}</th>
                 </tr>
               </thead>
               <tbody>
-                {sortedWhitelist.length > 0 ? sortedWhitelist.map((item) => (
-                  <tr key={`${item.serial}-${item.createdAt ?? ""}`}>
-                    <td className="font-mono font-semibold">{item.serial}</td>
-                    <td>{item.model || "-"}</td>
-                    <td>{formatWhitelistSource(item.source, t)}</td>
-                    <td>{formatWhitelistDate(item.createdAt, locale)}</td>
-                    <td className="text-right">
-                      <button
-                        className="btn btn-ghost btn-xs text-error"
-                        type="button"
-                        disabled={saving}
-                        aria-label={t("whitelistDelete", { ns: "settings", serial: item.serial })}
-                        onClick={() => void deleteWhitelistItem(item.serial)}
-                      >
-                        <Trash2 size={14} aria-hidden="true" />
-                      </button>
-                    </td>
-                  </tr>
-                )) : (
+                {visibleWhitelist.length > 0 ? visibleWhitelist.map((item) => {
+                  const editing = editingSerial === item.serial;
+                  return (
+                    <tr key={`${item.serial}-${item.createdAt ?? ""}`}>
+                      <td className="min-w-52">
+                        {editing ? (
+                          <input
+                            className="input input-bordered input-xs w-full bg-base-100 font-mono"
+                            value={editSerialDraft}
+                            maxLength={128}
+                            onChange={(event) => setEditSerialDraft(event.target.value)}
+                          />
+                        ) : (
+                          <span className="font-mono font-semibold">{item.serial}</span>
+                        )}
+                      </td>
+                      <td className="min-w-44">
+                        {editing ? (
+                          <input
+                            className="input input-bordered input-xs w-full bg-base-100"
+                            value={editModelDraft}
+                            maxLength={64}
+                            placeholder={t("whitelistModelPlaceholder", { ns: "settings" })}
+                            onChange={(event) => setEditModelDraft(event.target.value)}
+                          />
+                        ) : item.model || "-"}
+                      </td>
+                      <td>{formatWhitelistDate(item.createdAt, locale)}</td>
+                      <td className="text-right">
+                        <div className="flex justify-end gap-1">
+                          {editing ? (
+                            <>
+                              <button
+                                className="btn btn-ghost btn-xs text-success"
+                                type="button"
+                                disabled={saving}
+                                aria-label={t("save", { ns: "common" })}
+                                onClick={() => void saveEditWhitelistItem()}
+                              >
+                                <Check size={14} aria-hidden="true" />
+                              </button>
+                              <button
+                                className="btn btn-ghost btn-xs"
+                                type="button"
+                                disabled={saving}
+                                aria-label={t("cancel", { ns: "common" })}
+                                onClick={cancelEditWhitelistItem}
+                              >
+                                <X size={14} aria-hidden="true" />
+                              </button>
+                            </>
+                          ) : (
+                            <>
+                              <button
+                                className="btn btn-ghost btn-xs"
+                                type="button"
+                                disabled={saving}
+                                aria-label={t("whitelistEdit", { ns: "settings", serial: item.serial })}
+                                onClick={() => startEditWhitelistItem(item.serial, item.model)}
+                              >
+                                <Pencil size={14} aria-hidden="true" />
+                              </button>
+                              <button
+                                className="btn btn-ghost btn-xs text-error"
+                                type="button"
+                                disabled={saving}
+                                aria-label={t("whitelistDelete", { ns: "settings", serial: item.serial })}
+                                onClick={() => void deleteWhitelistItem(item.serial)}
+                              >
+                                <Trash2 size={14} aria-hidden="true" />
+                              </button>
+                            </>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                }) : (
                   <tr>
-                    <td colSpan={5} className="py-8 text-center text-sm text-base-content/50">
+                    <td colSpan={4} className="py-8 text-center text-sm text-base-content/50">
                       {t("whitelistEmpty", { ns: "settings" })}
                     </td>
                   </tr>
@@ -203,6 +300,19 @@ export function WhitelistPage({
               </tbody>
             </table>
           </div>
+          {hasMoreWhitelist ? (
+            <div className="flex justify-center">
+              <button
+                className="btn btn-sm btn-outline"
+                type="button"
+                disabled={saving}
+                onClick={() => setVisibleLimit((current) => current + whitelistPageSize)}
+              >
+                <ChevronDown size={15} aria-hidden="true" />
+                {t("loadMore", { ns: "common" })}
+              </button>
+            </div>
+          ) : null}
         </PanelBody>
       </Panel>
     </section>

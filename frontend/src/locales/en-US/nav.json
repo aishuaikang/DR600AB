@@ -1,6 +1,7 @@
 {
   "screen": "Situation Screen",
   "intrusions": "Target Intrusions",
+  "interferenceReports": "Interference Reports",
   "deceptionReports": "Spoofing Reports",
   "detectionRecords": "Detection Data",
   "parsedRecords": "Parsed Data",

@@ -7,6 +7,7 @@ import (
 
 	"github.com/gofiber/fiber/v2"
 
+	"dr600ab-api/internal/compass"
 	"dr600ab-api/internal/config"
 	"dr600ab-api/internal/deception"
 	"dr600ab-api/internal/deceptionreport"
@@ -15,6 +16,7 @@ import (
 	"dr600ab-api/internal/gps"
 	"dr600ab-api/internal/i18n"
 	"dr600ab-api/internal/interference"
+	"dr600ab-api/internal/interferencereport"
 	"dr600ab-api/internal/intrusion"
 	"dr600ab-api/internal/model"
 	"dr600ab-api/internal/network"
@@ -44,6 +46,15 @@ type DeceptionReportStore interface {
 	Close() error
 }
 
+// InterferenceReportStore 查询已归档的干扰报告。
+type InterferenceReportStore interface {
+	List(interferencereport.QueryOptions) ([]model.InterferenceReportSummary, error)
+	Get(string) (model.InterferenceReport, error)
+	DeleteFailed(string) (int64, error)
+	CloseRunning(reason string, now time.Time) (int64, error)
+	Close() error
+}
+
 type intrusionDeviceLocationSetter interface {
 	SetDeviceLocationProvider(intrusion.DeviceLocationProvider)
 }
@@ -54,18 +65,20 @@ type screenPositionRelationSetter interface {
 
 // Server 持有 Fiber 应用以及对外暴露的后端服务。
 type Server struct {
-	app          *fiber.App
-	cfg          config.Config
-	translator   *i18n.Translator
-	detection    *detection.Service
-	interference *interference.Service
-	developer    *developer.Service
-	gps          *gps.Service
-	network      *network.Service
-	deception    *deception.Service
-	userSettings UserSettingsStore
-	intrusions   IntrusionStore
-	reports      DeceptionReportStore
+	app                 *fiber.App
+	cfg                 config.Config
+	translator          *i18n.Translator
+	detection           *detection.Service
+	interference        *interference.Service
+	developer           *developer.Service
+	gps                 *gps.Service
+	network             *network.Service
+	deception           *deception.Service
+	compass             *compass.Service
+	userSettings        UserSettingsStore
+	intrusions          IntrusionStore
+	reports             DeceptionReportStore
+	interferenceReports InterferenceReportStore
 
 	intrusionPruneMu      sync.Mutex
 	lastIntrusionPruneRun time.Time
@@ -81,22 +94,26 @@ func New(
 	gpsSvc *gps.Service,
 	networkSvc *network.Service,
 	deceptionSvc *deception.Service,
+	compassSvc *compass.Service,
 	userSettingsStore UserSettingsStore,
 	intrusionStore IntrusionStore,
 	reportStore DeceptionReportStore,
+	interferenceReportStore InterferenceReportStore,
 ) *Server {
 	s := &Server{
-		cfg:          cfg,
-		translator:   translator,
-		detection:    detectionSvc,
-		interference: interferenceSvc,
-		developer:    developerSvc,
-		gps:          gpsSvc,
-		network:      networkSvc,
-		deception:    deceptionSvc,
-		userSettings: userSettingsStore,
-		intrusions:   intrusionStore,
-		reports:      reportStore,
+		cfg:                 cfg,
+		translator:          translator,
+		detection:           detectionSvc,
+		interference:        interferenceSvc,
+		developer:           developerSvc,
+		gps:                 gpsSvc,
+		network:             networkSvc,
+		deception:           deceptionSvc,
+		compass:             compassSvc,
+		userSettings:        userSettingsStore,
+		intrusions:          intrusionStore,
+		reports:             reportStore,
+		interferenceReports: interferenceReportStore,
 	}
 	s.app = fiber.New(fiber.Config{
 		AppName: "dr600ab-api",
@@ -138,12 +155,17 @@ func (s *Server) Shutdown() error {
 	s.gps.Stop("")
 	s.interference.Shutdown()
 	s.deception.Shutdown()
+	s.compass.Shutdown()
 	if s.intrusions != nil {
 		_ = s.intrusions.Close()
 	}
 	if s.reports != nil {
 		_, _ = s.reports.CloseRunning("service_shutdown", time.Now())
 		_ = s.reports.Close()
+	}
+	if s.interferenceReports != nil {
+		_, _ = s.interferenceReports.CloseRunning("service_shutdown", time.Now())
+		_ = s.interferenceReports.Close()
 	}
 	return s.app.Shutdown()
 }

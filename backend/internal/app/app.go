@@ -5,6 +5,7 @@ import (
 	"context"
 	"time"
 
+	"dr600ab-api/internal/compass"
 	"dr600ab-api/internal/config"
 	"dr600ab-api/internal/deception"
 	"dr600ab-api/internal/deceptionreport"
@@ -14,6 +15,7 @@ import (
 	"dr600ab-api/internal/httpapi"
 	"dr600ab-api/internal/i18n"
 	"dr600ab-api/internal/interference"
+	"dr600ab-api/internal/interferencereport"
 	"dr600ab-api/internal/intrusion"
 	"dr600ab-api/internal/network"
 	"dr600ab-api/internal/settings"
@@ -25,7 +27,7 @@ type App struct {
 	server *httpapi.Server
 }
 
-// New 根据配置创建应用，并恢复已保存的侦测设置。
+// New 根据配置创建应用，并恢复已保存的串口设置。
 func New(cfg config.Config) (*App, error) {
 	translator, err := i18n.New(cfg.DefaultLocale)
 	if err != nil {
@@ -43,9 +45,22 @@ func New(cfg config.Config) (*App, error) {
 		_ = intrusionStore.Close()
 		return nil, err
 	}
+	interferenceReportStore, err := interferencereport.NewStore(cfg.InterferenceReportDBPath)
+	if err != nil {
+		_ = intrusionStore.Close()
+		_ = reportStore.Close()
+		return nil, err
+	}
 	if _, err := reportStore.CloseRunning("abnormal_restart", time.Now()); err != nil {
 		_ = intrusionStore.Close()
 		_ = reportStore.Close()
+		_ = interferenceReportStore.Close()
+		return nil, err
+	}
+	if _, err := interferenceReportStore.CloseRunning("abnormal_restart", time.Now()); err != nil {
+		_ = intrusionStore.Close()
+		_ = reportStore.Close()
+		_ = interferenceReportStore.Close()
 		return nil, err
 	}
 	state.SetIntrusionArchiver(intrusionStore)
@@ -68,8 +83,13 @@ func New(cfg config.Config) (*App, error) {
 		},
 	})
 	interferenceSvc := interference.NewService(state, translator, interference.DefaultChannels(), nil)
+	interferenceSvc.SetReportStore(interferenceReportStore)
+	interferenceSvc.SetUserSettingsStore(settingsStore)
 	developerSvc, err := developer.NewService(cfg.DeveloperTOTPSecret, cfg.DeveloperSessionTTL)
 	if err != nil {
+		_ = intrusionStore.Close()
+		_ = reportStore.Close()
+		_ = interferenceReportStore.Close()
 		return nil, err
 	}
 	gpsSvc := gps.NewService(state, translator, settingsStore, gps.Options{
@@ -92,10 +112,20 @@ func New(cfg config.Config) (*App, error) {
 		ReconnectMaxDelay:     cfg.ReconnectMaxDelay,
 	})
 	deceptionSvc.SetReportStore(reportStore)
+	compassSvc := compass.NewService(state, translator, settingsStore, compass.Options{
+		DefaultBaudRate:       compass.DefaultBaudRate,
+		DefaultDataBits:       cfg.DefaultDataBits,
+		DefaultStopBits:       cfg.DefaultStopBits,
+		DefaultParity:         cfg.DefaultParity,
+		DefaultReadTimeout:    cfg.DefaultReadTimeout,
+		ReconnectInitialDelay: cfg.ReconnectInitialDelay,
+		ReconnectMaxDelay:     cfg.ReconnectMaxDelay,
+	})
 
 	detectionSvc.RestoreSavedSettings(cfg.DefaultLocale)
 	gpsSvc.RestoreSavedSettings(cfg.DefaultLocale)
 	deceptionSvc.RestoreSavedSettings(cfg.DefaultLocale)
+	compassSvc.RestoreSavedSettings(cfg.DefaultLocale)
 	_ = networkSvc.RestoreSavedSettings(context.Background())
 
 	return &App{
@@ -108,9 +138,11 @@ func New(cfg config.Config) (*App, error) {
 			gpsSvc,
 			networkSvc,
 			deceptionSvc,
+			compassSvc,
 			settingsStore,
 			intrusionStore,
 			reportStore,
+			interferenceReportStore,
 		),
 	}, nil
 }

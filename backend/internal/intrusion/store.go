@@ -36,6 +36,7 @@ type DeviceLocationProvider func() *model.ScreenDeviceLocationResponse
 // QueryOptions controls intrusion record listing.
 type QueryOptions struct {
 	Limit      int
+	Offset     int
 	TargetType model.IntrusionTargetType
 }
 
@@ -316,6 +317,10 @@ func (s *Store) List(options QueryOptions) ([]model.IntrusionRecord, error) {
 	if limit <= 0 {
 		limit = defaultQueryLimit
 	}
+	offset := options.Offset
+	if offset < 0 {
+		offset = 0
+	}
 
 	args := []any{}
 	query := `SELECT id, target_id, target_type, model, serial, device, frequency, rssi,
@@ -328,8 +333,8 @@ func (s *Store) List(options QueryOptions) ([]model.IntrusionRecord, error) {
 		query += ` WHERE target_type = ?`
 		args = append(args, string(options.TargetType))
 	}
-	query += ` ORDER BY last_seen DESC, archived_at DESC LIMIT ?`
-	args = append(args, limit)
+	query += ` ORDER BY last_seen DESC, archived_at DESC LIMIT ? OFFSET ?`
+	args = append(args, limit, offset)
 
 	rows, err := s.db.Query(query, args...)
 	if err != nil {

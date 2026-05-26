@@ -35,6 +35,7 @@ func (s *memoryUserSettingsStore) SaveUser(settings model.UserSettings) error {
 
 func (s *memoryUserSettingsStore) SaveEditableUser(settings model.UserSettings) (model.UserSettings, error) {
 	settings.DeviceSN = s.settings.DeviceSN
+	settings.DeviceHardwareID = s.settings.DeviceHardwareID
 	s.settings = settings
 	s.ok = true
 	return settings, nil
@@ -73,7 +74,8 @@ func (s *pruningIntrusionStore) Close() error {
 func TestHandleUpdateUserSettingsPreservesDeviceSN(t *testing.T) {
 	store := &memoryUserSettingsStore{
 		settings: model.UserSettings{
-			DeviceSN: "10125",
+			DeviceSN:         "SL67CB3FC848FA0E795P",
+			DeviceHardwareID: "10125",
 		},
 		ok: true,
 	}
@@ -87,6 +89,7 @@ func TestHandleUpdateUserSettingsPreservesDeviceSN(t *testing.T) {
 
 	body, err := json.Marshal(model.UserSettings{
 		DeviceSN:             "client-sn",
+		DeviceHardwareID:     "client-hardware-id",
 		ManualDeviceLocation: &model.GeoPoint{Latitude: 23.12911, Longitude: 113.264385},
 	})
 	if err != nil {
@@ -105,8 +108,11 @@ func TestHandleUpdateUserSettingsPreservesDeviceSN(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusOK)
 	}
-	if store.settings.DeviceSN != "10125" {
-		t.Fatalf("saved device SN = %q, want preserved 10125", store.settings.DeviceSN)
+	if store.settings.DeviceSN != "SL67CB3FC848FA0E795P" {
+		t.Fatalf("saved device SN = %q, want preserved SL67CB3FC848FA0E795P", store.settings.DeviceSN)
+	}
+	if store.settings.DeviceHardwareID != "10125" {
+		t.Fatalf("saved hardware ID = %q, want preserved 10125", store.settings.DeviceHardwareID)
 	}
 	if store.settings.ManualDeviceLocation == nil ||
 		store.settings.ManualDeviceLocation.Latitude != 23.12911 ||
@@ -156,7 +162,7 @@ func TestHandleUserSettingsReturnsDefaultIntrusionRetention(t *testing.T) {
 
 func TestHandleUpdateUserSettingsNormalizesWhitelistAndAlarmSettings(t *testing.T) {
 	store := &memoryUserSettingsStore{
-		settings: model.UserSettings{DeviceSN: "10125"},
+		settings: model.UserSettings{DeviceSN: "10125", DeviceHardwareID: "10125"},
 		ok:       true,
 	}
 	server := &Server{
@@ -199,6 +205,9 @@ func TestHandleUpdateUserSettingsNormalizesWhitelistAndAlarmSettings(t *testing.
 	}
 	if store.settings.DeviceSN != "10125" {
 		t.Fatalf("saved device SN = %q, want preserved 10125", store.settings.DeviceSN)
+	}
+	if store.settings.DeviceHardwareID != "10125" {
+		t.Fatalf("saved hardware ID = %q, want preserved 10125", store.settings.DeviceHardwareID)
 	}
 	if len(store.settings.Whitelist) != 2 {
 		t.Fatalf("whitelist = %#v, want 2 normalized items", store.settings.Whitelist)

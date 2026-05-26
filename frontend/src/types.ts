@@ -100,6 +100,7 @@ export interface DeceptionQueryResponse {
 }
 
 export type DeceptionReportStatus = "running" | "completed" | "failed" | "abnormal";
+export type InterferenceReportStatus = "running" | "completed" | "failed" | "abnormal";
 
 export interface GPSFix {
   latitude: number;
@@ -121,6 +122,52 @@ export interface GPSRecord {
   fix?: GPSFix;
 }
 
+export interface CompassSessionRequest {
+  portName?: string;
+  baudRate: number;
+  dataBits: number;
+  stopBits: number;
+  parity: string;
+  readTimeoutMs?: number;
+  autoConnect?: boolean;
+}
+
+export interface CompassSettings extends CompassSessionRequest {}
+
+export interface CompassRecord {
+  sessionId: string;
+  portName: string;
+  receivedAt: string;
+  pitch: number;
+  roll: number;
+  heading: number;
+  rawHex?: string;
+}
+
+export interface CompassSessionResponse {
+  active: boolean;
+  sessionId?: string;
+  portName?: string;
+  baudRate?: number;
+  dataBits?: number;
+  stopBits?: number;
+  parity?: string;
+  startedAt?: string;
+  state?: "inactive" | "connecting" | "connected" | "reconnecting";
+  autoReconnect?: boolean;
+  lastError?: string;
+  retryCount?: number;
+  lastRecord?: CompassRecord;
+  lastPitch?: number;
+  lastRoll?: number;
+  lastHeading?: number;
+  lastRawHex?: string;
+  lastUpdatedAt?: string;
+  autoOutput: boolean;
+  autoOutputRate?: number;
+  message: string;
+}
+
 export interface GeoPoint {
   latitude: number;
   longitude: number;
@@ -128,6 +175,7 @@ export interface GeoPoint {
 
 export interface UserSettings {
   deviceSn?: string;
+  deviceHardwareId?: string;
   manualDeviceLocation?: GeoPoint;
   screenStrikeChannelLabels?: string[];
   intrusionRetentionDays?: number;
@@ -164,11 +212,14 @@ export interface ScreenSerialCapabilityStatus {
   rxPortName?: string;
   txPortName?: string;
   lastError?: string;
+  headingDeg?: number;
+  headingUpdatedAt?: string;
 }
 
 export interface ScreenRuntimeStatus {
   detection: ScreenSerialCapabilityStatus;
   deception: ScreenSerialCapabilityStatus;
+  compass: ScreenSerialCapabilityStatus;
 }
 
 export interface ScreenStrikeChannel {
@@ -578,6 +629,10 @@ export interface DeceptionReportDeleteResponse {
   deleted: number;
 }
 
+export interface InterferenceReportDeleteResponse {
+  deleted: number;
+}
+
 export interface DeceptionRecord {
   time: string;
   direction: string;
@@ -626,6 +681,29 @@ export interface DeceptionReport extends DeceptionReportSummary {
   recordCount: number;
 }
 
+export interface InterferenceReportSummary {
+  id: string;
+  status: InterferenceReportStatus;
+  startedAt: string;
+  endedAt?: string;
+  durationSeconds: number;
+  requestedDurationSeconds?: number;
+  channelIds?: string[];
+  channelLabels?: string[];
+  channelPins?: number[];
+  summary?: string;
+  lastError?: string;
+  abnormalReason?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface InterferenceReport extends InterferenceReportSummary {
+  request: ScreenStrikeRequest;
+  startState?: ScreenStrikeState;
+  endState?: ScreenStrikeState;
+}
+
 export type DebugRecord = DetectionRecord | ParsedMessage;
 
 export interface GpioChannel {
@@ -653,6 +731,8 @@ export interface GpioChannelStateResponse {
 export interface ListResponse<T> {
   items: T[];
   count: number;
+  hasMore?: boolean;
+  nextOffset?: number;
 }
 
 export interface PortsResponse {
@@ -787,6 +867,10 @@ export interface StreamHandlers {
   onDeceptionSessionStarted?: (event: EventMessage<DeceptionSessionResponse>) => void;
   onDeceptionSessionStopped?: (event: EventMessage<DeceptionSessionResponse>) => void;
   onDeceptionSessionState?: (event: EventMessage<DeceptionSessionResponse>) => void;
+  onCompassSessionStarted?: (event: EventMessage<CompassSessionResponse>) => void;
+  onCompassSessionStopped?: (event: EventMessage<CompassSessionResponse>) => void;
+  onCompassSessionState?: (event: EventMessage<CompassSessionResponse>) => void;
+  onCompassRecord?: (event: EventMessage<CompassRecord>) => void;
   onGPSRecord?: (event: EventMessage<GPSRecord>) => void;
   onParsed?: (event: EventMessage<ParsedMessage>) => void;
   onDetection?: (event: EventMessage<DetectionRecord>) => void;
@@ -799,5 +883,6 @@ export interface ScreenStreamHandlers {
   onPositionUpdated?: (event: EventMessage<ScreenPositionTarget>) => void;
   onStrikeUpdated?: (event: EventMessage<ScreenStrikeState>) => void;
   onDeceptionUpdated?: (event: EventMessage<ScreenDeceptionState>) => void;
+  onCompassRecord?: (event: EventMessage<CompassRecord>) => void;
   onError?: (error: Error) => void;
 }

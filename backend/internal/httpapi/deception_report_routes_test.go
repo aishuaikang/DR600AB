@@ -19,20 +19,28 @@ type memoryDeceptionReportStore struct {
 
 func (s *memoryDeceptionReportStore) List(options deceptionreport.QueryOptions) ([]model.DeceptionReportSummary, error) {
 	limit := options.Limit
-	if limit <= 0 || limit > len(s.items) {
+	if limit <= 0 {
 		limit = len(s.items)
 	}
-	items := make([]model.DeceptionReportSummary, 0, limit)
+	offset := options.Offset
+	if offset < 0 {
+		offset = 0
+	}
+	filtered := make([]model.DeceptionReportSummary, 0, len(s.items))
 	for _, item := range s.items {
 		if options.Status != "" && item.Status != options.Status {
 			continue
 		}
-		items = append(items, item.DeceptionReportSummary)
-		if len(items) >= limit {
-			break
-		}
+		filtered = append(filtered, item.DeceptionReportSummary)
 	}
-	return items, nil
+	if offset >= len(filtered) {
+		return []model.DeceptionReportSummary{}, nil
+	}
+	end := offset + limit
+	if end > len(filtered) {
+		end = len(filtered)
+	}
+	return append([]model.DeceptionReportSummary(nil), filtered[offset:end]...), nil
 }
 
 func (s *memoryDeceptionReportStore) Get(id string) (model.DeceptionReport, error) {
@@ -128,6 +136,46 @@ func TestHandleDeceptionReportsFiltersByStatus(t *testing.T) {
 	}
 	if body.Items[0].ID != "completed-1" || body.Items[0].Status != model.DeceptionReportStatusCompleted {
 		t.Fatalf("Items = %#v, want completed report", body.Items)
+	}
+}
+
+func TestHandleDeceptionReportsReturnsPageInfo(t *testing.T) {
+	startedAt := time.Date(2026, 5, 21, 10, 0, 0, 0, time.UTC)
+	server := &Server{
+		translator: mustTranslator(t),
+		reports: &memoryDeceptionReportStore{
+			items: []model.DeceptionReport{
+				{DeceptionReportSummary: model.DeceptionReportSummary{ID: "report-1", Status: model.DeceptionReportStatusCompleted, StartedAt: startedAt}},
+				{DeceptionReportSummary: model.DeceptionReportSummary{ID: "report-2", Status: model.DeceptionReportStatusCompleted, StartedAt: startedAt}},
+				{DeceptionReportSummary: model.DeceptionReportSummary{ID: "report-3", Status: model.DeceptionReportStatusCompleted, StartedAt: startedAt}},
+			},
+		},
+	}
+	server.app = fiber.New()
+	api := server.app.Group("/api/v1")
+	server.registerDeceptionReportRoutes(api)
+
+	req, err := http.NewRequest(http.MethodGet, "/api/v1/deception-reports?limit=2", nil)
+	if err != nil {
+		t.Fatalf("NewRequest() error = %v", err)
+	}
+	resp, err := server.app.Test(req)
+	if err != nil {
+		t.Fatalf("app.Test() error = %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusOK)
+	}
+
+	var body model.ListResponse[model.DeceptionReportSummary]
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("Decode() error = %v", err)
+	}
+	if body.Count != 2 || !body.HasMore || body.NextOffset != 2 {
+		t.Fatalf("page = count %d hasMore %v nextOffset %d, want 2 true 2", body.Count, body.HasMore, body.NextOffset)
+	}
+	if body.Items[0].ID != "report-1" || body.Items[1].ID != "report-2" {
+		t.Fatalf("Items = %#v, want first two reports", body.Items)
 	}
 }
 

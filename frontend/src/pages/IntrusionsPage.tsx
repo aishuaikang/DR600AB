@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { TFunction } from "i18next";
-import { MapPinned, RefreshCw, Trash2, X } from "lucide-react";
+import { ChevronDown, MapPinned, RefreshCw, ShieldMinus, ShieldPlus, Trash2, X } from "lucide-react";
 
 import { deleteIntrusions, getIntrusions } from "../api";
 import { Badge } from "../components/Badge";
@@ -14,11 +14,13 @@ import type {
   ScreenPositionPoint,
   ScreenPositionTarget,
   ScreenPositionTrackPoint,
+  UserSettings,
 } from "../types";
 import { cx } from "../utils/classnames";
 import { formatNumber, formatTime } from "../utils/format";
 import { resolveDisplayModel } from "../utils/models";
 import { extractErrorMessage } from "../utils/session";
+import { isSerialWhitelisted, normalizeWhitelistSerial, removeWhitelistSerial, upsertWhitelistItem } from "../utils/whitelist";
 import { PositionMap } from "./ScreenMap";
 import { referenceMapLayers } from "./screenData";
 
@@ -29,8 +31,24 @@ type CellDetail = {
   mono?: boolean;
 };
 
-const intrusionLimit = 200;
+const intrusionPageSize = 50;
 const intrusionFilters: IntrusionFilter[] = ["all", "detection", "position"];
+
+function appendIntrusionRecords(
+  current: IntrusionRecord[],
+  incoming: IntrusionRecord[],
+) {
+  const existingIds = new Set(current.map((item) => item.id));
+  const next = [...current];
+  for (const item of incoming) {
+    if (existingIds.has(item.id)) {
+      continue;
+    }
+    existingIds.add(item.id);
+    next.push(item);
+  }
+  return next;
+}
 
 function formatIntrusionDateKey(value: string) {
   const date = new Date(value);
@@ -109,11 +127,22 @@ function formatDistanceMetric(locale: string, value: number | undefined) {
   return `${formatNumber(locale, value, 0)} m`;
 }
 
-function formatPoint(point?: ScreenPositionPoint) {
+function hasDisplayableIntrusionPoint(point?: ScreenPositionPoint | null): point is ScreenPositionPoint {
   if (!point) {
+    return false;
+  }
+  return typeof point.latitude === "number" && typeof point.longitude === "number";
+}
+
+function formatCoordinateNumber(value: number) {
+  return Number.isFinite(value) ? value.toFixed(6) : String(value);
+}
+
+function formatPoint(point?: ScreenPositionPoint | null) {
+  if (!hasDisplayableIntrusionPoint(point)) {
     return "-";
   }
-  return `${point.latitude.toFixed(6)}, ${point.longitude.toFixed(6)}`;
+  return `${formatCoordinateNumber(point.latitude)}, ${formatCoordinateNumber(point.longitude)}`;
 }
 
 function validIntrusionPoint(point?: ScreenPositionPoint | null): point is ScreenPositionPoint {
@@ -135,19 +164,19 @@ function validIntrusionTrackPoint(point?: ScreenPositionTrackPoint | null): poin
 
 function coordinateSummary(record: IntrusionRecord, t: TFunction) {
   const parts: string[] = [];
-  if (record.deviceLocation?.valid && record.deviceLocation.point) {
+  if (hasDisplayableIntrusionPoint(record.deviceLocation?.point)) {
     parts.push(`${t("intrusionDeviceLocation", { ns: "settings" })}: ${formatPoint(record.deviceLocation.point)}`);
   }
   if (record.targetType !== "position") {
     return parts.length > 0 ? parts.join(" / ") : "-";
   }
-  if (record.drone) {
+  if (hasDisplayableIntrusionPoint(record.drone)) {
     parts.push(`${t("intrusionDrone", { ns: "settings" })}: ${formatPoint(record.drone)}`);
   }
-  if (record.pilot) {
+  if (hasDisplayableIntrusionPoint(record.pilot)) {
     parts.push(`${t("intrusionPilot", { ns: "settings" })}: ${formatPoint(record.pilot)}`);
   }
-  if (record.home) {
+  if (hasDisplayableIntrusionPoint(record.home)) {
     parts.push(`${t("intrusionHome", { ns: "settings" })}: ${formatPoint(record.home)}`);
   }
   return parts.length > 0 ? parts.join(" / ") : "-";
@@ -163,7 +192,7 @@ function targetTypeTone(type: IntrusionTargetType): Tone {
 
 function hasIntrusionMapData(record: IntrusionRecord) {
   return (
-    validIntrusionPoint(record.deviceLocation?.point) ||
+    Boolean(record.deviceLocation?.valid && validIntrusionPoint(record.deviceLocation.point)) ||
     validIntrusionPoint(record.drone) ||
     validIntrusionPoint(record.pilot) ||
     Boolean(record.droneTrajectory?.some(validIntrusionTrackPoint)) ||
@@ -300,6 +329,44 @@ function CoordinateMapCell({
         </button>
       ) : null}
     </div>
+  );
+}
+
+function WhitelistActionButton({
+  record,
+  whitelisted,
+  busy,
+  disabled,
+  t,
+  onToggle,
+}: {
+  record: IntrusionRecord;
+  whitelisted: boolean;
+  busy: boolean;
+  disabled: boolean;
+  t: TFunction;
+  onToggle: (record: IntrusionRecord) => void;
+}) {
+  if (record.targetType !== "position") {
+    return null;
+  }
+
+  const label = whitelisted
+    ? t("removeFromWhitelist", { ns: "screen" })
+    : t("addToWhitelist", { ns: "screen" });
+
+  return (
+    <button
+      className={cx("intrusion-whitelist-button", whitelisted && "intrusion-whitelist-button--active")}
+      type="button"
+      disabled={disabled || busy}
+      title={label}
+      aria-label={label}
+      onClick={() => onToggle(record)}
+    >
+      {whitelisted ? <ShieldMinus size={13} aria-hidden="true" /> : <ShieldPlus size={13} aria-hidden="true" />}
+      <span>{busy ? t("loading", { ns: "common" }) : label}</span>
+    </button>
   );
 }
 
@@ -461,10 +528,14 @@ function DeleteConfirmModal({
 
 export function IntrusionsPage({
   locale,
+  userSettings,
   t,
+  onUserSettingsChange,
 }: {
   locale: string;
+  userSettings: UserSettings;
   t: TFunction;
+  onUserSettingsChange: (settings: UserSettings) => Promise<UserSettings>;
 }) {
   const [records, setRecords] = useState<IntrusionRecord[]>([]);
   const [filter, setFilter] = useState<IntrusionFilter>("all");
@@ -474,29 +545,48 @@ export function IntrusionsPage({
   const [intrusionDateTo, setIntrusionDateTo] = useState("");
   const [banner, setBanner] = useState<Banner>({ kind: "idle", message: "" });
   const [loading, setLoading] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [hasMore, setHasMore] = useState(false);
+  const [nextOffset, setNextOffset] = useState(0);
   const [cellDetail, setCellDetail] = useState<CellDetail | null>(null);
   const [mapRecord, setMapRecord] = useState<IntrusionRecord | null>(null);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [deleteBusy, setDeleteBusy] = useState(false);
+  const [whitelistBusySerial, setWhitelistBusySerial] = useState("");
 
-  const loadRecords = useCallback(async (options?: { preserveBanner?: boolean }) => {
-    setLoading(true);
-    if (!options?.preserveBanner) {
+  const loadRecords = useCallback(async (options?: { append?: boolean; offset?: number; preserveBanner?: boolean }) => {
+    const append = Boolean(options?.append);
+    const offset = append ? options?.offset ?? 0 : 0;
+    if (append) {
+      setLoadingMore(true);
+    } else {
+      setLoading(true);
+    }
+    if (!append && !options?.preserveBanner) {
       setBanner({ kind: "loading", message: t("loading", { ns: "common" }) });
     }
     try {
-      const response = await getIntrusions(locale, intrusionLimit, filter);
-      setRecords(response.items);
-      const availableIds = new Set(response.items.map((item) => item.id));
-      setSelectedIds((items) => items.filter((id) => availableIds.has(id)));
-      if (!options?.preserveBanner) {
+      const response = await getIntrusions(locale, intrusionPageSize, filter, offset);
+      const items = response.items ?? [];
+      setRecords((current) => (append ? appendIntrusionRecords(current, items) : items));
+      if (!append) {
+        const availableIds = new Set(items.map((item) => item.id));
+        setSelectedIds((selected) => selected.filter((id) => availableIds.has(id)));
+      }
+      setHasMore(Boolean(response.hasMore));
+      setNextOffset(response.hasMore ? response.nextOffset ?? offset + items.length : 0);
+      if (!append && !options?.preserveBanner) {
         setBanner({ kind: "idle", message: "" });
       }
     } catch (error) {
       setBanner({ kind: "error", message: extractErrorMessage(error, t("unexpectedError", { ns: "common" })) });
     } finally {
-      setLoading(false);
+      if (append) {
+        setLoadingMore(false);
+      } else {
+        setLoading(false);
+      }
     }
   }, [filter, locale, t]);
 
@@ -599,6 +689,37 @@ export function IntrusionsPage({
     }
   };
 
+  const toggleRecordWhitelist = useCallback(async (record: IntrusionRecord) => {
+    if (record.targetType !== "position") {
+      return;
+    }
+    const serial = record.serial?.trim() ?? "";
+    if (!serial) {
+      setBanner({ kind: "error", message: t("whitelistSerialRequired", { ns: "settings" }) });
+      return;
+    }
+    const busySerial = normalizeWhitelistSerial(serial);
+    const whitelisted = isSerialWhitelisted(serial, userSettings.whitelist);
+    setWhitelistBusySerial(busySerial);
+    try {
+      await onUserSettingsChange({
+        ...userSettings,
+        whitelist: whitelisted
+          ? removeWhitelistSerial(userSettings.whitelist, serial)
+          : upsertWhitelistItem(userSettings.whitelist, {
+            serial,
+            model: resolveDisplayModel(record) || record.model,
+            source: record.source || "intrusion",
+          }),
+      });
+      setBanner({ kind: "success", message: t(whitelisted ? "whitelistDeleted" : "whitelistSaved", { ns: "settings" }) });
+    } catch (error) {
+      setBanner({ kind: "error", message: extractErrorMessage(error, t("unexpectedError", { ns: "common" })) });
+    } finally {
+      setWhitelistBusySerial("");
+    }
+  }, [onUserSettingsChange, t, userSettings]);
+
   return (
     <section className="flex min-h-0 min-w-0 flex-1">
       <Panel className="flex min-h-0 min-w-0 flex-1 flex-col">
@@ -611,13 +732,13 @@ export function IntrusionsPage({
                 <button
                   className="btn btn-sm btn-outline btn-error"
                   type="button"
-                  disabled={selectedCount === 0 || loading || deleteBusy}
+                  disabled={selectedCount === 0 || loading || loadingMore || deleteBusy}
                   onClick={() => setDeleteConfirmOpen(true)}
                 >
                   <Trash2 size={16} />
                   <span>{t("intrusionDeleteSelected", { ns: "settings", count: selectedCount })}</span>
                 </button>
-                <button className="btn btn-sm btn-outline btn-info" type="button" onClick={() => void loadRecords()} disabled={loading || deleteBusy}>
+                <button className="btn btn-sm btn-outline btn-info" type="button" onClick={() => void loadRecords()} disabled={loading || loadingMore || deleteBusy}>
                   <RefreshCw size={16} className={loading ? "animate-spin" : undefined} />
                   <span>{t("refresh", { ns: "common" })}</span>
                 </button>
@@ -714,7 +835,7 @@ export function IntrusionsPage({
                         }
                       }}
                       aria-label={t("intrusionSelectCurrentPage", { ns: "settings" })}
-                      disabled={visibleRecords.length === 0 || loading || deleteBusy}
+                      disabled={visibleRecords.length === 0 || loading || loadingMore || deleteBusy}
                       onChange={(event) => toggleCurrentPageSelection(event.currentTarget.checked)}
                     />
                   </th>
@@ -770,13 +891,23 @@ export function IntrusionsPage({
                         />
                       </td>
                       <td>
-                        <OverflowCell
-                          label={t("intrusionIdentity", { ns: "settings" })}
-                          value={record.serial || "-"}
-                          mono
-                          className="rounded-xl bg-base-200/80 px-2 py-1 text-xs"
-                          onOpen={setCellDetail}
-                        />
+                        <div className="intrusion-identity-cell">
+                          <OverflowCell
+                            label={t("intrusionIdentity", { ns: "settings" })}
+                            value={record.serial || "-"}
+                            mono
+                            className="rounded-xl bg-base-200/80 px-2 py-1 text-xs"
+                            onOpen={setCellDetail}
+                          />
+                          <WhitelistActionButton
+                            record={record}
+                            whitelisted={isSerialWhitelisted(record.serial, userSettings.whitelist)}
+                            busy={Boolean(record.serial && whitelistBusySerial === normalizeWhitelistSerial(record.serial))}
+                            disabled={deleteBusy || Boolean(whitelistBusySerial) || !record.serial?.trim()}
+                            t={t}
+                            onToggle={(target) => void toggleRecordWhitelist(target)}
+                          />
+                        </div>
                       </td>
                       <td className="tabular-nums">{formatFrequency(locale, record.frequency)}</td>
                       <td className="tabular-nums">{formatRSSI(locale, record.rssi)}</td>
@@ -816,6 +947,19 @@ export function IntrusionsPage({
               </tbody>
             </table>
           </div>
+          {hasMore ? (
+            <div className="flex justify-center">
+              <button
+                className="btn btn-sm btn-outline"
+                type="button"
+                disabled={loading || loadingMore || deleteBusy}
+                onClick={() => void loadRecords({ append: true, offset: nextOffset, preserveBanner: true })}
+              >
+                <ChevronDown size={15} aria-hidden="true" />
+                <span>{loadingMore ? t("loading", { ns: "common" }) : t("loadMore", { ns: "common" })}</span>
+              </button>
+            </div>
+          ) : null}
         </PanelBody>
       </Panel>
       <CellDetailModal

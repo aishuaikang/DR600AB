@@ -25,5 +25,11 @@
   "deception.session.inactive": "当前没有活动诱骗设备串口会话",
   "deception.started": "诱骗已开启",
   "deception.stopped": "诱骗已停止",
-  "deception.query.ok": "诱骗设备查询成功"
+  "deception.query.ok": "诱骗设备查询成功",
+  "compass.session.connecting": "三维电子罗盘串口正在连接",
+  "compass.session.started": "三维电子罗盘串口已连接",
+  "compass.session.reconnecting": "三维电子罗盘串口已断开，正在自动重连",
+  "compass.session.stopped": "三维电子罗盘串口已停止",
+  "compass.session.inactive": "当前没有活动三维电子罗盘串口会话",
+  "compass.session.disconnected": "三维电子罗盘串口连接已断开"
 }

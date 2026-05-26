@@ -37,5 +37,9 @@
   "deception_invalid_random": "Random coordinate settings are invalid",
   "deception_invalid_query": "Unsupported spoofing device query item",
   "deception_report_not_found": "Deception report was not found",
-  "deception_report_delete_not_failed": "Only failed deception reports can be deleted"
+  "deception_report_delete_not_failed": "Only failed deception reports can be deleted",
+  "interference_report_not_found": "Interference report was not found",
+  "interference_report_delete_not_failed": "Only failed interference reports can be deleted",
+  "compass_port_required": "Select a 3D compass serial port",
+  "compass_port_open_failed": "Failed to open 3D compass serial port"
 }

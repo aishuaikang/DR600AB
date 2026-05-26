@@ -41,6 +41,7 @@
   "deviceLocation": "Device Location",
   "deviceLocationGps": "GPS coordinates",
   "deviceLocationManual": "Manual coordinates",
+  "deviceHeading": "Device Heading",
   "operationPanel": "Operations",
   "strike": "Interference",
   "deception": "Spoofing",

@@ -75,7 +75,7 @@ func openDetectorPorts(baseCfg serialport.Config, legacyPortName, rxPortName, tx
 	rxCfg.PortName = rxPortName
 	readPort, err := serialport.Open(&rxCfg)
 	if err != nil {
-		return nil, "", nil, "", fmt.Errorf("打开接收数据串口失败: %w", err)
+		return nil, "", nil, "", err
 	}
 
 	if txPortName == rxCfg.PortName {
@@ -87,7 +87,7 @@ func openDetectorPorts(baseCfg serialport.Config, legacyPortName, rxPortName, tx
 	writePort, err := serialport.Open(&txCfg)
 	if err != nil {
 		readPort.Close()
-		return nil, "", nil, "", fmt.Errorf("打开发送命令串口失败: %w", err)
+		return nil, "", nil, "", err
 	}
 
 	return readPort, rxCfg.PortName, writePort, txCfg.PortName, nil

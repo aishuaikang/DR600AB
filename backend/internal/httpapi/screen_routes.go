@@ -229,9 +229,14 @@ func (s *Server) screenStatus(locale string) (model.ScreenRuntimeStatus, error) 
 	if err != nil {
 		return model.ScreenRuntimeStatus{}, err
 	}
+	compassSettings, compassConfigured, err := s.compass.Configured()
+	if err != nil {
+		return model.ScreenRuntimeStatus{}, err
+	}
 
 	detectionSession := s.detection.Current(locale)
 	deceptionSession := s.deception.Current(locale)
+	compassSession := s.compass.Current(locale)
 
 	return model.ScreenRuntimeStatus{
 		Detection: screenDetectionCapabilityStatus(
@@ -243,6 +248,11 @@ func (s *Server) screenStatus(locale string) (model.ScreenRuntimeStatus, error) 
 			deceptionSettings,
 			deceptionConfigured,
 			deceptionSession,
+		),
+		Compass: screenCompassCapabilityStatus(
+			compassSettings,
+			compassConfigured,
+			compassSession,
 		),
 	}, nil
 }
@@ -304,6 +314,46 @@ func screenDeceptionCapabilityStatus(
 		status.PortName = session.PortName
 	}
 	return status
+}
+
+func screenCompassCapabilityStatus(
+	settings model.CompassSessionRequest,
+	configured bool,
+	session model.CompassSessionResponse,
+) model.ScreenSerialCapabilityStatus {
+	status := model.ScreenSerialCapabilityStatus{
+		Configured: configured || session.PortName != "",
+		Active:     session.Active,
+		State:      session.State,
+		LastError:  session.LastError,
+	}
+	if status.Configured {
+		status.PortName = settings.PortName
+	} else {
+		status.State = "unconfigured"
+	}
+	if session.PortName != "" {
+		status.PortName = session.PortName
+	}
+	status.HeadingDeg = cloneFloat64Ptr(session.LastHeading)
+	status.HeadingUpdatedAt = cloneTimePtr(session.LastUpdatedAt)
+	return status
+}
+
+func cloneFloat64Ptr(value *float64) *float64 {
+	if value == nil {
+		return nil
+	}
+	cloned := *value
+	return &cloned
+}
+
+func cloneTimePtr(value *time.Time) *time.Time {
+	if value == nil {
+		return nil
+	}
+	cloned := *value
+	return &cloned
 }
 
 func screenDeviceLocationResponse(

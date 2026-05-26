@@ -2,6 +2,7 @@
   "app.title": "无人机智能管控系统",
   "loading": "加载中",
   "refresh": "刷新",
+  "loadMore": "加载更多",
   "reserved": "预留",
   "active": "运行中",
   "idle": "空闲",

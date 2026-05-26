@@ -45,8 +45,11 @@ func (s *Server) handleIntrusionRecords(c *fiber.Ctx) error {
 			err.Error(),
 		)
 	}
+	limit := parseLimit(c, 200)
+	offset := parseOffset(c)
 	items, err := s.intrusions.List(intrusion.QueryOptions{
-		Limit:      parseLimit(c, 200),
+		Limit:      limit + 1,
+		Offset:     offset,
 		TargetType: targetType,
 	})
 	if err != nil {
@@ -58,10 +61,7 @@ func (s *Server) handleIntrusionRecords(c *fiber.Ctx) error {
 			err.Error(),
 		)
 	}
-	return c.JSON(model.ListResponse[model.IntrusionRecord]{
-		Items: items,
-		Count: len(items),
-	})
+	return c.JSON(pagedListResponse(items, limit, offset))
 }
 
 // handleDeleteIntrusionRecords deletes selected intrusion records.

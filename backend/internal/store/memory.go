@@ -39,6 +39,7 @@ type MemoryStore struct {
 	positions  []model.ScreenPositionTarget
 	parsed     []model.ParsedMessage
 	gps        []model.GPSRecord
+	compass    []model.CompassRecord
 
 	expiredDetections []model.ScreenDetectionTarget
 	expiredPositions  []model.ScreenPositionTarget
@@ -128,6 +129,15 @@ func (s *MemoryStore) AddGPS(record model.GPSRecord) {
 	s.Publish(model.Event{Type: "gps.record", Time: record.ReceivedAt, Payload: record})
 }
 
+// AddCompass 追加三维电子罗盘角度记录，并发布罗盘事件。
+func (s *MemoryStore) AddCompass(record model.CompassRecord) {
+	s.mu.Lock()
+	s.compass = appendBounded(s.compass, record, s.maxParsed)
+	s.mu.Unlock()
+
+	s.Publish(model.Event{Type: "compass.record", Time: record.ReceivedAt, Payload: record})
+}
+
 // ListParsed 按时间倒序返回最新解析消息。
 func (s *MemoryStore) ListParsed(limit int) []model.ParsedMessage {
 	s.mu.RLock()
@@ -175,6 +185,13 @@ func (s *MemoryStore) ListGPS(limit int) []model.GPSRecord {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return latest(s.gps, limit)
+}
+
+// ListCompass 按时间倒序返回最新三维电子罗盘角度记录。
+func (s *MemoryStore) ListCompass(limit int) []model.CompassRecord {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return latest(s.compass, limit)
 }
 
 // Subscribe 注册事件通道，并返回取消订阅函数。

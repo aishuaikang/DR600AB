@@ -35,8 +35,11 @@ func (s *Server) handleDeceptionReports(c *fiber.Ctx) error {
 			Count: 0,
 		})
 	}
+	limit := parseLimit(c, 200)
+	offset := parseOffset(c)
 	items, err := s.reports.List(deceptionreport.QueryOptions{
-		Limit:  parseLimit(c, 200),
+		Limit:  limit + 1,
+		Offset: offset,
 		Status: status,
 	})
 	if err != nil {
@@ -48,10 +51,7 @@ func (s *Server) handleDeceptionReports(c *fiber.Ctx) error {
 			err.Error(),
 		)
 	}
-	return c.JSON(model.ListResponse[model.DeceptionReportSummary]{
-		Items: items,
-		Count: len(items),
-	})
+	return c.JSON(pagedListResponse(items, limit, offset))
 }
 
 // handleDeceptionReport 返回单条诱骗报告详情。

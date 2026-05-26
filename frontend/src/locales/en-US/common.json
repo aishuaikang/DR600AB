@@ -2,6 +2,7 @@
   "app.title": "UAV Control System",
   "loading": "Loading",
   "refresh": "Refresh",
+  "loadMore": "Load More",
   "reserved": "Reserved",
   "active": "Running",
   "idle": "Idle",

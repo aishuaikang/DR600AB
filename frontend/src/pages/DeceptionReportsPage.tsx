@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { TFunction } from "i18next";
-import { RefreshCw, Trash2 } from "lucide-react";
+import { ChevronDown, RefreshCw, Trash2 } from "lucide-react";
 
 import { deleteFailedDeceptionReport, getDeceptionReports } from "../api";
 import { Badge } from "../components/Badge";
@@ -15,9 +15,25 @@ import { extractErrorMessage } from "../utils/session";
 type ReportFilter = "all" | DeceptionReportStatus;
 type ReportModeFilter = "all" | "fixed_point" | "circle" | "linear";
 
-const reportLimit = 200;
+const reportPageSize = 50;
 const reportFilters: ReportFilter[] = ["all", "running", "completed", "failed", "abnormal"];
 const reportModeFilters: ReportModeFilter[] = ["all", "fixed_point", "circle", "linear"];
+
+function appendReports(
+  current: DeceptionReportSummary[],
+  incoming: DeceptionReportSummary[],
+) {
+  const existingIds = new Set(current.map((item) => item.id));
+  const next = [...current];
+  for (const item of incoming) {
+    if (existingIds.has(item.id)) {
+      continue;
+    }
+    existingIds.add(item.id);
+    next.push(item);
+  }
+  return next;
+}
 
 function formatReportDateKey(value: string) {
   const date = new Date(value);
@@ -89,23 +105,39 @@ export function DeceptionReportsPage({
   const [reportMode, setReportMode] = useState<ReportModeFilter>("all");
   const [banner, setBanner] = useState<Banner>({ kind: "idle", message: "" });
   const [loading, setLoading] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [hasMore, setHasMore] = useState(false);
+  const [nextOffset, setNextOffset] = useState(0);
   const [deletingId, setDeletingId] = useState("");
 
-  const loadReports = useCallback(async (options?: { preserveBanner?: boolean }) => {
-    setLoading(true);
-    if (!options?.preserveBanner) {
+  const loadReports = useCallback(async (options?: { append?: boolean; offset?: number; preserveBanner?: boolean }) => {
+    const append = Boolean(options?.append);
+    const offset = append ? options?.offset ?? 0 : 0;
+    if (append) {
+      setLoadingMore(true);
+    } else {
+      setLoading(true);
+    }
+    if (!append && !options?.preserveBanner) {
       setBanner({ kind: "loading", message: t("loading", { ns: "common" }) });
     }
     try {
-      const response = await getDeceptionReports(locale, reportLimit, filter);
-      setReports(response.items);
-      if (!options?.preserveBanner) {
+      const response = await getDeceptionReports(locale, reportPageSize, filter, offset);
+      const items = response.items ?? [];
+      setReports((current) => (append ? appendReports(current, items) : items));
+      setHasMore(Boolean(response.hasMore));
+      setNextOffset(response.hasMore ? response.nextOffset ?? offset + items.length : 0);
+      if (!append && !options?.preserveBanner) {
         setBanner({ kind: "idle", message: "" });
       }
     } catch (error) {
       setBanner({ kind: "error", message: extractErrorMessage(error, t("unexpectedError", { ns: "common" })) });
     } finally {
-      setLoading(false);
+      if (append) {
+        setLoadingMore(false);
+      } else {
+        setLoading(false);
+      }
     }
   }, [filter, locale, t]);
 
@@ -189,7 +221,7 @@ export function DeceptionReportsPage({
             title={t("deceptionReportsTitle", { ns: "settings" })}
             description={t("deceptionReportsDescription", { ns: "settings" })}
             action={
-              <button className="btn btn-sm btn-outline btn-info" type="button" onClick={() => void loadReports()} disabled={loading || Boolean(deletingId)}>
+              <button className="btn btn-sm btn-outline btn-info" type="button" onClick={() => void loadReports()} disabled={loading || loadingMore || Boolean(deletingId)}>
                 <RefreshCw size={16} className={loading ? "animate-spin" : undefined} />
                 <span>{t("refresh", { ns: "common" })}</span>
               </button>
@@ -325,6 +357,19 @@ export function DeceptionReportsPage({
               </tbody>
             </table>
           </div>
+          {hasMore ? (
+            <div className="flex justify-center">
+              <button
+                className="btn btn-sm btn-outline"
+                type="button"
+                disabled={loading || loadingMore || Boolean(deletingId)}
+                onClick={() => void loadReports({ append: true, offset: nextOffset, preserveBanner: true })}
+              >
+                <ChevronDown size={15} aria-hidden="true" />
+                <span>{loadingMore ? t("loading", { ns: "common" }) : t("loadMore", { ns: "common" })}</span>
+              </button>
+            </div>
+          ) : null}
         </PanelBody>
       </Panel>
     </section>

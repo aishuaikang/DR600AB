@@ -25,6 +25,7 @@ const defaultQueryLimit = 200
 // QueryOptions controls deception report listing.
 type QueryOptions struct {
 	Limit  int
+	Offset int
 	Status model.DeceptionReportStatus
 }
 
@@ -277,6 +278,10 @@ func (s *Store) List(options QueryOptions) ([]model.DeceptionReportSummary, erro
 	if limit <= 0 {
 		limit = defaultQueryLimit
 	}
+	offset := options.Offset
+	if offset < 0 {
+		offset = 0
+	}
 	args := []any{}
 	query := `SELECT
 		id, status, started_at, ended_at, duration_seconds, target_id, mode, point_json,
@@ -287,8 +292,8 @@ func (s *Store) List(options QueryOptions) ([]model.DeceptionReportSummary, erro
 		query += ` WHERE status = ?`
 		args = append(args, string(options.Status))
 	}
-	query += ` ORDER BY started_at DESC, created_at DESC LIMIT ?`
-	args = append(args, limit)
+	query += ` ORDER BY started_at DESC, created_at DESC LIMIT ? OFFSET ?`
+	args = append(args, limit, offset)
 
 	rows, err := s.db.Query(query, args...)
 	if err != nil {
@@ -352,7 +357,7 @@ func (s *Store) DeleteFailed(id string) (int64, error) {
 		if errors.Is(err, sql.ErrNoRows) {
 			return 0, ErrNotFound
 		}
-		return 0, fmt.Errorf("读取诱骗报告状态失败: %w", err)
+		return 0, err
 	}
 	if model.DeceptionReportStatus(status) != model.DeceptionReportStatusFailed {
 		return 0, ErrNotFailed

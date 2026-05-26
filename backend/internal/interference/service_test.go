@@ -1,6 +1,7 @@
 package interference
 
 import (
+	"errors"
 	"reflect"
 	"testing"
 	"time"
@@ -16,6 +17,7 @@ type fakePin struct {
 	low     int
 	cleanup int
 	value   int
+	highErr error
 }
 
 func (f *fakePin) Setup() error {
@@ -24,6 +26,9 @@ func (f *fakePin) Setup() error {
 }
 
 func (f *fakePin) SetHigh() error {
+	if f.highErr != nil {
+		return f.highErr
+	}
 	f.high++
 	f.value = 1
 	return nil
@@ -336,6 +341,108 @@ func TestScreenStrikeTimeoutStopsChannels(t *testing.T) {
 	}
 }
 
+func TestSetScreenStrikeCreatesAndCompletesReport(t *testing.T) {
+	svc, _ := newStrikeTestService(t)
+	defer svc.Shutdown()
+
+	reports := &fakeInterferenceReportStore{}
+	svc.SetReportStore(reports)
+
+	if _, err := svc.SetScreenStrike(model.ScreenStrikeRequest{
+		Enabled:         true,
+		ChannelIDs:      []string{"io1", "io3"},
+		DurationSeconds: 60,
+	}, "zh-CN"); err != nil {
+		t.Fatalf("SetScreenStrike(start) error = %v", err)
+	}
+
+	if len(reports.items) != 1 {
+		t.Fatalf("reports len = %d, want 1", len(reports.items))
+	}
+	started := reports.items[0]
+	if started.Status != model.InterferenceReportStatusRunning {
+		t.Fatalf("started status = %q, want running", started.Status)
+	}
+	if !reflect.DeepEqual(started.ChannelIDs, []string{"io1", "io3"}) {
+		t.Fatalf("started channel IDs = %+v, want io1/io3", started.ChannelIDs)
+	}
+	if len(started.ChannelLabels) != 2 || started.ChannelLabels[0] != "433M" || started.ChannelLabels[1] != "2.4G" {
+		t.Fatalf("started channel labels = %+v, want 433M/2.4G", started.ChannelLabels)
+	}
+
+	if _, err := svc.SetScreenStrike(model.ScreenStrikeRequest{Enabled: false}, "zh-CN"); err != nil {
+		t.Fatalf("SetScreenStrike(stop) error = %v", err)
+	}
+	completed := reports.items[0]
+	if completed.Status != model.InterferenceReportStatusCompleted {
+		t.Fatalf("completed status = %q, want completed", completed.Status)
+	}
+	if completed.EndedAt == nil || completed.EndState == nil || completed.EndState.Active {
+		t.Fatalf("completed report = %+v, want inactive end state with end time", completed)
+	}
+}
+
+func TestSetScreenStrikeReportUsesConfiguredBandLabels(t *testing.T) {
+	svc, _ := newStrikeTestService(t)
+	defer svc.Shutdown()
+
+	reports := &fakeInterferenceReportStore{}
+	svc.SetReportStore(reports)
+	svc.SetUserSettingsStore(fakeUserSettingsStore{
+		settings: model.UserSettings{
+			ScreenStrikeChannelLabels: []string{"低频段", "中频段", "高频段"},
+		},
+		ok: true,
+	})
+
+	if _, err := svc.SetScreenStrike(model.ScreenStrikeRequest{
+		Enabled:         true,
+		ChannelIDs:      []string{"io1", "io3"},
+		DurationSeconds: 60,
+	}, "zh-CN"); err != nil {
+		t.Fatalf("SetScreenStrike(start) error = %v", err)
+	}
+
+	if len(reports.items) != 1 {
+		t.Fatalf("reports len = %d, want 1", len(reports.items))
+	}
+	started := reports.items[0]
+	if !reflect.DeepEqual(started.ChannelLabels, []string{"低频段", "高频段"}) {
+		t.Fatalf("started channel labels = %+v, want configured labels", started.ChannelLabels)
+	}
+}
+
+func TestSetScreenStrikeCreatesFailedReportOnPinError(t *testing.T) {
+	svc, pins := newStrikeTestService(t)
+	defer svc.Shutdown()
+
+	reports := &fakeInterferenceReportStore{}
+	svc.SetReportStore(reports)
+	pins["io2"].highErr = errors.New("gpio high failed")
+
+	state, err := svc.SetScreenStrike(model.ScreenStrikeRequest{
+		Enabled:         true,
+		ChannelIDs:      []string{"io1", "io2"},
+		DurationSeconds: 60,
+	}, "zh-CN")
+	if err == nil {
+		t.Fatal("SetScreenStrike() error = nil, want pin error")
+	}
+	if state.Active {
+		t.Fatalf("state active = true after failure: %+v", state)
+	}
+	if len(reports.items) != 1 {
+		t.Fatalf("reports len = %d, want 1", len(reports.items))
+	}
+	failed := reports.items[0]
+	if failed.Status != model.InterferenceReportStatusFailed {
+		t.Fatalf("failed status = %q, want failed", failed.Status)
+	}
+	if failed.LastError == "" || failed.EndedAt == nil {
+		t.Fatalf("failed report = %+v, want error and end time", failed)
+	}
+}
+
 func TestScreenStrikeStateUsesActualHighLevel(t *testing.T) {
 	svc, pins := newStrikeTestService(t)
 	defer svc.Shutdown()
@@ -451,4 +558,41 @@ func newStrikeTestService(t *testing.T) (*Service, map[string]*fakePin) {
 		return pinsByNumber[number]
 	})
 	return svc, pins
+}
+
+type fakeInterferenceReportStore struct {
+	items []model.InterferenceReport
+}
+
+type fakeUserSettingsStore struct {
+	settings model.UserSettings
+	ok       bool
+	err      error
+}
+
+func (s fakeUserSettingsStore) LoadUser() (model.UserSettings, bool, error) {
+	return s.settings, s.ok, s.err
+}
+
+func (s *fakeInterferenceReportStore) Create(report model.InterferenceReport) (model.InterferenceReport, error) {
+	if report.ID == "" {
+		report.ID = "report-" + string(rune('1'+len(s.items)))
+	}
+	s.items = append(s.items, cloneInterferenceReport(report))
+	return report, nil
+}
+
+func (s *fakeInterferenceReportStore) CreateRunning(report model.InterferenceReport) (model.InterferenceReport, error) {
+	report.Status = model.InterferenceReportStatusRunning
+	return s.Create(report)
+}
+
+func (s *fakeInterferenceReportStore) Update(report model.InterferenceReport) error {
+	for index := range s.items {
+		if s.items[index].ID == report.ID {
+			s.items[index] = cloneInterferenceReport(report)
+			return nil
+		}
+	}
+	return errors.New("report not found")
 }

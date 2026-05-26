@@ -136,6 +136,14 @@ func (s *Server) handlePorts(c *fiber.Ctx) error {
 			}
 		}
 	}
+	compassSession := s.compass.Current(locale)
+	if compassSession.Active {
+		for index := range ports {
+			if ports[index].Name == compassSession.PortName {
+				ports[index].Active = true
+			}
+		}
+	}
 	return c.JSON(fiber.Map{
 		"ports":         ports,
 		"activeSession": s.detection.Current(locale),

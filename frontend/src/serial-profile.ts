@@ -6,6 +6,11 @@ export const FIXED_SERIAL_PROFILE = {
   readTimeoutMs: 1000,
 } as const;
 
+export const COMPASS_SERIAL_PROFILE = {
+  ...FIXED_SERIAL_PROFILE,
+  baudRate: 9600,
+} as const;
+
 export const DETECTION_DEFAULT_BAUD_RATE = 460800;
 
 export const SERIAL_BAUD_RATE_LIMITS = {

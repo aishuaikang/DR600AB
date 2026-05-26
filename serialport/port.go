@@ -60,7 +60,7 @@ func Open(cfg *Config) (serial.Port, error) {
 
 	port, err := serial.Open(cfg.PortName, mode)
 	if err != nil {
-		return nil, fmt.Errorf("打开串口 %s 失败: %w", cfg.PortName, err)
+		return nil, err
 	}
 
 	if cfg.ReadTimeout > 0 {

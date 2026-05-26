@@ -29,11 +29,14 @@ func (s *Server) routes() {
 	s.registerDetectionRoutes(api)
 	s.registerIntrusionRoutes(api)
 	s.registerDeceptionReportRoutes(api)
+	s.registerInterferenceReportRoutes(api)
 	s.registerScreenRoutes(api)
 	s.registerInterferenceRoutes(api)
 	s.registerDeceptionRoutes(api)
+	s.registerCompassRoutes(api)
 	s.registerNetworkRoutes(api)
 
+	s.registerOfflineMapRoutes()
 	s.registerFrontendRoutes()
 }
 

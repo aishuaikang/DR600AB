@@ -73,6 +73,7 @@ func (s *Server) handleUpdateUserSettings(c *fiber.Ctx) error {
 	req.ScreenStrikeChannelLabels = normalizeScreenStrikeChannelLabels(req.ScreenStrikeChannelLabels)
 	req.Whitelist = normalizeUserWhitelist(req.Whitelist, time.Now())
 	req.DeviceSN = ""
+	req.DeviceHardwareID = ""
 	req = model.UserSettingsWithDefaults(req)
 	if s.userSettings == nil {
 		return c.JSON(req)

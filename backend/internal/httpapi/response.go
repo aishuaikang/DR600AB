@@ -55,3 +55,32 @@ func parseLimit(c *fiber.Ctx, fallback int) int {
 	}
 	return limit
 }
+
+// parseOffset 读取非负 offset 查询参数，失败时从列表首条开始。
+func parseOffset(c *fiber.Ctx) int {
+	raw := strings.TrimSpace(c.Query("offset"))
+	if raw == "" {
+		return 0
+	}
+	offset, err := strconv.Atoi(raw)
+	if err != nil || offset < 0 {
+		return 0
+	}
+	return offset
+}
+
+func pagedListResponse[T any](items []T, limit int, offset int) model.ListResponse[T] {
+	hasMore := len(items) > limit
+	if hasMore {
+		items = items[:limit]
+	}
+	response := model.ListResponse[T]{
+		Items:   items,
+		Count:   len(items),
+		HasMore: hasMore,
+	}
+	if hasMore {
+		response.NextOffset = offset + len(items)
+	}
+	return response
+}

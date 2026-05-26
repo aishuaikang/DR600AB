@@ -1,6 +1,10 @@
 import type {
   ApiErrorPayload,
   ChannelsResponse,
+  CompassRecord,
+  CompassSessionRequest,
+  CompassSessionResponse,
+  CompassSettings,
   DetectionRecord,
   DeceptionSessionRequest,
   DeceptionSessionResponse,
@@ -27,6 +31,10 @@ import type {
   IntrusionDeleteResponse,
   IntrusionRecord,
   IntrusionTargetType,
+  InterferenceReport,
+  InterferenceReportDeleteResponse,
+  InterferenceReportStatus,
+  InterferenceReportSummary,
   ListResponse,
   LocaleMeta,
   NetworkInterfacesResponse,
@@ -217,6 +225,30 @@ export function updateDeceptionSettings(
   }, locale);
 }
 
+export function getCompassSession(locale: string, developerToken: string): Promise<CompassSessionResponse> {
+  return requestJson<CompassSessionResponse>("/compass/session", {
+    headers: developerHeaders(developerToken),
+  }, locale);
+}
+
+export function getCompassSettings(locale: string, developerToken: string): Promise<CompassSettings> {
+  return requestJson<CompassSettings>("/compass/settings", {
+    headers: developerHeaders(developerToken),
+  }, locale);
+}
+
+export function updateCompassSettings(
+  payload: CompassSessionRequest,
+  locale: string,
+  developerToken: string,
+): Promise<CompassSessionResponse> {
+  return requestJson<CompassSessionResponse>("/compass/settings", {
+    method: "PUT",
+    headers: developerHeaders(developerToken),
+    body: JSON.stringify(payload),
+  }, locale);
+}
+
 export function queryDeceptionDevice(
   item: string,
   locale: string,
@@ -249,12 +281,26 @@ export function getGPSRecords(locale: string, developerToken: string, limit = 20
   }, locale);
 }
 
+export function getCompassRecords(
+  locale: string,
+  developerToken: string,
+  limit = 200,
+): Promise<ListResponse<CompassRecord>> {
+  return requestJson<ListResponse<CompassRecord>>(`/compass/records?limit=${limit}`, {
+    headers: developerHeaders(developerToken),
+  }, locale);
+}
+
 export function getIntrusions(
   locale: string,
   limit = 200,
   targetType?: IntrusionTargetType | "all",
+  offset = 0,
 ): Promise<ListResponse<IntrusionRecord>> {
   const params = new URLSearchParams({ limit: String(limit) });
+  if (offset > 0) {
+    params.set("offset", String(offset));
+  }
   if (targetType && targetType !== "all") {
     params.set("type", targetType);
   }
@@ -265,8 +311,12 @@ export function getDeceptionReports(
   locale: string,
   limit = 200,
   status?: DeceptionReportStatus | "all",
+  offset = 0,
 ): Promise<ListResponse<DeceptionReportSummary>> {
   const params = new URLSearchParams({ limit: String(limit) });
+  if (offset > 0) {
+    params.set("offset", String(offset));
+  }
   if (status && status !== "all") {
     params.set("status", status);
   }
@@ -279,6 +329,32 @@ export function getDeceptionReport(id: string, locale: string): Promise<Deceptio
 
 export function deleteFailedDeceptionReport(id: string, locale: string): Promise<DeceptionReportDeleteResponse> {
   return requestJson<DeceptionReportDeleteResponse>(`/deception-reports/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+  }, locale);
+}
+
+export function getInterferenceReports(
+  locale: string,
+  limit = 200,
+  status?: InterferenceReportStatus | "all",
+  offset = 0,
+): Promise<ListResponse<InterferenceReportSummary>> {
+  const params = new URLSearchParams({ limit: String(limit) });
+  if (offset > 0) {
+    params.set("offset", String(offset));
+  }
+  if (status && status !== "all") {
+    params.set("status", status);
+  }
+  return requestJson<ListResponse<InterferenceReportSummary>>(`/interference-reports?${params.toString()}`, {}, locale);
+}
+
+export function getInterferenceReport(id: string, locale: string): Promise<InterferenceReport> {
+  return requestJson<InterferenceReport>(`/interference-reports/${encodeURIComponent(id)}`, {}, locale);
+}
+
+export function deleteFailedInterferenceReport(id: string, locale: string): Promise<InterferenceReportDeleteResponse> {
+  return requestJson<InterferenceReportDeleteResponse>(`/interference-reports/${encodeURIComponent(id)}`, {
     method: "DELETE",
   }, locale);
 }
@@ -472,6 +548,12 @@ export function openDetectionStream(locale: string, developerToken: string, hand
   bind("deception.session.started", handlers.onDeceptionSessionStarted);
   bind("deception.session.stopped", handlers.onDeceptionSessionStopped);
   bind("deception.session.connecting", handlers.onDeceptionSessionState);
+  bind("deception.session.reconnecting", handlers.onDeceptionSessionState);
+  bind("compass.session.started", handlers.onCompassSessionStarted);
+  bind("compass.session.stopped", handlers.onCompassSessionStopped);
+  bind("compass.session.connecting", handlers.onCompassSessionState);
+  bind("compass.session.reconnecting", handlers.onCompassSessionState);
+  bind("compass.record", handlers.onCompassRecord);
   bind("gps.record", handlers.onGPSRecord);
   bind("detection.parsed", handlers.onParsed);
   bind("detection.record", handlers.onDetection);
@@ -515,6 +597,13 @@ export function openScreenStream(handlers: ScreenStreamHandlers): () => void {
     const event = parseStreamEvent<ScreenDeceptionState>((message as MessageEvent<string>).data);
     if (event) {
       handlers.onDeceptionUpdated?.(event);
+    }
+  });
+
+  source.addEventListener("compass.record", (message) => {
+    const event = parseStreamEvent<CompassRecord>((message as MessageEvent<string>).data);
+    if (event) {
+      handlers.onCompassRecord?.(event);
     }
   });
 

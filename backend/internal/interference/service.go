@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"sort"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -52,6 +53,18 @@ type GPIOPin interface {
 // PinFactory 根据 Linux GPIO 编号创建引脚。
 type PinFactory func(number int) GPIOPin
 
+// ReportStore 持久化大屏干扰操作证据报告。
+type ReportStore interface {
+	Create(model.InterferenceReport) (model.InterferenceReport, error)
+	CreateRunning(model.InterferenceReport) (model.InterferenceReport, error)
+	Update(model.InterferenceReport) error
+}
+
+// UserSettingsStore 读取用户可配置的大屏干扰频段文案。
+type UserSettingsStore interface {
+	LoadUser() (model.UserSettings, bool, error)
+}
+
 // ChannelDefinition 声明一个可控制的 GPIO 输出通道。
 type ChannelDefinition struct {
 	ID       string
@@ -70,6 +83,8 @@ type Service struct {
 	pinFactory PinFactory
 	store      *store.MemoryStore
 	translator *i18n.Translator
+	reports    ReportStore
+	settings   UserSettingsStore
 
 	strikeTimer           *time.Timer
 	strikeSeq             uint64
@@ -78,6 +93,8 @@ type Service struct {
 	strikeDurationSeconds int
 	strikeStartedAt       time.Time
 	strikeEndsAt          time.Time
+	activeReport          *model.InterferenceReport
+	activeReportID        string
 }
 
 type channelState struct {
@@ -124,6 +141,20 @@ func NewService(store *store.MemoryStore, translator *i18n.Translator, definitio
 	}
 }
 
+// SetReportStore 设置干扰报告持久化存储。
+func (s *Service) SetReportStore(reports ReportStore) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.reports = reports
+}
+
+// SetUserSettingsStore 设置用户设置存储，用于干扰报告频段显示。
+func (s *Service) SetUserSettingsStore(settings UserSettingsStore) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.settings = settings
+}
+
 // DefaultChannels 返回设备使用的 GPIO 通道映射。
 func DefaultChannels() []ChannelDefinition {
 	pins := board.DefaultPins()
@@ -168,6 +199,7 @@ func (s *Service) SetState(id string, enabled bool, locale string) (model.GpioCh
 				s.strikeTimer = nil
 			}
 			s.clearScreenStrikeLocked()
+			s.finishActiveReportLocked(model.InterferenceReportStatusCompleted, "", nil, time.Now(), s.screenStrikeStateLocked(time.Now()))
 		}
 		s.publishScreenStrikeLocked(s.screenStrikeStateLocked(time.Now()))
 	}
@@ -207,11 +239,19 @@ func (s *Service) applyScreenStrike(
 		}
 		err := s.stopScreenStrikeChannelsLocked(locale)
 		s.clearScreenStrikeLocked()
-		state := s.screenStrikeStateLocked(time.Now())
+		endedAt := time.Now()
+		state := s.screenStrikeStateLocked(endedAt)
+		s.finishActiveReportLocked(model.InterferenceReportStatusCompleted, "", err, endedAt, state)
 		s.publishScreenStrikeLocked(state)
 		return state, err
 	}
 
+	startedAt := time.Now()
+	req := model.ScreenStrikeRequest{
+		Enabled:         enabled,
+		ChannelIDs:      append([]string(nil), channelIDs...),
+		DurationSeconds: durationSeconds,
+	}
 	selected, err := s.validateScreenStrikeChannelsLocked(channelIDs, locale)
 	if err != nil {
 		return s.screenStrikeStateLocked(time.Now()), err
@@ -238,6 +278,7 @@ func (s *Service) applyScreenStrike(
 			_ = s.stopScreenStrikeChannelsLocked(locale)
 			s.clearScreenStrikeLocked()
 			state := s.screenStrikeStateLocked(time.Now())
+			s.createFailedReportLocked(req, selected, startedAt, err, state)
 			s.publishScreenStrikeLocked(state)
 			return state, err
 		}
@@ -248,7 +289,7 @@ func (s *Service) applyScreenStrike(
 	s.strikeActive = true
 	s.strikeChannelIDs = append([]string(nil), selected...)
 	s.strikeDurationSeconds = durationSeconds
-	s.strikeStartedAt = now
+	s.strikeStartedAt = startedAt
 	s.strikeEndsAt = endsAt
 
 	seq := s.strikeSeq
@@ -257,6 +298,7 @@ func (s *Service) applyScreenStrike(
 	})
 
 	state := s.screenStrikeStateLocked(now)
+	s.createRunningReportLocked(req, selected, startedAt, state)
 	s.publishScreenStrikeLocked(state)
 	return state, nil
 }
@@ -272,7 +314,10 @@ func (s *Service) stopScreenStrikeOnTimeout(seq uint64) {
 	s.strikeTimer = nil
 	_ = s.stopScreenStrikeChannelsLocked("")
 	s.clearScreenStrikeLocked()
-	s.publishScreenStrikeLocked(s.screenStrikeStateLocked(time.Now()))
+	endedAt := time.Now()
+	state := s.screenStrikeStateLocked(endedAt)
+	s.finishActiveReportLocked(model.InterferenceReportStatusCompleted, "", nil, endedAt, state)
+	s.publishScreenStrikeLocked(state)
 }
 
 func (s *Service) setStateLocked(id string, enabled bool, locale string) (model.GpioChannel, error) {
@@ -288,12 +333,12 @@ func (s *Service) setStateLocked(id string, enabled bool, locale string) (model.
 	if enabled {
 		if !state.initialized {
 			if err := state.pin.Setup(); err != nil {
-				return s.markError(state, locale, err)
+				return s.markError(state, err)
 			}
 			state.initialized = true
 		}
 		if err := state.pin.SetHigh(); err != nil {
-			return s.markError(state, locale, err)
+			return s.markError(state, err)
 		}
 		state.enabled = true
 		state.actualLevel = "high"
@@ -309,7 +354,7 @@ func (s *Service) setStateLocked(id string, enabled bool, locale string) (model.
 		}
 		if state.pin != nil {
 			if err := state.pin.SetLow(); err != nil {
-				return s.markError(state, locale, err)
+				return s.markError(state, err)
 			}
 			state.pin.Cleanup()
 			state.pin = nil
@@ -352,6 +397,8 @@ func (s *Service) Shutdown() {
 		state.desiredLevel = "low"
 		state.status = initialStatus(state.def)
 	}
+	endedAt := time.Now()
+	s.finishActiveReportLocked(model.InterferenceReportStatusAbnormal, "service_shutdown", nil, endedAt, s.screenStrikeStateLocked(endedAt))
 }
 
 func (s *Service) validateScreenStrikeChannelsLocked(ids []string, locale string) ([]string, error) {
@@ -474,6 +521,244 @@ func (s *Service) publishScreenStrikeLocked(state model.ScreenStrikeState) {
 	s.store.Publish(model.Event{Type: screenStrikeEventType, Time: time.Now(), Payload: state})
 }
 
+func (s *Service) createRunningReportLocked(
+	req model.ScreenStrikeRequest,
+	selected []string,
+	startedAt time.Time,
+	state model.ScreenStrikeState,
+) {
+	if s.reports == nil {
+		return
+	}
+	labels, pins := s.reportChannelMetadataLocked(selected)
+	report := model.InterferenceReport{
+		InterferenceReportSummary: model.InterferenceReportSummary{
+			Status:                   model.InterferenceReportStatusRunning,
+			StartedAt:                startedAt,
+			RequestedDurationSeconds: req.DurationSeconds,
+			ChannelIDs:               append([]string(nil), selected...),
+			ChannelLabels:            labels,
+			ChannelPins:              pins,
+			Summary:                  interferenceReportSummary(labels, req.DurationSeconds),
+		},
+		Request:    cloneStrikeRequest(req),
+		StartState: cloneStrikeState(&state),
+	}
+	created, err := s.reports.CreateRunning(report)
+	if err != nil {
+		return
+	}
+	s.activeReportID = created.ID
+	cloned := cloneInterferenceReport(created)
+	s.activeReport = &cloned
+}
+
+func (s *Service) createFailedReportLocked(
+	req model.ScreenStrikeRequest,
+	selected []string,
+	startedAt time.Time,
+	cause error,
+	endState model.ScreenStrikeState,
+) {
+	if s.reports == nil || cause == nil {
+		return
+	}
+	endedAt := time.Now()
+	labels, pins := s.reportChannelMetadataLocked(selected)
+	report := model.InterferenceReport{
+		InterferenceReportSummary: model.InterferenceReportSummary{
+			Status:                   model.InterferenceReportStatusFailed,
+			StartedAt:                startedAt,
+			EndedAt:                  &endedAt,
+			RequestedDurationSeconds: req.DurationSeconds,
+			ChannelIDs:               append([]string(nil), selected...),
+			ChannelLabels:            labels,
+			ChannelPins:              pins,
+			Summary:                  interferenceReportSummary(labels, req.DurationSeconds),
+			LastError:                cause.Error(),
+		},
+		Request:  cloneStrikeRequest(req),
+		EndState: cloneStrikeState(&endState),
+	}
+	_, _ = s.reports.Create(report)
+}
+
+func (s *Service) finishActiveReportLocked(
+	status model.InterferenceReportStatus,
+	reason string,
+	cause error,
+	endedAt time.Time,
+	endState model.ScreenStrikeState,
+) {
+	if s.reports == nil || s.activeReport == nil || s.activeReportID == "" {
+		return
+	}
+	report := cloneInterferenceReport(*s.activeReport)
+	if report.ID == "" {
+		return
+	}
+	report.Status = status
+	report.EndedAt = &endedAt
+	report.EndState = cloneStrikeState(&endState)
+	if cause != nil {
+		report.LastError = cause.Error()
+	}
+	if strings.TrimSpace(reason) != "" {
+		report.AbnormalReason = strings.TrimSpace(reason)
+		if report.LastError == "" {
+			report.LastError = report.AbnormalReason
+		}
+	}
+	_ = s.reports.Update(report)
+	s.activeReportID = ""
+	s.activeReport = nil
+}
+
+func (s *Service) reportChannelMetadataLocked(ids []string) ([]string, []int) {
+	labels := make([]string, 0, len(ids))
+	pins := make([]int, 0, len(ids))
+	customLabels := s.screenStrikeCustomLabelsLocked()
+	strikeIndexes := s.screenStrikeChannelIndexesLocked()
+	for _, id := range ids {
+		state := s.channels[id]
+		if state == nil {
+			continue
+		}
+		strikeIndex, ok := strikeIndexes[id]
+		if !ok {
+			strikeIndex = -1
+		}
+		labels = append(labels, reportChannelLabel(state.def, strikeIndex, customLabels))
+		pins = append(pins, state.def.Pin)
+	}
+	return labels, pins
+}
+
+func (s *Service) screenStrikeCustomLabelsLocked() []string {
+	if s.settings == nil {
+		return nil
+	}
+	settings, ok, err := s.settings.LoadUser()
+	if err != nil || !ok {
+		return nil
+	}
+	return append([]string(nil), settings.ScreenStrikeChannelLabels...)
+}
+
+func (s *Service) screenStrikeChannelIndexesLocked() map[string]int {
+	indexes := make(map[string]int, 3)
+	for index, id := range s.screenStrikeChannelIDsLocked() {
+		indexes[id] = index
+	}
+	return indexes
+}
+
+func reportChannelLabel(def ChannelDefinition, strikeIndex int, customLabels []string) string {
+	if strikeIndex >= 0 && strikeIndex < len(customLabels) {
+		if label := strings.TrimSpace(customLabels[strikeIndex]); label != "" {
+			return label
+		}
+	}
+	if label := formatStrikeBands(def.Bands); label != "" {
+		return label
+	}
+	if def.Label != "" {
+		return def.Label
+	}
+	return def.ID
+}
+
+func formatStrikeBands(bands []string) string {
+	parts := make([]string, 0, len(bands))
+	for _, band := range bands {
+		if label := formatStrikeBand(band); label != "" {
+			parts = append(parts, label)
+		}
+	}
+	return strings.Join(parts, "/")
+}
+
+func formatStrikeBand(value string) string {
+	band := strings.TrimSpace(value)
+	if band == "" {
+		return ""
+	}
+	numeric, err := strconv.ParseFloat(band, 64)
+	if err == nil {
+		if numeric >= 100 {
+			return band + "M"
+		}
+		return band + "G"
+	}
+	return band
+}
+
+func interferenceReportSummary(labels []string, durationSeconds int) string {
+	parts := make([]string, 0, len(labels))
+	for _, label := range labels {
+		if value := strings.TrimSpace(label); value != "" {
+			parts = append(parts, value)
+		}
+	}
+	channelText := strings.Join(parts, ", ")
+	if channelText == "" {
+		channelText = "unknown"
+	}
+	if durationSeconds > 0 {
+		return fmt.Sprintf("%s / %ds", channelText, durationSeconds)
+	}
+	return channelText
+}
+
+func cloneStrikeRequest(req model.ScreenStrikeRequest) model.ScreenStrikeRequest {
+	req.ChannelIDs = append([]string(nil), req.ChannelIDs...)
+	return req
+}
+
+func cloneStrikeState(state *model.ScreenStrikeState) *model.ScreenStrikeState {
+	if state == nil {
+		return nil
+	}
+	cloned := *state
+	cloned.ChannelIDs = append([]string(nil), state.ChannelIDs...)
+	cloned.Channels = cloneGPIOChannels(state.Channels)
+	if state.StartedAt != nil {
+		startedAt := *state.StartedAt
+		cloned.StartedAt = &startedAt
+	}
+	if state.EndsAt != nil {
+		endsAt := *state.EndsAt
+		cloned.EndsAt = &endsAt
+	}
+	return &cloned
+}
+
+func cloneGPIOChannels(channels []model.GpioChannel) []model.GpioChannel {
+	if len(channels) == 0 {
+		return nil
+	}
+	cloned := make([]model.GpioChannel, len(channels))
+	for index, channel := range channels {
+		cloned[index] = channel
+		cloned[index].Bands = append([]string(nil), channel.Bands...)
+	}
+	return cloned
+}
+
+func cloneInterferenceReport(report model.InterferenceReport) model.InterferenceReport {
+	report.ChannelIDs = append([]string(nil), report.ChannelIDs...)
+	report.ChannelLabels = append([]string(nil), report.ChannelLabels...)
+	report.ChannelPins = append([]int(nil), report.ChannelPins...)
+	report.Request = cloneStrikeRequest(report.Request)
+	report.StartState = cloneStrikeState(report.StartState)
+	report.EndState = cloneStrikeState(report.EndState)
+	if report.EndedAt != nil {
+		endedAt := *report.EndedAt
+		report.EndedAt = &endedAt
+	}
+	return report
+}
+
 func ceilSeconds(duration time.Duration) int {
 	if duration <= 0 {
 		return 0
@@ -489,12 +774,12 @@ func (s *Service) localizedError(locale string, code string) error {
 }
 
 // markError 将通道更新为错误状态，并发布当前状态。
-func (s *Service) markError(state *channelState, locale string, err error) (model.GpioChannel, error) {
+func (s *Service) markError(state *channelState, err error) (model.GpioChannel, error) {
 	state.status = "error"
 	state.lastError = err.Error()
 	channel := state.dto()
 	s.store.Publish(model.Event{Type: "gpio.channel.updated", Time: time.Now(), Payload: channel})
-	return channel, fmt.Errorf("%s: %w", s.translator.T(locale, "errors", "gpio_update_failed"), err)
+	return channel, err
 }
 
 // dto 将可变通道状态复制到 API 模型。

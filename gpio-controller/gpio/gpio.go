@@ -66,11 +66,11 @@ func (p *Pin) Export() error {
 			}
 			return p.busyError()
 		}
-		return fmt.Errorf("导出 GPIO%d 失败: %w", p.Number, err)
+		return err
 	}
 
 	if err := p.waitForAttribute("value", exportReadyRetries, exportReadyDelay); err != nil {
-		return fmt.Errorf("导出 GPIO%d 后等待就绪失败: %w", p.Number, err)
+		return err
 	}
 	return nil
 }
@@ -81,7 +81,7 @@ func (p *Pin) Unexport() error {
 		return nil
 	}
 	if err := writeControlFile("unexport", p.Number); err != nil {
-		return fmt.Errorf("取消导出 GPIO%d 失败: %w", p.Number, err)
+		return err
 	}
 	return nil
 }
@@ -131,7 +131,7 @@ func (p *Pin) GetValue() (int, error) {
 	}
 	value, convErr := strconv.Atoi(data)
 	if convErr != nil {
-		return 0, fmt.Errorf("解析 GPIO%d/value 失败: %w", p.Number, convErr)
+		return 0, convErr
 	}
 	return value, nil
 }
@@ -142,7 +142,7 @@ func (p *Pin) Setup() error {
 		return err
 	}
 	if err := p.SetDirection(directionOut); err != nil {
-		return fmt.Errorf("设置 GPIO%d 为输出模式失败: %w", p.Number, err)
+		return err
 	}
 	return nil
 }
@@ -232,20 +232,20 @@ func (p *Pin) attributePath(name string) string {
 }
 
 func (p *Pin) busyError() error {
-	return fmt.Errorf("导出 GPIO%d 失败: 引脚已被其他进程导出或被内核占用", p.Number)
+	return fmt.Errorf("GPIO%d 引脚已被其他进程导出或被内核占用", p.Number)
 }
 
 func (p *Pin) readAttribute(name string) (string, error) {
 	data, err := readFile(p.attributePath(name))
 	if err != nil {
-		return "", fmt.Errorf("读取 GPIO%d/%s 失败: %w", p.Number, name, err)
+		return "", err
 	}
 	return strings.TrimSpace(string(data)), nil
 }
 
 func (p *Pin) writeAttribute(name, value string) error {
 	if err := writeFile(p.attributePath(name), []byte(value), attributeFilePerm); err != nil {
-		return fmt.Errorf("写入 GPIO%d/%s 失败: %w", p.Number, name, err)
+		return err
 	}
 	return nil
 }
@@ -262,7 +262,7 @@ func (p *Pin) writeAttributeWithRetry(name, value string, retries int, delay tim
 			sleep(delay)
 		}
 	}
-	return fmt.Errorf("写入 GPIO%d/%s 失败: %w", p.Number, name, lastErr)
+	return lastErr
 }
 
 func (p *Pin) waitForAttribute(name string, retries int, delay time.Duration) error {
@@ -271,7 +271,7 @@ func (p *Pin) waitForAttribute(name string, retries int, delay time.Duration) er
 		if _, err := statFile(path); err == nil {
 			return nil
 		} else if !errors.Is(err, os.ErrNotExist) {
-			return fmt.Errorf("检查 GPIO%d/%s 失败: %w", p.Number, name, err)
+			return err
 		}
 
 		if i < retries-1 {

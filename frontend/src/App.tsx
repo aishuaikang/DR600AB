@@ -4,6 +4,8 @@ import { useTranslation } from "react-i18next";
 import {
   createDeveloperSessionRequest,
   deleteDeveloperSessionRequest,
+  getCompassSession,
+  getCompassSettings,
   getDeceptionSession,
   getDeceptionSettings,
   getChannels,
@@ -20,6 +22,7 @@ import {
   openDetectionStream,
   setChannelState,
   setUnauthorizedHandler,
+  updateCompassSettings,
   updateDetectionSettings,
   updateDeceptionSettings,
   updateGPSSettings,
@@ -35,6 +38,7 @@ import { getStoredLocale, persistLocale, supportedLocales } from "./i18n";
 import { useHashPage } from "./hooks/useHashPage";
 import { DeceptionReportsPage } from "./pages/DeceptionReportsPage";
 import { InterferencePage } from "./pages/InterferencePage";
+import { InterferenceReportsPage } from "./pages/InterferenceReportsPage";
 import { GPSRecordsPage } from "./pages/GPSRecordsPage";
 import { IntrusionsPage } from "./pages/IntrusionsPage";
 import { MessagePage } from "./pages/MessagePage";
@@ -45,12 +49,14 @@ import { UserSettingsPage } from "./pages/UserSettingsPage";
 import { WhitelistPage } from "./pages/WhitelistPage";
 import { getStoredSettings, persistSettings } from "./preferences";
 import {
+  COMPASS_SERIAL_PROFILE,
   DETECTION_DEFAULT_BAUD_RATE,
   FIXED_SERIAL_PROFILE,
   normalizeSerialBaudRate,
 } from "./serial-profile";
 import { referenceMapLayers } from "./pages/screenData";
 import type {
+  CompassSessionResponse,
   DetectionSessionResponse,
   DetectionRecord,
   DeceptionSessionResponse,
@@ -87,6 +93,8 @@ import {
   dedupeGPSRecords,
   dedupeParsed,
   extractErrorMessage,
+  compassSessionBannerKind,
+  compassSessionBannerText,
   gpsSessionBannerKind,
   gpsSessionBannerText,
   resolveInitialPorts,
@@ -110,6 +118,7 @@ function App() {
   const [session, setSession] = useState<DetectionSessionResponse | null>(null);
   const [gpsSession, setGPSSession] = useState<GPSSessionResponse | null>(null);
   const [deceptionSession, setDeceptionSession] = useState<DeceptionSessionResponse | null>(null);
+  const [compassSession, setCompassSession] = useState<CompassSessionResponse | null>(null);
   const [detections, setDetections] = useState<DetectionRecord[]>([]);
   const [messages, setMessages] = useState<ParsedMessage[]>([]);
   const [gpsRecords, setGPSRecords] = useState<GPSRecord[]>([]);
@@ -121,9 +130,11 @@ function App() {
   const [selectedGPSDataPort, setSelectedGPSDataPort] = useState("");
   const [selectedGPSControlPort, setSelectedGPSControlPort] = useState("");
   const [selectedDeceptionPort, setSelectedDeceptionPort] = useState("");
+  const [selectedCompassPort, setSelectedCompassPort] = useState("");
   const [messageSearch, setMessageSearch] = useState("");
   const [banner, setBanner] = useState<Banner>({ kind: "idle", message: "" });
   const [gpsBanner, setGPSBanner] = useState<Banner>({ kind: "idle", message: "" });
+  const [compassBanner, setCompassBanner] = useState<Banner>({ kind: "idle", message: "" });
   const [gpsRecordsBanner, setGPSRecordsBanner] = useState<Banner>({ kind: "idle", message: "" });
   const [runtimeLoading, setRuntimeLoading] = useState(false);
   const [gpsRecordsLoading, setGPSRecordsLoading] = useState(false);
@@ -131,6 +142,7 @@ function App() {
   const lastAppliedSerialRef = useRef("");
   const lastAppliedGPSRef = useRef("");
   const lastAppliedDeceptionRef = useRef("");
+  const lastAppliedCompassRef = useRef("");
   const developerActive = Boolean(developerSession);
   const developerToken = developerSession?.token ?? "";
   const debugAccessBlocked = !developerActive && isDebugPage(page);
@@ -160,12 +172,19 @@ function App() {
     setSelectedDeceptionPort(nextPort);
   }, []);
 
+  const syncCompassSelection = useCallback((port: string) => {
+    const nextPort = port.trim();
+    lastAppliedCompassRef.current = nextPort;
+    setSelectedCompassPort(nextPort);
+  }, []);
+
   const handleUnauthorized = useCallback((error: Error) => {
     clearDeveloperSession();
     setDeveloperSession(null);
     setSession(null);
     setGPSSession(null);
     setDeceptionSession(null);
+    setCompassSession(null);
     setDetections([]);
     setMessages([]);
     setGPSRecords([]);
@@ -175,6 +194,7 @@ function App() {
     setGPSRecordsLoading(false);
     setBanner({ kind: "error", message: error.message || t("developerSessionExpired", { ns: "common" }) });
     setGPSBanner({ kind: "idle", message: "" });
+    setCompassBanner({ kind: "idle", message: "" });
     setGPSRecordsBanner({ kind: "idle", message: "" });
     if (isDebugPage(page)) {
       navigate("screen");
@@ -196,15 +216,31 @@ function App() {
       const channelsPromise = developerActive
         ? getChannels(locale, developerToken)
         : Promise.resolve({ channels: [] as GpioChannel[], count: 0 });
-      const [metaRes, portsRes, sessionRes, gpsSessionRes, deceptionSessionRes, settingsRes, gpsSettingsRes, deceptionSettingsRes, parsedRes, detectionsRes, channelsRes] = await Promise.all([
+      const [
+        metaRes,
+        portsRes,
+        sessionRes,
+        gpsSessionRes,
+        deceptionSessionRes,
+        compassSessionRes,
+        settingsRes,
+        gpsSettingsRes,
+        deceptionSettingsRes,
+        compassSettingsRes,
+        parsedRes,
+        detectionsRes,
+        channelsRes,
+      ] = await Promise.all([
         getLocales(),
         getPorts(locale, developerToken),
         getSession(locale, developerToken),
         getGPSSession(locale, developerToken),
         getDeceptionSession(locale, developerToken),
+        getCompassSession(locale, developerToken),
         getDetectionSettings(locale, developerToken),
         getGPSSettings(locale, developerToken),
         getDeceptionSettings(locale, developerToken),
+        getCompassSettings(locale, developerToken),
         parsedPromise,
         detectionsPromise,
         channelsPromise,
@@ -215,6 +251,7 @@ function App() {
       setSession(sessionRes);
       setGPSSession(gpsSessionRes);
       setDeceptionSession(deceptionSessionRes);
+      setCompassSession(compassSessionRes);
       setMessages(parsedRes.items);
       setDetections(detectionsRes.items);
       setChannels(normalizeGpioChannels(channelsRes.channels));
@@ -224,6 +261,7 @@ function App() {
       const { dataPort, controlPort } = resolveInitialGPSPorts(gpsSessionRes, gpsSettingsRes, portsRes.ports);
       syncGPSSelection(dataPort, controlPort);
       syncDeceptionSelection(deceptionSessionRes.portName || deceptionSettingsRes.portName || "");
+      syncCompassSelection(compassSessionRes.portName || compassSettingsRes.portName || "");
       setBanner({
         kind: sessionBannerKind(sessionRes),
         message: sessionBannerText(sessionRes, sessionRes.active ? t("active", { ns: "common" }) : t("idle", { ns: "common" })),
@@ -232,12 +270,16 @@ function App() {
         kind: gpsSessionBannerKind(gpsSessionRes),
         message: gpsSessionBannerText(gpsSessionRes, gpsSessionRes.active ? t("active", { ns: "common" }) : t("idle", { ns: "common" })),
       });
+      setCompassBanner({
+        kind: compassSessionBannerKind(compassSessionRes),
+        message: compassSessionBannerText(compassSessionRes, compassSessionRes.active ? t("active", { ns: "common" }) : t("idle", { ns: "common" })),
+      });
     } catch (error) {
       setBanner({ kind: "error", message: extractErrorMessage(error, t("unexpectedError", { ns: "common" })) });
     } finally {
       setRuntimeLoading(false);
     }
-  }, [developerActive, developerToken, locale, syncDeceptionSelection, syncGPSSelection, syncSerialSelection, t]);
+  }, [developerActive, developerToken, locale, syncCompassSelection, syncDeceptionSelection, syncGPSSelection, syncSerialSelection, t]);
 
   const loadGPSRecords = useCallback(async () => {
     if (!developerActive) {
@@ -483,6 +525,48 @@ function App() {
     if (!needsRuntimeData) {
       return;
     }
+    const portName = selectedCompassPort.trim();
+    if (portName === lastAppliedCompassRef.current) {
+      return;
+    }
+
+    const timer = window.setTimeout(() => {
+      void (async () => {
+        try {
+          setCompassBanner({ kind: "loading", message: t("loading", { ns: "common" }) });
+          const response = await updateCompassSettings(
+            {
+              portName,
+              baudRate: COMPASS_SERIAL_PROFILE.baudRate,
+              dataBits: COMPASS_SERIAL_PROFILE.dataBits,
+              stopBits: COMPASS_SERIAL_PROFILE.stopBits,
+              parity: COMPASS_SERIAL_PROFILE.parity,
+              readTimeoutMs: COMPASS_SERIAL_PROFILE.readTimeoutMs,
+              autoConnect: true,
+            },
+            locale,
+            developerToken,
+          );
+          lastAppliedCompassRef.current = portName;
+          setCompassSession(response);
+          setCompassBanner({
+            kind: compassSessionBannerKind(response),
+            message: compassSessionBannerText(response, response.message || t("active", { ns: "common" })),
+          });
+          await bootstrap();
+        } catch (error) {
+          setCompassBanner({ kind: "error", message: extractErrorMessage(error, t("unexpectedError", { ns: "common" })) });
+        }
+      })();
+    }, 350);
+
+    return () => window.clearTimeout(timer);
+  }, [bootstrap, developerToken, locale, needsRuntimeData, selectedCompassPort, t]);
+
+  useEffect(() => {
+    if (!needsRuntimeData) {
+      return;
+    }
     const close = openDetectionStream(locale, developerToken, {
       onSessionStarted: (event) => {
         if (event.payload) {
@@ -586,6 +670,49 @@ function App() {
           syncDeceptionSelection(event.payload.portName || "");
         }
       },
+      onCompassSessionStarted: (event) => {
+        if (event.payload) {
+          setCompassSession(event.payload);
+          syncCompassSelection(event.payload.portName || "");
+          setCompassBanner({
+            kind: compassSessionBannerKind(event.payload),
+            message: compassSessionBannerText(event.payload, t("active", { ns: "common" })),
+          });
+        }
+      },
+      onCompassSessionStopped: (event) => {
+        if (event.payload) {
+          setCompassSession(event.payload);
+          syncCompassSelection(event.payload.portName || "");
+          setCompassBanner({
+            kind: compassSessionBannerKind(event.payload),
+            message: compassSessionBannerText(event.payload, t("idle", { ns: "common" })),
+          });
+        }
+      },
+      onCompassSessionState: (event) => {
+        if (event.payload) {
+          setCompassSession(event.payload);
+          syncCompassSelection(event.payload.portName || "");
+          setCompassBanner({
+            kind: compassSessionBannerKind(event.payload),
+            message: compassSessionBannerText(event.payload, t("loading", { ns: "common" })),
+          });
+        }
+      },
+      onCompassRecord: (event) => {
+        if (event.payload) {
+          setCompassSession((current) => current ? {
+            ...current,
+            lastRecord: event.payload!,
+            lastPitch: event.payload!.pitch,
+            lastRoll: event.payload!.roll,
+            lastHeading: event.payload!.heading,
+            lastRawHex: event.payload!.rawHex,
+            lastUpdatedAt: event.payload!.receivedAt,
+          } : current);
+        }
+      },
       onGPSRecord: (event) => {
         if (event.payload) {
           setGPSSession((current) => current ? {
@@ -620,7 +747,7 @@ function App() {
     });
 
     return close;
-  }, [developerActive, developerToken, locale, needsRuntimeData, syncDeceptionSelection, syncGPSSelection, syncSerialSelection, t]);
+  }, [developerActive, developerToken, locale, needsRuntimeData, syncCompassSelection, syncDeceptionSelection, syncGPSSelection, syncSerialSelection, t]);
 
   const sessionActive = Boolean(session?.active);
   const sessionStateLabel = session
@@ -640,6 +767,11 @@ function App() {
     ? deceptionSession.message || (deceptionActive ? t("active", { ns: "common" }) : t("idle", { ns: "common" }))
     : t("idle", { ns: "common" });
   const currentDeceptionPort = deceptionSession?.portName || selectedDeceptionPort;
+  const compassActive = Boolean(compassSession?.active);
+  const compassSessionStateLabel = compassSession
+    ? compassSessionBannerText(compassSession, compassActive ? t("active", { ns: "common" }) : t("idle", { ns: "common" }))
+    : t("idle", { ns: "common" });
+  const currentCompassPort = compassSession?.portName || selectedCompassPort;
   const defaultAppTitle = t("app.title", { ns: "common" });
   const appTitle = storedSettings.appTitle.trim() || defaultAppTitle;
   const allLocaleOptions = meta?.supportedLocales.length ? meta.supportedLocales : supportedLocales;
@@ -652,14 +784,15 @@ function App() {
   const developerExpiresAt = developerSession?.expiresAt ?? 0;
   const isMessagePage = developerActive && MESSAGE_PAGE_ORDER.includes(page as DebugRecordPage);
   const loadingLabel = t("loading", { ns: "common" });
-  const hasRuntimeData = Boolean(meta || ports.length > 0 || session || gpsSession);
+  const hasRuntimeData = Boolean(meta || ports.length > 0 || session || gpsSession || compassSession);
   const showRuntimeFallback = needsRuntimeData && runtimeLoading && !hasRuntimeData;
   const operationInFlight = needsRuntimeData && (
     runtimeLoading ||
     gpsRecordsLoading ||
     Boolean(channelBusyId) ||
     banner.kind === "loading" ||
-    gpsBanner.kind === "loading"
+    gpsBanner.kind === "loading" ||
+    compassBanner.kind === "loading"
   );
 
   useEffect(() => {
@@ -852,13 +985,23 @@ function App() {
                 {page === "intrusions" ? (
                   <IntrusionsPage
                     locale={locale}
+                    userSettings={userSettings}
                     t={t}
+                    onUserSettingsChange={handleUserSettingsChange}
                   />
                 ) : null}
 
                 {page === "deception-reports" ? (
                   <DeceptionReportsPage
                     locale={locale}
+                    t={t}
+                  />
+                ) : null}
+
+                {page === "interference-reports" ? (
+                  <InterferenceReportsPage
+                    locale={locale}
+                    userSettings={userSettings}
                     t={t}
                   />
                 ) : null}
@@ -893,6 +1036,7 @@ function App() {
                     selectedGPSDataPort={selectedGPSDataPort}
                     selectedGPSControlPort={selectedGPSControlPort}
                     selectedDeceptionPort={selectedDeceptionPort}
+                    selectedCompassPort={selectedCompassPort}
                     sessionStateLabel={sessionStateLabel}
                     currentReceivePort={currentReceivePort}
                     currentSendPort={currentSendPort}
@@ -905,6 +1049,10 @@ function App() {
                     deceptionSession={deceptionSession}
                     deceptionSessionStateLabel={deceptionSessionStateLabel}
                     currentDeceptionPort={currentDeceptionPort}
+                    compassBanner={compassBanner}
+                    compassSession={compassSession}
+                    compassSessionStateLabel={compassSessionStateLabel}
+                    currentCompassPort={currentCompassPort}
                     allLocaleOptions={allLocaleOptions}
                     visibleLocales={localeOptions}
                     currentLocale={locale}
@@ -919,6 +1067,7 @@ function App() {
                     onGPSDataPortChange={setSelectedGPSDataPort}
                     onGPSControlPortChange={setSelectedGPSControlPort}
                     onDeceptionPortChange={setSelectedDeceptionPort}
+                    onCompassPortChange={setSelectedCompassPort}
                     onUserSettingsChange={handleUserSettingsChange}
                     onVisibleLocalesChange={handleVisibleLocalesChange}
                     onVisibleMapLayersChange={handleVisibleMapLayersChange}

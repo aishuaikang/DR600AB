@@ -95,6 +95,7 @@ type GeoPoint struct {
 // UserSettings 保存公开用户设置。
 type UserSettings struct {
 	DeviceSN                  string               `json:"deviceSn,omitempty"`
+	DeviceHardwareID          string               `json:"deviceHardwareId,omitempty"`
 	ManualDeviceLocation      *GeoPoint            `json:"manualDeviceLocation,omitempty"`
 	ScreenStrikeChannelLabels []string             `json:"screenStrikeChannelLabels,omitempty"`
 	IntrusionRetentionDays    *int                 `json:"intrusionRetentionDays,omitempty"`
@@ -170,19 +171,22 @@ type ScreenDeviceLocationResponse struct {
 
 // ScreenSerialCapabilityStatus 描述大屏依赖串口能力的配置和运行状态。
 type ScreenSerialCapabilityStatus struct {
-	Configured bool   `json:"configured"`
-	Active     bool   `json:"active"`
-	State      string `json:"state,omitempty"`
-	PortName   string `json:"portName,omitempty"`
-	RxPortName string `json:"rxPortName,omitempty"`
-	TxPortName string `json:"txPortName,omitempty"`
-	LastError  string `json:"lastError,omitempty"`
+	Configured       bool       `json:"configured"`
+	Active           bool       `json:"active"`
+	State            string     `json:"state,omitempty"`
+	PortName         string     `json:"portName,omitempty"`
+	RxPortName       string     `json:"rxPortName,omitempty"`
+	TxPortName       string     `json:"txPortName,omitempty"`
+	LastError        string     `json:"lastError,omitempty"`
+	HeadingDeg       *float64   `json:"headingDeg,omitempty"`
+	HeadingUpdatedAt *time.Time `json:"headingUpdatedAt,omitempty"`
 }
 
 // ScreenRuntimeStatus 返回大屏各串口能力的公开运行状态。
 type ScreenRuntimeStatus struct {
 	Detection ScreenSerialCapabilityStatus `json:"detection"`
 	Deception ScreenSerialCapabilityStatus `json:"deception"`
+	Compass   ScreenSerialCapabilityStatus `json:"compass"`
 }
 
 // GPSSessionResponse 返回当前 GPS 会话状态。
@@ -205,6 +209,53 @@ type GPSSessionResponse struct {
 	LastFix         *GPSFix    `json:"lastFix,omitempty"`
 	LastRecord      *GPSRecord `json:"lastRecord,omitempty"`
 	Message         string     `json:"message"`
+}
+
+// CompassSessionRequest 配置三维电子罗盘串口会话。
+type CompassSessionRequest struct {
+	PortName      string `json:"portName,omitempty"`
+	BaudRate      int    `json:"baudRate"`
+	DataBits      int    `json:"dataBits"`
+	StopBits      int    `json:"stopBits"`
+	Parity        string `json:"parity"`
+	ReadTimeoutMs int    `json:"readTimeoutMs,omitempty"`
+	AutoConnect   bool   `json:"autoConnect,omitempty"`
+}
+
+// CompassRecord 保存一条三维电子罗盘角度记录。
+type CompassRecord struct {
+	SessionID  string    `json:"sessionId"`
+	PortName   string    `json:"portName"`
+	ReceivedAt time.Time `json:"receivedAt"`
+	Pitch      float64   `json:"pitch"`
+	Roll       float64   `json:"roll"`
+	Heading    float64   `json:"heading"`
+	RawHex     string    `json:"rawHex,omitempty"`
+}
+
+// CompassSessionResponse 返回当前三维电子罗盘串口会话状态。
+type CompassSessionResponse struct {
+	Active         bool           `json:"active"`
+	SessionID      string         `json:"sessionId,omitempty"`
+	PortName       string         `json:"portName,omitempty"`
+	BaudRate       int            `json:"baudRate,omitempty"`
+	DataBits       int            `json:"dataBits,omitempty"`
+	StopBits       int            `json:"stopBits,omitempty"`
+	Parity         string         `json:"parity,omitempty"`
+	StartedAt      time.Time      `json:"startedAt,omitempty"`
+	State          string         `json:"state,omitempty"`
+	AutoReconnect  bool           `json:"autoReconnect,omitempty"`
+	LastError      string         `json:"lastError,omitempty"`
+	RetryCount     int            `json:"retryCount,omitempty"`
+	LastRecord     *CompassRecord `json:"lastRecord,omitempty"`
+	LastPitch      *float64       `json:"lastPitch,omitempty"`
+	LastRoll       *float64       `json:"lastRoll,omitempty"`
+	LastHeading    *float64       `json:"lastHeading,omitempty"`
+	LastRawHex     string         `json:"lastRawHex,omitempty"`
+	LastUpdatedAt  *time.Time     `json:"lastUpdatedAt,omitempty"`
+	AutoOutput     bool           `json:"autoOutput"`
+	AutoOutputRate int            `json:"autoOutputRate,omitempty"`
+	Message        string         `json:"message"`
 }
 
 // DeceptionSessionRequest 配置 GNSS 诱骗设备串口会话。
@@ -508,6 +559,42 @@ type ScreenStrikeResponse struct {
 	Message string            `json:"message"`
 }
 
+// InterferenceReportStatus 描述干扰报告生命周期状态。
+type InterferenceReportStatus string
+
+const (
+	InterferenceReportStatusRunning   InterferenceReportStatus = "running"
+	InterferenceReportStatusCompleted InterferenceReportStatus = "completed"
+	InterferenceReportStatusFailed    InterferenceReportStatus = "failed"
+	InterferenceReportStatusAbnormal  InterferenceReportStatus = "abnormal"
+)
+
+// InterferenceReportSummary 是干扰报告列表使用的摘要记录。
+type InterferenceReportSummary struct {
+	ID                       string                   `json:"id"`
+	Status                   InterferenceReportStatus `json:"status"`
+	StartedAt                time.Time                `json:"startedAt"`
+	EndedAt                  *time.Time               `json:"endedAt,omitempty"`
+	DurationSeconds          int64                    `json:"durationSeconds"`
+	RequestedDurationSeconds int                      `json:"requestedDurationSeconds,omitempty"`
+	ChannelIDs               []string                 `json:"channelIds,omitempty"`
+	ChannelLabels            []string                 `json:"channelLabels,omitempty"`
+	ChannelPins              []int                    `json:"channelPins,omitempty"`
+	Summary                  string                   `json:"summary,omitempty"`
+	LastError                string                   `json:"lastError,omitempty"`
+	AbnormalReason           string                   `json:"abnormalReason,omitempty"`
+	CreatedAt                time.Time                `json:"createdAt"`
+	UpdatedAt                time.Time                `json:"updatedAt"`
+}
+
+// InterferenceReport 保存一次大屏干扰操作的证据快照。
+type InterferenceReport struct {
+	InterferenceReportSummary
+	Request    ScreenStrikeRequest `json:"request"`
+	StartState *ScreenStrikeState  `json:"startState,omitempty"`
+	EndState   *ScreenStrikeState  `json:"endState,omitempty"`
+}
+
 // ScreenDeceptionRequest 控制大屏诱骗面板绑定的 GNSS 诱骗设备。
 type ScreenDeceptionRequest struct {
 	Enabled        bool                         `json:"enabled"`
@@ -728,6 +815,11 @@ type DeceptionReportDeleteResponse struct {
 	Deleted int64 `json:"deleted"`
 }
 
+// InterferenceReportDeleteResponse 返回干扰报告删除数量。
+type InterferenceReportDeleteResponse struct {
+	Deleted int64 `json:"deleted"`
+}
+
 // DeveloperLoginRequest 使用动态码换取短时开发者会话。
 type DeveloperLoginRequest struct {
 	Code string `json:"code"`
@@ -861,10 +953,12 @@ type Event struct {
 	Payload any       `json:"payload,omitempty"`
 }
 
-// ListResponse 包装列表接口响应，并附带条目数量。
+// ListResponse 包装列表接口响应，并附带条目数量和后续批次游标。
 type ListResponse[T any] struct {
-	Items []T `json:"items"`
-	Count int `json:"count"`
+	Items      []T  `json:"items"`
+	Count      int  `json:"count"`
+	HasMore    bool `json:"hasMore,omitempty"`
+	NextOffset int  `json:"nextOffset,omitempty"`
 }
 
 // ApiError 是标准 JSON 错误响应。

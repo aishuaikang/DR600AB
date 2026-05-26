@@ -1,5 +1,6 @@
 import type { Banner } from "../app/types";
 import type {
+  CompassSessionResponse,
   DetectionRecord,
   DetectionSessionResponse,
   DetectionSettings,
@@ -74,6 +75,24 @@ export function gpsSessionBannerText(session: GPSSessionResponse, fallback: stri
 }
 
 export function gpsSessionBannerKind(session: GPSSessionResponse): Banner["kind"] {
+  if (session.state === "connected" || session.active) {
+    return "success";
+  }
+  if (session.state === "connecting" || session.state === "reconnecting") {
+    return "loading";
+  }
+  return "idle";
+}
+
+export function compassSessionBannerText(session: CompassSessionResponse, fallback: string) {
+  const message = session.message || fallback;
+  if (session.lastError && session.state && session.state !== "connected" && session.state !== "inactive") {
+    return `${message}：${session.lastError}`;
+  }
+  return message;
+}
+
+export function compassSessionBannerKind(session: CompassSessionResponse): Banner["kind"] {
   if (session.state === "connected" || session.active) {
     return "success";
   }

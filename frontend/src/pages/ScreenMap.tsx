@@ -40,6 +40,7 @@ const pilotTrajectoryColor = "#f4c95d";
 
 type RealMapData = {
   deviceLocation: ScreenDeviceLocationResponse | null;
+  deviceHeadingDeg?: number;
   positions: ScreenPositionTarget[];
   whitelist?: WhitelistItem[];
 };
@@ -49,6 +50,7 @@ type PositionMapProps = {
   positions: ScreenPositionTarget[];
   whitelist?: WhitelistItem[];
   deviceLocation: ScreenDeviceLocationResponse | null;
+  deviceHeadingDeg?: number;
   visibleMapLayers: ReferenceMapLayer[];
   onSelectPosition: (target: ScreenPositionTarget) => void;
   onMapReady?: (map: L.Map | null) => void;
@@ -69,7 +71,7 @@ function getOfflineTileBase() {
   if (configuredBase) {
     return configuredBase.replace(/\/+$/, "");
   }
-  return import.meta.env.DEV ? "http://localhost:8099" : `http://${window.location.hostname}:8099`;
+  return "";
 }
 
 function getStoredMapLayer(): ReferenceMapLayer {
@@ -185,6 +187,21 @@ function formatMapOptionalNumber(value: number | undefined, unit: string, digits
     return "-";
   }
   return `${value.toFixed(digits)}${unit}`;
+}
+
+function validHeading(value?: number): value is number {
+  return typeof value === "number" && Number.isFinite(value);
+}
+
+function normalizeMapHeading(value: number) {
+  return ((value % 360) + 360) % 360;
+}
+
+function formatDeviceHeading(value?: number) {
+  if (!validHeading(value)) {
+    return "-";
+  }
+  return `${Math.round(normalizeMapHeading(value))}°`;
 }
 
 type MapLegendItem = {
@@ -351,7 +368,45 @@ function fitRealScreenBounds(
   });
 }
 
-function deviceTooltipContent(deviceLocation: ScreenDeviceLocationResponse, t: TFunction) {
+function createDeviceHeadingIcon(heading: number) {
+  const normalized = normalizeMapHeading(heading);
+  return L.divIcon({
+    className: "screen-map-device-heading-marker",
+    iconSize: [126, 126],
+    iconAnchor: [63, 88],
+    html: [
+      `<svg class="screen-map-device-heading-marker__sector" style="--device-heading: ${normalized.toFixed(1)}deg" viewBox="0 0 126 126" aria-hidden="true" focusable="false">`,
+      `<defs>`,
+      `<radialGradient id="screenDeviceHeadingFanFill" cx="63" cy="88" r="76" gradientUnits="userSpaceOnUse">`,
+      `<stop offset="0%" stop-color="currentColor" stop-opacity="0"></stop>`,
+      `<stop offset="32%" stop-color="currentColor" stop-opacity="0.32"></stop>`,
+      `<stop offset="72%" stop-color="currentColor" stop-opacity="0.26"></stop>`,
+      `<stop offset="100%" stop-color="currentColor" stop-opacity="0.07"></stop>`,
+      `</radialGradient>`,
+      `<linearGradient id="screenDeviceHeadingFanArc" x1="42" y1="16" x2="84" y2="16" gradientUnits="userSpaceOnUse">`,
+      `<stop offset="0%" stop-color="currentColor" stop-opacity="0.22"></stop>`,
+      `<stop offset="50%" stop-color="currentColor" stop-opacity="1"></stop>`,
+      `<stop offset="100%" stop-color="currentColor" stop-opacity="0.22"></stop>`,
+      `</linearGradient>`,
+      `<linearGradient id="screenDeviceHeadingFanBeam" x1="63" y1="70" x2="63" y2="15" gradientUnits="userSpaceOnUse">`,
+      `<stop offset="0%" stop-color="currentColor" stop-opacity="0"></stop>`,
+      `<stop offset="48%" stop-color="currentColor" stop-opacity="0.72"></stop>`,
+      `<stop offset="100%" stop-color="currentColor" stop-opacity="0.18"></stop>`,
+      `</linearGradient>`,
+      `<mask id="screenDeviceHeadingFanMask" maskUnits="userSpaceOnUse">`,
+      `<rect width="126" height="126" fill="white"></rect>`,
+      `<circle cx="63" cy="88" r="18" fill="black"></circle>`,
+      `</mask>`,
+      `</defs>`,
+      `<path class="screen-map-device-heading-marker__fan" fill="url(#screenDeviceHeadingFanFill)" d="M63 88 L42 16 A74 74 0 0 1 84 16 Z" mask="url(#screenDeviceHeadingFanMask)"></path>`,
+      `<path class="screen-map-device-heading-marker__fan-beam" stroke="url(#screenDeviceHeadingFanBeam)" d="M63 70 L63 17"></path>`,
+      `<path class="screen-map-device-heading-marker__fan-arc" stroke="url(#screenDeviceHeadingFanArc)" d="M42 16 A74 74 0 0 1 84 16"></path>`,
+      `</svg>`,
+    ].join(""),
+  });
+}
+
+function deviceTooltipContent(deviceLocation: ScreenDeviceLocationResponse, heading: number | undefined, t: TFunction) {
   const point = deviceLocation.point;
   const sourceLabel = deviceLocation.source === "manual"
     ? t("deviceLocationManual", { ns: "screen" })
@@ -360,6 +415,7 @@ function deviceTooltipContent(deviceLocation: ScreenDeviceLocationResponse, t: T
     `<strong>${escapeHtml(t("deviceLocation", { ns: "screen" }))}</strong>`,
     escapeHtml(sourceLabel),
     point ? escapeHtml(formatCoordinate(point)) : "-",
+    `${escapeHtml(t("deviceHeading", { ns: "screen" }))}: ${escapeHtml(formatDeviceHeading(heading))}`,
     `${escapeHtml(t("time", { ns: "screen" }))}: ${escapeHtml(formatMapTime(deviceLocation.updatedAt))}`,
   ].join("<br>");
 }
@@ -396,22 +452,38 @@ function trajectoryTooltipContent(
   ].join("<br>");
 }
 
-function renderDeviceLayer(map: L.Map, deviceLocation: ScreenDeviceLocationResponse | null, t: TFunction) {
+function renderDeviceLayer(
+  map: L.Map,
+  deviceLocation: ScreenDeviceLocationResponse | null,
+  deviceHeadingDeg: number | undefined,
+  t: TFunction,
+) {
   const group = L.layerGroup().addTo(map);
   if (!deviceLocation?.valid || !validMapPoint(deviceLocation.point)) {
     return group;
   }
 
+  const latLng: L.LatLngExpression = [deviceLocation.point.latitude, deviceLocation.point.longitude];
+  if (validHeading(deviceHeadingDeg)) {
+    L.marker(latLng, {
+      icon: createDeviceHeadingIcon(deviceHeadingDeg),
+      pane: markerPane,
+      interactive: false,
+      keyboard: false,
+      zIndexOffset: -30,
+    }).addTo(group);
+  }
+
   const className = deviceLocation.source === "manual"
     ? "screen-map-device-marker screen-map-device-marker--manual"
     : "screen-map-device-marker";
-  L.marker([deviceLocation.point.latitude, deviceLocation.point.longitude], {
+  L.marker(latLng, {
     icon: createIcon(referenceMarkerIcons.detectionOnline, deviceIconSize, className),
     pane: markerPane,
     riseOnHover: true,
     alt: t("deviceLocation", { ns: "screen" }),
   })
-    .bindTooltip(deviceTooltipContent(deviceLocation, t), {
+    .bindTooltip(deviceTooltipContent(deviceLocation, deviceHeadingDeg, t), {
       direction: "top",
       offset: [0, -deviceIconSize[1]],
       className: "module-location-tooltip screen-map-tooltip",
@@ -548,6 +620,7 @@ export function PositionMap({
   positions,
   whitelist,
   deviceLocation,
+  deviceHeadingDeg,
   visibleMapLayers,
   onSelectPosition,
   onMapReady = noopMapReady,
@@ -560,7 +633,7 @@ export function PositionMap({
   const positionLayerRef = useRef<L.LayerGroup | null>(null);
   const onSelectPositionRef = useRef(onSelectPosition);
   const selectedIdRef = useRef(selectedId);
-  const realDataRef = useRef<RealMapData>({ deviceLocation, positions, whitelist });
+  const realDataRef = useRef<RealMapData>({ deviceLocation, deviceHeadingDeg, positions, whitelist });
   const hasFitRealBoundsRef = useRef(false);
   const visibleMapLayersKey = visibleMapLayers.join("|");
 
@@ -573,8 +646,8 @@ export function PositionMap({
   }, [selectedId]);
 
   useEffect(() => {
-    realDataRef.current = { deviceLocation, positions, whitelist };
-  }, [deviceLocation, positions, whitelist]);
+    realDataRef.current = { deviceLocation, deviceHeadingDeg, positions, whitelist };
+  }, [deviceHeadingDeg, deviceLocation, positions, whitelist]);
 
   const layerLabels = useMemo(() => {
     return Object.fromEntries(referenceMapLayers.map((key) => [key, t(key, { ns: "screen" })])) as Record<ReferenceMapLayer, string>;
@@ -642,7 +715,7 @@ export function PositionMap({
 
     mapRef.current = map;
     const data = realDataRef.current;
-    deviceLayerRef.current = renderDeviceLayer(map, data.deviceLocation, t);
+    deviceLayerRef.current = renderDeviceLayer(map, data.deviceLocation, data.deviceHeadingDeg, t);
     positionLayerRef.current = renderPositionLayers(
       map,
       data.positions,
@@ -707,7 +780,7 @@ export function PositionMap({
       map.removeLayer(positionLayerRef.current);
     }
 
-    deviceLayerRef.current = renderDeviceLayer(map, deviceLocation, t);
+    deviceLayerRef.current = renderDeviceLayer(map, deviceLocation, deviceHeadingDeg, t);
     positionLayerRef.current = renderPositionLayers(
       map,
       positions,
@@ -721,7 +794,7 @@ export function PositionMap({
       fitRealScreenBounds(map, deviceLocation, positions);
       hasFitRealBoundsRef.current = true;
     }
-  }, [deviceLocation, positions, selectedId, t, whitelist]);
+  }, [deviceHeadingDeg, deviceLocation, positions, selectedId, t, whitelist]);
 
   useEffect(() => {
     const map = mapRef.current;

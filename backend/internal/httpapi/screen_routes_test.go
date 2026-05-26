@@ -75,6 +75,62 @@ func TestScreenDeceptionCapabilityStatusUsesUnconfiguredState(t *testing.T) {
 	}
 }
 
+func TestScreenCompassCapabilityStatusUsesUnconfiguredState(t *testing.T) {
+	status := screenCompassCapabilityStatus(
+		model.CompassSessionRequest{},
+		false,
+		model.CompassSessionResponse{State: "inactive"},
+	)
+
+	if status.Configured || status.Active || status.State != "unconfigured" {
+		t.Fatalf("status = %+v, want unconfigured inactive compass", status)
+	}
+}
+
+func TestScreenCompassCapabilityStatusKeepsConfiguredOfflineState(t *testing.T) {
+	status := screenCompassCapabilityStatus(
+		model.CompassSessionRequest{PortName: "/dev/ttyUSB3"},
+		true,
+		model.CompassSessionResponse{
+			State:     "connecting",
+			LastError: "open /dev/ttyUSB3: no such file",
+		},
+	)
+
+	if !status.Configured || status.Active || status.State != "connecting" {
+		t.Fatalf("status = %+v, want configured offline compass", status)
+	}
+	if status.PortName != "/dev/ttyUSB3" || status.LastError == "" {
+		t.Fatalf("status = %+v, want configured port and error", status)
+	}
+}
+
+func TestScreenCompassCapabilityStatusTreatsCurrentSessionAsConfigured(t *testing.T) {
+	heading := 123.45
+	updatedAt := time.Date(2026, 5, 25, 10, 0, 0, 0, time.UTC)
+	status := screenCompassCapabilityStatus(
+		model.CompassSessionRequest{},
+		false,
+		model.CompassSessionResponse{
+			Active:        true,
+			State:         "connected",
+			PortName:      "/dev/ttyUSB3",
+			LastHeading:   &heading,
+			LastUpdatedAt: &updatedAt,
+		},
+	)
+
+	if !status.Configured || !status.Active || status.State != "connected" || status.PortName != "/dev/ttyUSB3" {
+		t.Fatalf("status = %+v, want configured active compass", status)
+	}
+	if status.HeadingDeg == nil || *status.HeadingDeg != heading {
+		t.Fatalf("heading = %v, want %.2f", status.HeadingDeg, heading)
+	}
+	if status.HeadingUpdatedAt == nil || !status.HeadingUpdatedAt.Equal(updatedAt) {
+		t.Fatalf("heading updated at = %v, want %v", status.HeadingUpdatedAt, updatedAt)
+	}
+}
+
 func TestScreenDeviceLocationResponsePrefersGPSOverManual(t *testing.T) {
 	updatedAt := time.Date(2026, 5, 18, 10, 0, 0, 0, time.UTC)
 	response := screenDeviceLocationResponse(

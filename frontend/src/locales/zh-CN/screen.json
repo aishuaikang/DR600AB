@@ -41,6 +41,7 @@
   "deviceLocation": "设备位置",
   "deviceLocationGps": "GPS 坐标",
   "deviceLocationManual": "手动坐标",
+  "deviceHeading": "设备方向",
   "operationPanel": "操作面板",
   "strike": "干扰",
   "deception": "诱骗",

@@ -241,6 +241,7 @@ clear_chromium_cache() {
 "${SUDO[@]}" install -d -m 0755 "$INSTALL_DIR"
 "${SUDO[@]}" install -m 0755 "$REMOTE_TMP/dr600ab" "$INSTALL_DIR/dr600ab"
 "${SUDO[@]}" install -d -m 0755 "$INSTALL_DIR/data"
+"${SUDO[@]}" install -d -m 0755 "$INSTALL_DIR/static/map"
 "${SUDO[@]}" chown -R "$SERVICE_USER:" "$INSTALL_DIR"
 "${SUDO[@]}" install -d -m 0755 -o "$KIOSK_USER" -g "$KIOSK_USER" "$CHROMIUM_USER_DATA_DIR"
 prepare_kiosk_xauthority
@@ -257,6 +258,7 @@ User=$SERVICE_USER
 WorkingDirectory=$INSTALL_DIR
 Environment=API_ADDR=$API_HOST:$API_PORT
 Environment=API_SETTINGS_PATH=$INSTALL_DIR/data/detection-settings.json
+Environment=API_OFFLINE_MAP_PATH=$INSTALL_DIR/static/map
 ExecStart=$INSTALL_DIR/dr600ab
 Restart=always
 RestartSec=3

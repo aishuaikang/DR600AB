@@ -16,6 +16,7 @@ export const userPageItems: NavItem[] = [
   { id: "settings", icon: Settings2, labelKey: "settings" },
   { id: "whitelist", icon: ShieldCheck, labelKey: "whitelist" },
   { id: "intrusions", icon: ListTree, labelKey: "intrusions" },
+  { id: "interference-reports", icon: FileText, labelKey: "interferenceReports" },
   { id: "deception-reports", icon: FileText, labelKey: "deceptionReports" },
 ];
 

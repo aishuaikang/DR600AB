@@ -1,18 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
 import type { TFunction } from "i18next";
-import { BellRing, Plus, ShieldCheck, Trash2, Volume2 } from "lucide-react";
+import { QrCode } from "lucide-react";
+import * as QRCode from "qrcode";
 
 import { Panel, PanelBody } from "../components/Panel";
 import { SectionHeader } from "../components/SectionHeader";
-import i18n from "../i18n";
-import { cx } from "../utils/classnames";
 import type { UserSettings } from "../types";
 import { extractErrorMessage } from "../utils/session";
-import {
-  removeWhitelistSerial,
-  resolveScreenAlarmSettings,
-  upsertWhitelistItem,
-} from "../utils/whitelist";
 
 const defaultIntrusionRetentionDays = 90;
 const intrusionRetentionOptions = [30, 90, 180, 0];
@@ -38,31 +32,6 @@ function validLatitude(value: number) {
 
 function validLongitude(value: number) {
   return Number.isFinite(value) && value >= -180 && value <= 180;
-}
-
-function formatSettingsDate(value: string | undefined, locale: string) {
-  if (!value) {
-    return "-";
-  }
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) {
-    return "-";
-  }
-  return date.toLocaleString(locale.startsWith("zh") ? "zh-CN" : "en-US", { hour12: false });
-}
-
-function formatWhitelistSource(value: string | undefined, t: TFunction) {
-  const source = value?.trim();
-  if (!source) {
-    return "-";
-  }
-  if (source === "manual") {
-    return t("whitelistSourceManual", { ns: "settings" });
-  }
-  if (source === "screen_position") {
-    return t("whitelistSourceScreenPosition", { ns: "settings" });
-  }
-  return source;
 }
 
 export function UserSettingsPage({
@@ -93,19 +62,8 @@ export function UserSettingsPage({
     kind: "idle",
     text: "",
   });
+  const [deviceSnQrDataUrl, setDeviceSnQrDataUrl] = useState("");
   const [retentionDraft, setRetentionDraft] = useState(() => String(userSettings.intrusionRetentionDays ?? defaultIntrusionRetentionDays));
-  const [whitelistSerialDraft, setWhitelistSerialDraft] = useState("");
-  const [whitelistModelDraft, setWhitelistModelDraft] = useState("");
-  const [whitelistSaving, setWhitelistSaving] = useState(false);
-  const [whitelistMessage, setWhitelistMessage] = useState<{ kind: "idle" | "success" | "error"; text: string }>({
-    kind: "idle",
-    text: "",
-  });
-  const [alarmSaving, setAlarmSaving] = useState(false);
-  const [alarmMessage, setAlarmMessage] = useState<{ kind: "idle" | "success" | "error"; text: string }>({
-    kind: "idle",
-    text: "",
-  });
   const normalizedDraft = titleDraft.trim();
   const changed = normalizedDraft !== appTitle;
   const savedRetentionDays = userSettings.intrusionRetentionDays ?? defaultIntrusionRetentionDays;
@@ -126,10 +84,6 @@ export function UserSettingsPage({
     }
     return savedLatitude !== latitude || savedLongitude !== longitude;
   }, [latitude, locationComplete, locationValid, longitude, savedLatitude, savedLongitude, userSettings.manualDeviceLocation]);
-  const whitelist = userSettings.whitelist ?? [];
-  const alarmSettings = resolveScreenAlarmSettings(userSettings.screenAlarmSettings);
-  const whitelistSerial = whitelistSerialDraft.trim();
-
   useEffect(() => {
     setTitleDraft(appTitle);
   }, [appTitle]);
@@ -142,6 +96,39 @@ export function UserSettingsPage({
   useEffect(() => {
     setRetentionDraft(String(userSettings.intrusionRetentionDays ?? defaultIntrusionRetentionDays));
   }, [userSettings.intrusionRetentionDays]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const deviceSn = userSettings.deviceSn?.trim();
+    if (!deviceSn) {
+      setDeviceSnQrDataUrl("");
+      return;
+    }
+
+    void QRCode.toDataURL(deviceSn, {
+      errorCorrectionLevel: "M",
+      margin: 1,
+      width: 192,
+      color: {
+        dark: "#06131f",
+        light: "#ffffff",
+      },
+    })
+      .then((dataUrl) => {
+        if (!cancelled) {
+          setDeviceSnQrDataUrl(dataUrl);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setDeviceSnQrDataUrl("");
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [userSettings.deviceSn]);
 
   const saveManualLocation = async () => {
     if (!locationValid) {
@@ -202,74 +189,6 @@ export function UserSettingsPage({
     }
   };
 
-  const addWhitelistItem = async () => {
-    if (!whitelistSerial) {
-      setWhitelistMessage({ kind: "error", text: t("whitelistSerialRequired", { ns: "settings" }) });
-      return;
-    }
-    setWhitelistSaving(true);
-    setWhitelistMessage({ kind: "idle", text: "" });
-    try {
-      await onUserSettingsChange({
-        ...userSettings,
-        whitelist: upsertWhitelistItem(whitelist, {
-          serial: whitelistSerial,
-          model: whitelistModelDraft,
-          source: "manual",
-        }),
-      });
-      setWhitelistSerialDraft("");
-      setWhitelistModelDraft("");
-      setWhitelistMessage({ kind: "success", text: t("whitelistSaved", { ns: "settings" }) });
-    } catch (error) {
-      setWhitelistMessage({ kind: "error", text: extractErrorMessage(error, t("unexpectedError", { ns: "common" })) });
-    } finally {
-      setWhitelistSaving(false);
-    }
-  };
-
-  const deleteWhitelistItem = async (serial: string) => {
-    setWhitelistSaving(true);
-    setWhitelistMessage({ kind: "idle", text: "" });
-    try {
-      await onUserSettingsChange({
-        ...userSettings,
-        whitelist: removeWhitelistSerial(whitelist, serial),
-      });
-      setWhitelistMessage({ kind: "success", text: t("whitelistDeleted", { ns: "settings" }) });
-    } catch (error) {
-      setWhitelistMessage({ kind: "error", text: extractErrorMessage(error, t("unexpectedError", { ns: "common" })) });
-    } finally {
-      setWhitelistSaving(false);
-    }
-  };
-
-  const updateAlarmSetting = async (key: keyof typeof alarmSettings, value: boolean) => {
-    setAlarmSaving(true);
-    setAlarmMessage({ kind: "idle", text: "" });
-    try {
-      await onUserSettingsChange({
-        ...userSettings,
-        screenAlarmSettings: {
-          ...alarmSettings,
-          [key]: value,
-        },
-      });
-      setAlarmMessage({ kind: "success", text: t("screenAlarmSaved", { ns: "settings" }) });
-    } catch (error) {
-      setAlarmMessage({ kind: "error", text: extractErrorMessage(error, t("unexpectedError", { ns: "common" })) });
-    } finally {
-      setAlarmSaving(false);
-    }
-  };
-
-  const alarmOptions = [
-    { key: "detection" as const, label: t("screenAlarmDetection", { ns: "settings" }), icon: <BellRing size={15} aria-hidden="true" /> },
-    { key: "position" as const, label: t("screenAlarmPosition", { ns: "settings" }), icon: <ShieldCheck size={15} aria-hidden="true" /> },
-    { key: "fpv" as const, label: t("screenAlarmFpv", { ns: "settings" }), icon: <BellRing size={15} aria-hidden="true" /> },
-    { key: "sound" as const, label: t("screenAlarmSound", { ns: "settings" }), icon: <Volume2 size={15} aria-hidden="true" /> },
-  ];
-
   return (
     <section className="grid gap-3">
       <Panel>
@@ -279,13 +198,43 @@ export function UserSettingsPage({
             description={t("deviceSnDescription", { ns: "settings" })}
           />
 
-          <div className="rounded-2xl border border-primary/20 bg-primary/10 px-4 py-3">
-            <span className="text-[11px] font-semibold uppercase tracking-wide text-primary/70">
-              {t("deviceSnField", { ns: "settings" })}
-            </span>
-            <strong className="mt-2 block min-w-0 break-words font-mono text-lg font-semibold text-base-content">
-              {userSettings.deviceSn || t("unknown", { ns: "common" })}
-            </strong>
+          <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_12rem]">
+            <div className="grid gap-3">
+              <div className="rounded-2xl border border-primary/20 bg-primary/10 px-4 py-3">
+                <span className="text-[11px] font-semibold uppercase tracking-wide text-primary/70">
+                  {t("deviceSnField", { ns: "settings" })}
+                </span>
+                <strong className="mt-2 block min-w-0 break-words font-mono text-lg font-semibold text-base-content">
+                  {userSettings.deviceSn || t("unknown", { ns: "common" })}
+                </strong>
+              </div>
+
+              <div className="rounded-2xl border border-base-300 bg-base-100/45 px-4 py-3">
+                <span className="text-[11px] font-semibold uppercase tracking-wide text-base-content/45">
+                  {t("deviceHardwareIdField", { ns: "settings" })}
+                </span>
+                <strong className="mt-2 block min-w-0 break-words font-mono text-sm font-semibold text-base-content">
+                  {userSettings.deviceHardwareId || t("unknown", { ns: "common" })}
+                </strong>
+              </div>
+            </div>
+
+            <div className="flex min-h-48 flex-col items-center justify-center rounded-2xl border border-base-300 bg-base-100 p-3 text-center">
+              <span className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-base-content/45">
+                {t("deviceSnQrField", { ns: "settings" })}
+              </span>
+              {deviceSnQrDataUrl ? (
+                <img
+                  className="h-36 w-36 rounded-xl border border-base-300 bg-white p-2"
+                  src={deviceSnQrDataUrl}
+                  alt={t("deviceSnQrField", { ns: "settings" })}
+                />
+              ) : (
+                <div className="flex h-36 w-36 items-center justify-center rounded-xl border border-dashed border-base-300 bg-base-200 text-base-content/35">
+                  <QrCode size={42} aria-hidden="true" />
+                </div>
+              )}
+            </div>
           </div>
         </PanelBody>
       </Panel>
@@ -470,152 +419,6 @@ export function UserSettingsPage({
               {retentionSaving ? t("loading", { ns: "common" }) : t("save", { ns: "common" })}
             </button>
           </div>
-        </PanelBody>
-      </Panel>
-
-      <Panel>
-        <PanelBody>
-          <SectionHeader
-            title={t("whitelistTitle", { ns: "settings" })}
-            description={t("whitelistDescription", { ns: "settings" })}
-            action={
-              <span className="inline-flex h-8 items-center gap-2 rounded-xl border border-success/25 bg-success/10 px-3 text-xs font-semibold text-success">
-                <ShieldCheck size={15} aria-hidden="true" />
-                {t("whitelistCount", { ns: "settings", count: whitelist.length })}
-              </span>
-            }
-          />
-
-          <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_12rem]">
-            <div className="grid gap-3 sm:grid-cols-2">
-              <label className="grid gap-1.5">
-                <span className="text-xs font-medium text-base-content/60">{t("whitelistSerial", { ns: "settings" })}</span>
-                <input
-                  className="input input-bordered input-sm w-full bg-base-100"
-                  value={whitelistSerialDraft}
-                  maxLength={128}
-                  placeholder="UAV-8F12"
-                  onChange={(event) => setWhitelistSerialDraft(event.target.value)}
-                />
-              </label>
-              <label className="grid gap-1.5">
-                <span className="text-xs font-medium text-base-content/60">{t("whitelistModel", { ns: "settings" })}</span>
-                <input
-                  className="input input-bordered input-sm w-full bg-base-100"
-                  value={whitelistModelDraft}
-                  maxLength={64}
-                  placeholder={t("whitelistModelPlaceholder", { ns: "settings" })}
-                  onChange={(event) => setWhitelistModelDraft(event.target.value)}
-                />
-              </label>
-            </div>
-
-            <button
-              className="btn btn-sm btn-primary self-end"
-              type="button"
-              disabled={whitelistSaving || !whitelistSerial}
-              onClick={() => void addWhitelistItem()}
-            >
-              <Plus size={15} aria-hidden="true" />
-              {t("whitelistAdd", { ns: "settings" })}
-            </button>
-          </div>
-
-          {whitelistMessage.text ? (
-            <div className={`alert py-2 text-sm ${whitelistMessage.kind === "error" ? "alert-error" : "alert-success"}`}>
-              {whitelistMessage.text}
-            </div>
-          ) : null}
-
-          <div className="overflow-x-auto rounded-2xl border border-base-300 bg-base-100/45">
-            <table className="table table-sm">
-              <thead>
-                <tr>
-                  <th>{t("whitelistSerial", { ns: "settings" })}</th>
-                  <th>{t("whitelistModel", { ns: "settings" })}</th>
-                  <th>{t("whitelistSource", { ns: "settings" })}</th>
-                  <th>{t("whitelistCreatedAt", { ns: "settings" })}</th>
-                  <th className="text-right">{t("whitelistActions", { ns: "settings" })}</th>
-                </tr>
-              </thead>
-              <tbody>
-                {whitelist.length > 0 ? whitelist.map((item) => (
-                  <tr key={`${item.serial}-${item.createdAt ?? ""}`}>
-                    <td className="font-mono font-semibold">{item.serial}</td>
-                    <td>{item.model || "-"}</td>
-                    <td>{formatWhitelistSource(item.source, t)}</td>
-                    <td>{formatSettingsDate(item.createdAt, i18n.language)}</td>
-                    <td className="text-right">
-                      <button
-                        className="btn btn-ghost btn-xs text-error"
-                        type="button"
-                        disabled={whitelistSaving}
-                        aria-label={t("whitelistDelete", { ns: "settings", serial: item.serial })}
-                        onClick={() => void deleteWhitelistItem(item.serial)}
-                      >
-                        <Trash2 size={14} aria-hidden="true" />
-                      </button>
-                    </td>
-                  </tr>
-                )) : (
-                  <tr>
-                    <td colSpan={5} className="py-6 text-center text-sm text-base-content/50">
-                      {t("whitelistEmpty", { ns: "settings" })}
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
-        </PanelBody>
-      </Panel>
-
-      <Panel>
-        <PanelBody>
-          <SectionHeader
-            title={t("screenAlarmTitle", { ns: "settings" })}
-            description={t("screenAlarmDescription", { ns: "settings" })}
-          />
-
-          <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
-            {alarmOptions.map((option) => {
-              const active = alarmSettings[option.key];
-              return (
-                <button
-                  key={option.key}
-                  className={cx(
-                    "flex h-11 items-center justify-between gap-3 rounded-2xl border px-3 text-left text-sm font-semibold",
-                    active
-                      ? "border-error/35 bg-error/10 text-error"
-                      : "border-base-300 bg-base-100/55 text-base-content/55 hover:bg-base-300/65",
-                  )}
-                  type="button"
-                  aria-pressed={active}
-                  disabled={alarmSaving}
-                  onClick={() => void updateAlarmSetting(option.key, !active)}
-                >
-                  <span className="inline-flex min-w-0 items-center gap-2">
-                    {option.icon}
-                    <span className="truncate">{option.label}</span>
-                  </span>
-                  <input
-                    className="toggle toggle-error toggle-sm"
-                    type="checkbox"
-                    tabIndex={-1}
-                    checked={active}
-                    readOnly
-                    aria-hidden="true"
-                  />
-                </button>
-              );
-            })}
-          </div>
-
-          {alarmMessage.text ? (
-            <div className={`alert py-2 text-sm ${alarmMessage.kind === "error" ? "alert-error" : "alert-success"}`}>
-              {alarmMessage.text}
-            </div>
-          ) : null}
         </PanelBody>
       </Panel>
     </section>

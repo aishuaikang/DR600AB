@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import type { TFunction } from "i18next";
-import { Check, Globe2, Map as MapIcon, RefreshCw, Satellite, SatelliteDish } from "lucide-react";
+import { Check, Compass, Globe2, Map as MapIcon, RefreshCw, Satellite, SatelliteDish } from "lucide-react";
 
 import { BannerAlert } from "../components/BannerAlert";
 import { InfoTile } from "../components/InfoTile";
@@ -13,7 +13,13 @@ import {
   SERIAL_BAUD_RATE_LIMITS,
   normalizeSerialBaudRate,
 } from "../serial-profile";
-import type { DeceptionSessionResponse, GPSSessionResponse, PortInfo, UserSettings } from "../types";
+import type {
+  CompassSessionResponse,
+  DeceptionSessionResponse,
+  GPSSessionResponse,
+  PortInfo,
+  UserSettings,
+} from "../types";
 import { cx } from "../utils/classnames";
 import { fullLocaleName } from "../utils/locales";
 import { extractErrorMessage } from "../utils/session";
@@ -29,6 +35,10 @@ function formatBaudRate(value: number) {
   return String(normalizeSerialBaudRate(value));
 }
 
+function formatCompassAngle(value: number | undefined) {
+  return typeof value === "number" && Number.isFinite(value) ? `${value.toFixed(2)}°` : "-";
+}
+
 export function SettingsPage({
   banner,
   ports,
@@ -38,6 +48,7 @@ export function SettingsPage({
   selectedGPSDataPort,
   selectedGPSControlPort,
   selectedDeceptionPort,
+  selectedCompassPort,
   sessionStateLabel,
   currentReceivePort,
   currentSendPort,
@@ -50,6 +61,10 @@ export function SettingsPage({
   deceptionSession,
   deceptionSessionStateLabel,
   currentDeceptionPort,
+  compassBanner,
+  compassSession,
+  compassSessionStateLabel,
+  currentCompassPort,
   allLocaleOptions,
   visibleLocales,
   currentLocale,
@@ -64,6 +79,7 @@ export function SettingsPage({
   onGPSDataPortChange,
   onGPSControlPortChange,
   onDeceptionPortChange,
+  onCompassPortChange,
   onUserSettingsChange,
   onVisibleLocalesChange,
   onVisibleMapLayersChange,
@@ -76,6 +92,7 @@ export function SettingsPage({
   selectedGPSDataPort: string;
   selectedGPSControlPort: string;
   selectedDeceptionPort: string;
+  selectedCompassPort: string;
   sessionStateLabel: string;
   currentReceivePort: string;
   currentSendPort: string;
@@ -88,6 +105,10 @@ export function SettingsPage({
   deceptionSession: DeceptionSessionResponse | null;
   deceptionSessionStateLabel: string;
   currentDeceptionPort: string;
+  compassBanner: Banner;
+  compassSession: CompassSessionResponse | null;
+  compassSessionStateLabel: string;
+  currentCompassPort: string;
   allLocaleOptions: string[];
   visibleLocales: string[];
   currentLocale: string;
@@ -102,6 +123,7 @@ export function SettingsPage({
   onGPSDataPortChange: (value: string) => void;
   onGPSControlPortChange: (value: string) => void;
   onDeceptionPortChange: (value: string) => void;
+  onCompassPortChange: (value: string) => void;
   onUserSettingsChange: (settings: UserSettings) => Promise<UserSettings>;
   onVisibleLocalesChange: (locales: string[]) => void;
   onVisibleMapLayersChange: (layers: ReferenceMapLayer[]) => void;
@@ -121,6 +143,10 @@ export function SettingsPage({
   const normalizedStrikeLabels = strikeLabelDrafts.map(normalizeStrikeLabel);
   const strikeLabelsChanged = normalizedStrikeLabels.join("|") !== savedStrikeLabels.map(normalizeStrikeLabel).join("|");
   const detectionBaudRate = normalizeSerialBaudRate(selectedDetectionBaudRate);
+  const compassPitch = compassSession?.lastPitch ?? compassSession?.lastRecord?.pitch;
+  const compassRoll = compassSession?.lastRoll ?? compassSession?.lastRecord?.roll;
+  const compassHeading = compassSession?.lastHeading ?? compassSession?.lastRecord?.heading;
+  const compassRawHex = compassSession?.lastRawHex || compassSession?.lastRecord?.rawHex || "-";
 
   useEffect(() => {
     setStrikeLabelDrafts(savedStrikeLabels);
@@ -273,6 +299,50 @@ export function SettingsPage({
           </div>
 
           {gpsBanner.kind === "error" ? <BannerAlert banner={gpsBanner} /> : null}
+        </PanelBody>
+      </Panel>
+
+      <Panel>
+        <PanelBody>
+          <SectionHeader
+            title={t("compassSerialTitle", { ns: "settings" })}
+            description={t("compassSerialDescription", { ns: "settings" })}
+            action={
+              <span className="inline-flex h-8 items-center gap-2 rounded-xl border border-info/25 bg-info/10 px-3 text-xs font-semibold text-info">
+                <Compass size={15} />
+                0x77
+              </span>
+            }
+          />
+
+          <div className="grid gap-3 md:grid-cols-3">
+            <InfoTile label={t("compassSessionTitle", { ns: "settings" })}>
+              {compassSessionStateLabel}
+            </InfoTile>
+            <InfoTile label={t("compassPort", { ns: "settings" })} value={currentCompassPort || t("unknown", { ns: "common" })} />
+            <InfoTile label={t("compassLastError", { ns: "settings" })} value={compassSession?.lastError || "-"} />
+          </div>
+
+          <PortSelect
+            label={t("compassPort", { ns: "settings" })}
+            placeholder={t("selectCompassPort", { ns: "settings" })}
+            value={selectedCompassPort}
+            ports={ports}
+            activeText={t("active", { ns: "common" })}
+            onChange={onCompassPortChange}
+          />
+
+          <div className="grid gap-3 md:grid-cols-3">
+            <InfoTile label={t("compassPitch", { ns: "settings" })} value={formatCompassAngle(compassPitch)} />
+            <InfoTile label={t("compassRoll", { ns: "settings" })} value={formatCompassAngle(compassRoll)} />
+            <InfoTile label={t("compassHeading", { ns: "settings" })} value={formatCompassAngle(compassHeading)} />
+          </div>
+
+          <InfoTile label={t("compassLastRawFrame", { ns: "settings" })}>
+            <span className="line-clamp-2 break-all font-mono text-[11px] leading-4">{compassRawHex}</span>
+          </InfoTile>
+
+          {compassBanner.kind === "error" ? <BannerAlert banner={compassBanner} /> : null}
         </PanelBody>
       </Panel>
 

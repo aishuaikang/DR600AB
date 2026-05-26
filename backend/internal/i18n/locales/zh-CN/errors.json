@@ -37,5 +37,9 @@
   "deception_invalid_random": "随机坐标参数不合法",
   "deception_invalid_query": "不支持的诱骗设备查询项",
   "deception_report_not_found": "未找到指定诱骗报告",
-  "deception_report_delete_not_failed": "只能删除启动失败的诱骗报告"
+  "deception_report_delete_not_failed": "只能删除启动失败的诱骗报告",
+  "interference_report_not_found": "未找到指定干扰报告",
+  "interference_report_delete_not_failed": "只能删除启动失败的干扰报告",
+  "compass_port_required": "请选择三维电子罗盘串口",
+  "compass_port_open_failed": "打开三维电子罗盘串口失败"
 }

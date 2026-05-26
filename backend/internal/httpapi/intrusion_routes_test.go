@@ -22,20 +22,28 @@ type memoryIntrusionStore struct {
 
 func (s *memoryIntrusionStore) List(options intrusion.QueryOptions) ([]model.IntrusionRecord, error) {
 	limit := options.Limit
-	if limit <= 0 || limit > len(s.items) {
+	if limit <= 0 {
 		limit = len(s.items)
 	}
-	items := make([]model.IntrusionRecord, 0, limit)
+	offset := options.Offset
+	if offset < 0 {
+		offset = 0
+	}
+	filtered := make([]model.IntrusionRecord, 0, len(s.items))
 	for _, item := range s.items {
 		if options.TargetType != "" && item.TargetType != options.TargetType {
 			continue
 		}
-		items = append(items, item)
-		if len(items) >= limit {
-			break
-		}
+		filtered = append(filtered, item)
 	}
-	return items, nil
+	if offset >= len(filtered) {
+		return []model.IntrusionRecord{}, nil
+	}
+	end := offset + limit
+	if end > len(filtered) {
+		end = len(filtered)
+	}
+	return append([]model.IntrusionRecord(nil), filtered[offset:end]...), nil
 }
 
 func (s *memoryIntrusionStore) Delete(ids []string) (int64, error) {
@@ -130,6 +138,46 @@ func TestHandleIntrusionRecordsFiltersByType(t *testing.T) {
 	}
 	if body.Items[0].TargetType != model.IntrusionTargetTypePosition {
 		t.Fatalf("target type = %q, want position", body.Items[0].TargetType)
+	}
+}
+
+func TestHandleIntrusionRecordsReturnsPageInfo(t *testing.T) {
+	now := time.Now()
+	server := &Server{
+		translator: mustTranslator(t),
+		intrusions: &memoryIntrusionStore{
+			items: []model.IntrusionRecord{
+				{ID: "record-1", TargetType: model.IntrusionTargetTypeDetection, FirstSeen: now, LastSeen: now, ArchivedAt: now},
+				{ID: "record-2", TargetType: model.IntrusionTargetTypeDetection, FirstSeen: now, LastSeen: now, ArchivedAt: now},
+				{ID: "record-3", TargetType: model.IntrusionTargetTypeDetection, FirstSeen: now, LastSeen: now, ArchivedAt: now},
+			},
+		},
+	}
+	server.app = fiber.New()
+	api := server.app.Group("/api/v1")
+	server.registerIntrusionRoutes(api)
+
+	req, err := http.NewRequest(http.MethodGet, "/api/v1/intrusions?limit=2", nil)
+	if err != nil {
+		t.Fatalf("NewRequest() error = %v", err)
+	}
+	resp, err := server.app.Test(req)
+	if err != nil {
+		t.Fatalf("app.Test() error = %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusOK)
+	}
+
+	var body model.ListResponse[model.IntrusionRecord]
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("Decode() error = %v", err)
+	}
+	if body.Count != 2 || !body.HasMore || body.NextOffset != 2 {
+		t.Fatalf("page = count %d hasMore %v nextOffset %d, want 2 true 2", body.Count, body.HasMore, body.NextOffset)
+	}
+	if body.Items[0].ID != "record-1" || body.Items[1].ID != "record-2" {
+		t.Fatalf("items = %#v, want first two records", body.Items)
 	}
 }
 
