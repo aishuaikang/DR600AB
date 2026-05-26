@@ -773,10 +773,6 @@ func (s *Service) ingestScreenPosition(parsed model.ParsedMessage, msg *parser.M
 		}
 	case *parser.DIDEncrypted:
 		did := *data
-		if target, ok := screenPositionFromDIDEncryptedFallback(parsed, &did); ok {
-			s.store.AddScreenPosition(target)
-		}
-
 		s.mu.RLock()
 		decoder := s.o3Decoder
 		s.mu.RUnlock()
@@ -811,48 +807,6 @@ func (s *Service) ingestScreenPosition(parsed model.ParsedMessage, msg *parser.M
 			s.store.AddScreenPosition(target)
 		}()
 	}
-}
-
-func screenPositionFromDIDEncryptedFallback(
-	parsed model.ParsedMessage,
-	data *parser.DIDEncrypted,
-) (model.ScreenPositionTarget, bool) {
-	if data == nil {
-		return model.ScreenPositionTarget{}, false
-	}
-	encryptedID := strings.TrimSpace(data.EncryptedID)
-	device := strings.TrimSpace(data.Device)
-	serial := encryptedID
-	if serial == "" {
-		serial = device
-	}
-	if serial == "" {
-		return model.ScreenPositionTarget{}, false
-	}
-
-	target := model.ScreenPositionTarget{
-		CorrelationID: didEncryptedCorrelationID(data),
-		Serial:        serial,
-		Model:         didEncryptedFallbackModel,
-		Source:        string(parser.TypeDIDEncrypted),
-		Frequency:     data.Freq,
-		RSSI:          data.RSSI,
-		Device:        device,
-		Cracked:       false,
-		FirstSeen:     parsed.Time,
-		LastSeen:      parsed.Time,
-		LastRecord: model.ScreenPositionLastRecord{
-			Type:       parsed.Type,
-			ReceivedAt: parsed.Time,
-			Device:     device,
-			Serial:     serial,
-			Model:      didEncryptedFallbackModel,
-			Frequency:  data.Freq,
-			RSSI:       data.RSSI,
-			Cracked:    false,
-		},
-	}
-	return target, true
 }
 
 func didEncryptedCorrelationID(data *parser.DIDEncrypted) string {

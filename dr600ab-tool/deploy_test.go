@@ -74,10 +74,10 @@ func TestValidateFirmwarePackagePath(t *testing.T) {
 	}{
 		{name: "linux arm64", path: "/Users/ask/Desktop/spbatc/dr600ab/dist/dr600ab-linux-arm64.tar.gz"},
 		{name: "linux amd64", path: "/Users/ask/Desktop/spbatc/dr600ab/dist/dr600ab-linux-amd64.tar.gz"},
-		{name: "dist subdir rejected", path: "/Users/ask/Desktop/spbatc/dr600ab/dist/packages/dr600ab-linux-arm64.tar.gz", wantErr: true},
+		{name: "dist subdir accepted", path: "/Users/ask/Desktop/spbatc/dr600ab/dist/packages/dr600ab-linux-arm64.tar.gz"},
 		{name: "darwin rejected", path: "/Users/ask/Desktop/spbatc/dr600ab/dist/dr600ab-darwin-arm64.tar.gz", wantErr: true},
 		{name: "windows rejected", path: "/Users/ask/Desktop/spbatc/dr600ab/dist/dr600ab-windows-amd64.zip", wantErr: true},
-		{name: "generic release rejected", path: "/tmp/release.tar.gz", wantErr: true},
+		{name: "generic release accepted", path: "/tmp/release.tar.gz"},
 		{name: "tgz rejected", path: "/Users/ask/Desktop/spbatc/dr600ab/dist/dr600ab-linux-arm64.tgz", wantErr: true},
 		{name: "wrong suffix rejected", path: "/Users/ask/Desktop/spbatc/dr600ab/dist/dr600ab-linux-arm64.txt", wantErr: true},
 	}

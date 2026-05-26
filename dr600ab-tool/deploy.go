@@ -330,25 +330,11 @@ func validateFirmwarePackagePath(path string) error {
 	if name == "" || name == "." {
 		return fmt.Errorf("请选择固件包")
 	}
-	cleanPath, err := filepath.Abs(path)
-	if err != nil {
-		return fmt.Errorf("固件包路径无效: %w", err)
-	}
-	cleanDistDir, err := filepath.Abs(defaultFirmwareDir)
-	if err != nil {
-		return fmt.Errorf("固件包目录配置无效: %w", err)
-	}
-	if filepath.Dir(cleanPath) != cleanDistDir {
-		return fmt.Errorf("请选择 %s 目录中的固件包", defaultFirmwareDir)
-	}
 	if strings.Contains(name, "darwin") || strings.Contains(name, "windows") {
-		return fmt.Errorf("请选择 dist 目录中的 Linux 固件包，不能部署 %s", filepath.Base(path))
-	}
-	if !strings.HasPrefix(name, "dr600ab-linux-") {
-		return fmt.Errorf("请选择 %s 目录中的 dr600ab-linux-*.tar.gz 固件包", defaultFirmwareDir)
+		return fmt.Errorf("请选择 Linux 固件包，不能部署 %s", filepath.Base(path))
 	}
 	if !strings.HasSuffix(name, ".tar.gz") {
-		return fmt.Errorf("固件包格式无效，请选择 dr600ab-linux-*.tar.gz")
+		return fmt.Errorf("固件包格式无效，请选择 .tar.gz 固件包")
 	}
 	return nil
 }

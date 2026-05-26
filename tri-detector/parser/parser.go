@@ -42,8 +42,8 @@ func parseGPS(s string) GPS {
 		return GPS{}
 	}
 	return GPS{
-		Lat: toFloat(parts[0]),
-		Lng: toFloat(parts[1]),
+		Lat: toFloat(parts[1]),
+		Lng: toFloat(parts[0]),
 	}
 }
 

@@ -23,6 +23,7 @@ const (
 	screenPositionTrajectoryJitterM = 3.0
 	screenDetectionEventType        = "screen.detection.updated"
 	screenPositionEventType         = "screen.position.updated"
+	uncrackedDJIDroneModel          = "DJI-Drone"
 )
 
 // MemoryStore 在内存中保存有上限的记录，并广播运行时事件。
@@ -391,6 +392,9 @@ func (s *MemoryStore) addScreenPositionLocked(target model.ScreenPositionTarget)
 	target.Model = normalizeScreenTargetModel(target.Model)
 	target.Source = stringsTrim(target.Source)
 	target.Sources = appendScreenTargetSources(target.Sources, target.Source)
+	if isUncrackedDJIDroneTarget(target) {
+		return model.ScreenPositionTarget{}, false
+	}
 	if target.Serial == "" || target.Model == "" {
 		return model.ScreenPositionTarget{}, false
 	}
@@ -695,6 +699,10 @@ func screenPositionTargetMatches(existing, incoming model.ScreenPositionTarget) 
 		return true
 	}
 	return screenPositionPendingEncryptedTargetMatches(existing, incoming)
+}
+
+func isUncrackedDJIDroneTarget(target model.ScreenPositionTarget) bool {
+	return !target.Cracked && target.Model == uncrackedDJIDroneModel
 }
 
 func normalizeScreenTargetModel(modelName string) string {

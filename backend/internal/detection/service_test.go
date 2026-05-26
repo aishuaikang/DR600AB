@@ -59,7 +59,7 @@ func TestIngestLineStoresScreenPositionFromRID(t *testing.T) {
 	st := store.NewMemoryStore(10, 10)
 	svc := NewService(st, tr, settings.NewStore(filepath.Join(t.TempDir(), "settings.json")), Options{})
 
-	svc.IngestLine("session-1", "/dev/ttyUSB0", "RID ssid=RID-1581ABC, serial=1581ABC, model=DJI Mini 4 Pro, UA_type=2, drone_GPS=31.200000,121.400000, pilot_GPS=31.210000,121.410000, speed=12.5, Vspeed=0, direc=90, AltitudeP=20.0, AltitudeG=110.0, Height_AGL=35.5, MAC=60:60:1f:38:98:b9, rssi=-82, freq=2437")
+	svc.IngestLine("session-1", "/dev/ttyUSB0", "RID ssid=RID-1581ABC, serial=1581ABC, model=DJI Mini 4 Pro, UA_type=2, drone_GPS=121.400000,31.200000, pilot_GPS=121.410000,31.210000, speed=12.5, Vspeed=0, direc=90, AltitudeP=20.0, AltitudeG=110.0, Height_AGL=35.5, MAC=60:60:1f:38:98:b9, rssi=-82, freq=2437")
 
 	items := svc.ScreenPositions(10)
 	if len(items) != 1 {
@@ -112,7 +112,7 @@ func TestIngestLineStoresScreenPositionFromDIDPlain(t *testing.T) {
 	st := store.NewMemoryStore(10, 10)
 	svc := NewService(st, tr, settings.NewStore(filepath.Join(t.TempDir(), "settings.json")), Options{})
 
-	svc.IngestLine("session-1", "/dev/ttyUSB0", "num=672/3/1, device=10125, serial=0M6CH6AR0A100L, model=41-Mavic 2, uuid=176344372408408473, drone_GPS=31.200000,121.400000, home_GPS=31.190000,121.390000, pilot_GPS=31.210000,121.410000, Height=50, Altitude=110.0,EastV=3.0, NothV=4.0,UpV=0.0, freq=5796.5, rssi=-78, distance=0.0km,")
+	svc.IngestLine("session-1", "/dev/ttyUSB0", "num=672/3/1, device=10125, serial=0M6CH6AR0A100L, model=41-Mavic 2, uuid=176344372408408473, drone_GPS=121.400000,31.200000, home_GPS=121.390000,31.190000, pilot_GPS=121.410000,31.210000, Height=50, Altitude=110.0,EastV=3.0, NothV=4.0,UpV=0.0, freq=5796.5, rssi=-78, distance=0.0km,")
 
 	items := svc.ScreenPositions(10)
 	if len(items) != 1 {
@@ -129,7 +129,35 @@ func TestIngestLineStoresScreenPositionFromDIDPlain(t *testing.T) {
 	}
 }
 
-func TestIngestLineStoresFallbackScreenPositionFromDIDEncryptedWithoutDecoder(t *testing.T) {
+func TestIngestLineStoresDIDPlainLongitudeLatitudeGPS(t *testing.T) {
+	tr, err := i18n.New("zh-CN")
+	if err != nil {
+		t.Fatalf("i18n.New() error = %v", err)
+	}
+	st := store.NewMemoryStore(10, 10)
+	svc := NewService(st, tr, settings.NewStore(filepath.Join(t.TempDir(), "settings.json")), Options{})
+
+	svc.IngestLine("session-1", "/dev/ttyUSB0", "num=672/3/1, device=4745, serial=3YTBL320040274, model=66-Air 2S, uuid=186158855762255052, drone_GPS=117.008616,28.192898, home_GPS=117.008255,28.192434, pilot_GPS=117.008450,28.192692, Height=0, Altitude=46,EastV=0,NothV=0,UpV=0, freq=2414.5, rssi=-80, distance=0.0km,")
+
+	items := svc.ScreenPositions(10)
+	if len(items) != 1 {
+		t.Fatalf("screen positions count = %d, want 1", len(items))
+	}
+	if items[0].Model != "Air 2S" {
+		t.Fatalf("model = %q, want Air 2S", items[0].Model)
+	}
+	if items[0].Drone == nil || items[0].Drone.Latitude != 28.192898 || items[0].Drone.Longitude != 117.008616 {
+		t.Fatalf("unexpected drone point: %#v", items[0].Drone)
+	}
+	if items[0].Home == nil || items[0].Home.Latitude != 28.192434 || items[0].Home.Longitude != 117.008255 {
+		t.Fatalf("unexpected home point: %#v", items[0].Home)
+	}
+	if items[0].Pilot == nil || items[0].Pilot.Latitude != 28.192692 || items[0].Pilot.Longitude != 117.008450 {
+		t.Fatalf("unexpected pilot point: %#v", items[0].Pilot)
+	}
+}
+
+func TestIngestLineSkipsDIDEncryptedScreenPositionWithoutDecoder(t *testing.T) {
 	tr, err := i18n.New("zh-CN")
 	if err != nil {
 		t.Fatalf("i18n.New() error = %v", err)
@@ -140,23 +168,8 @@ func TestIngestLineStoresFallbackScreenPositionFromDIDEncryptedWithoutDecoder(t 
 	svc.IngestLine("session-1", "/dev/ttyUSB0", "#=632/3/1, device=10125, Encypted Mavic_O4_ID=875bb45f, freq=2429.5, rssi=-64, byte,15,1b,9b,58,f0,d9")
 
 	items := svc.ScreenPositions(10)
-	if len(items) != 1 {
-		t.Fatalf("screen positions count = %d, want 1", len(items))
-	}
-	if items[0].Serial != "875bb45f" {
-		t.Fatalf("serial = %q, want encrypted id", items[0].Serial)
-	}
-	if items[0].Model != "DJI-Drone" {
-		t.Fatalf("model = %q, want DJI-Drone", items[0].Model)
-	}
-	if items[0].CorrelationID != "did_encrypted:875bb45f" {
-		t.Fatalf("correlation id = %q, want did_encrypted:875bb45f", items[0].CorrelationID)
-	}
-	if items[0].Cracked {
-		t.Fatalf("fallback target should not be marked cracked")
-	}
-	if items[0].Drone != nil || items[0].Pilot != nil || items[0].Home != nil {
-		t.Fatalf("fallback target should not invent coordinates, got drone=%#v pilot=%#v home=%#v", items[0].Drone, items[0].Pilot, items[0].Home)
+	if len(items) != 0 {
+		t.Fatalf("screen positions count = %d, want 0 for uncracked DID encrypted", len(items))
 	}
 }
 
@@ -188,8 +201,8 @@ func TestIngestLineStoresScreenPositionFromDIDEncryptedDecoder(t *testing.T) {
 	if !items[0].Cracked {
 		t.Fatalf("expected decoded target to be marked cracked")
 	}
-	if items[0].HitCount != 2 {
-		t.Fatalf("hit count = %d, want fallback plus decoded updates", items[0].HitCount)
+	if items[0].HitCount != 1 {
+		t.Fatalf("hit count = %d, want decoded update only", items[0].HitCount)
 	}
 	if items[0].LastRecord.Device != "10125" {
 		t.Fatalf("last record device = %q, want 10125", items[0].LastRecord.Device)
@@ -749,7 +762,7 @@ func TestIngestLineUpdatesDeviceSNFromDeviceMessages(t *testing.T) {
 		},
 		{
 			name: "did plain",
-			line: "num=672/3/1, device=20250, serial=0M6CH6AR0A100L, model=41-Mavic 2, uuid=176344372408408473, drone_GPS=31.200000,121.400000, home_GPS=31.190000,121.390000, pilot_GPS=31.210000,121.410000, Height=50, Altitude=110.0,EastV=3.0, NothV=4.0,UpV=0.0, freq=5796.5, rssi=-78, distance=0.0km,",
+			line: "num=672/3/1, device=20250, serial=0M6CH6AR0A100L, model=41-Mavic 2, uuid=176344372408408473, drone_GPS=121.400000,31.200000, home_GPS=121.390000,31.190000, pilot_GPS=121.410000,31.210000, Height=50, Altitude=110.0,EastV=3.0, NothV=4.0,UpV=0.0, freq=5796.5, rssi=-78, distance=0.0km,",
 			want: settings.StandardDeviceSN("20250"),
 			raw:  "20250",
 		},

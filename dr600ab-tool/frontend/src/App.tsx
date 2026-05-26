@@ -901,7 +901,7 @@ function DeployPage({
           <label className="file-field wide">
             固件包
             <div>
-              <input readOnly value={firmwarePath} placeholder="选择 dist/dr600ab-linux-*.tar.gz" />
+              <input readOnly value={firmwarePath} placeholder="选择 .tar.gz 固件包" />
               <button type="button" onClick={onChooseFirmware}>
                 <FolderOpen size={16} />
                 选择
@@ -910,8 +910,8 @@ function DeployPage({
           </label>
           <div className="firmware-help wide">
             <strong>固件包要求</strong>
-            <span>ARM 设备选择 dr600ab-linux-arm64.tar.gz；x86_64 设备选择 dr600ab-linux-amd64.tar.gz。</span>
-            <span>不要选择 darwin 或 windows 包；压缩包内必须包含 dr600ab 可执行文件。</span>
+            <span>请选择设备对应的 .tar.gz 固件包；文件名不要求固定格式，也不限制所在目录。</span>
+            <span>压缩包内必须包含 dr600ab 可执行文件，部署时会自动校验。</span>
             <span>增量更新会保留 data、backend/data、static/map；全量更新会先备份再覆盖。</span>
             <span>设备端需要 systemctl、tar 和 Chromium；部署会同时安装 dr600ab.service 与 dr600ab-kiosk.service。</span>
           </div>

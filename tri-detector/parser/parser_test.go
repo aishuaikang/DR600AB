@@ -49,6 +49,26 @@ func TestParseDIDPlain(t *testing.T) {
 	_ = d
 }
 
+func TestParseDIDPlainGPSUsesLongitudeLatitudeOrder(t *testing.T) {
+	line := "num=672/3/1, device=4745, serial=3YTBL320040274, model=66-Air 2S, uuid=186158855762255052, drone_GPS=117.008616,28.192898, home_GPS=117.008255,28.192434, pilot_GPS=117.008450,28.192692, Height=0, Altitude=46,EastV=0,NothV=0,UpV=0, freq=2414.5, rssi=-80, distance=0.0km,"
+
+	msg, err := ParseLine(line)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	d := msg.Data.(*DIDPlain)
+	if d.DroneGPS.Lat != 28.192898 || d.DroneGPS.Lng != 117.008616 {
+		t.Fatalf("drone GPS = %#v, want lat=28.192898 lng=117.008616", d.DroneGPS)
+	}
+	if d.HomeGPS.Lat != 28.192434 || d.HomeGPS.Lng != 117.008255 {
+		t.Fatalf("home GPS = %#v, want lat=28.192434 lng=117.008255", d.HomeGPS)
+	}
+	if d.PilotGPS.Lat != 28.192692 || d.PilotGPS.Lng != 117.008450 {
+		t.Fatalf("pilot GPS = %#v, want lat=28.192692 lng=117.008450", d.PilotGPS)
+	}
+}
+
 func TestParseDetect(t *testing.T) {
 	line := "device=10125, model=PAL Analog, freq=5865.0, rssi=-56.9"
 	msg, err := ParseLine(line)
