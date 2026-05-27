@@ -913,7 +913,7 @@ function DeployPage({
             <span>请选择设备对应的 .tar.gz 固件包；文件名不要求固定格式，也不限制所在目录。</span>
             <span>压缩包内必须包含 dr600ab 可执行文件，部署时会自动校验。</span>
             <span>增量更新会保留 data、backend/data、static/map；全量更新会先备份再覆盖。</span>
-            <span>设备端需要 systemctl、tar 和 Chromium；部署会同时安装 dr600ab.service 与 dr600ab-kiosk.service。</span>
+            <span>设备端需要 systemctl、tar 和 Chromium；部署会安装 dr600ab.service，并为图形用户安装屏幕自启动项。</span>
           </div>
           <label className="checkbox wide">
             <input checked={fullUpdate} type="checkbox" onChange={(event) => onFullUpdateChange(event.target.checked)} />
@@ -936,7 +936,7 @@ function DeployPage({
         {probe ? (
           <div className="probe-grid">
             <InfoTile label="服务状态" value={probe.serviceStatus || "-"} strong={probe.serviceActive} />
-            <InfoTile label="屏幕服务" value={probe.kioskStatus || "-"} strong={probe.kioskActive} />
+            <InfoTile label="屏幕状态" value={probe.kioskStatus || "-"} strong={probe.kioskActive} />
             <InfoTile label="systemd" value={probe.hasSystemd ? "可用" : "不可用"} strong={probe.hasSystemd} />
             <InfoTile label="tar" value={probe.hasTar ? "可用" : "不可用"} strong={probe.hasTar} />
             <InfoTile label="Chromium" value={probe.chromiumPath || "未找到"} strong={!!probe.chromiumPath} />

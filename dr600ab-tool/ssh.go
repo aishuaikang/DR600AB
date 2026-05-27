@@ -289,6 +289,20 @@ func (a *App) ProbeRemote(installDir string) (RemoteProbe, error) {
 		result.KioskStatus = strings.TrimSpace(kioskStatus)
 		result.KioskActive = result.KioskStatus == "active"
 	}
+	kioskProcess, err := a.runCommand(`if command -v pgrep >/dev/null 2>&1; then
+  pgrep -f '[d]r600ab-kiosk-start|[c]hromium.*127[.]0[.]0[.]1:18080' >/dev/null && echo yes || echo no
+else
+  ps -eo args 2>/dev/null | grep -E '[d]r600ab-kiosk-start|[c]hromium.*127[.]0[.]0[.]1:18080' >/dev/null && echo yes || echo no
+fi`)
+	if err == nil && strings.TrimSpace(kioskProcess) == "yes" {
+		result.KioskActive = true
+		if result.KioskStatus == "" || result.KioskStatus == "inactive" || result.KioskStatus == "failed" {
+			result.KioskStatus = "桌面自启动运行中"
+		}
+	}
+	if !result.KioskActive && (result.KioskStatus == "" || result.KioskStatus == "unknown") {
+		result.KioskStatus = "未运行"
+	}
 	result.IntrusionDBPath = a.firstExistingRemotePath([]string{
 		remoteJoin(installDir, "data", "intrusions.db"),
 		remoteJoin(installDir, "backend", "data", "intrusions.db"),

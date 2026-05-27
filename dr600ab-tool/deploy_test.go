@@ -18,13 +18,21 @@ func TestBuildDeployScript(t *testing.T) {
 		"tar -xzf \"$REMOTE_PACKAGE\" -C \"$EXTRACT_DIR\"",
 		"$SUDO install -m 0755 \"$BINARY\" \"$INSTALL_DIR/dr600ab\"",
 		"/etc/systemd/system/dr600ab.service",
-		"/etc/systemd/system/dr600ab-kiosk.service",
 		"API_INTRUSION_DB_PATH=$INSTALL_DIR/data/intrusions.db",
 		"API_DECEPTION_REPORT_DB_PATH=$INSTALL_DIR/data/deception-reports.db",
 		"API_INTERFERENCE_REPORT_DB_PATH=$INSTALL_DIR/data/interference-reports.db",
 		"API_OFFLINE_MAP_PATH=$INSTALL_DIR/static/map",
+		"$SUDO tee \"$INSTALL_DIR/dr600ab-kiosk-start\"",
+		"$SUDO ln -sf \"$INSTALL_DIR/dr600ab-kiosk-start\" \"$KIOSK_LAUNCHER\"",
+		"$SUDO install -d -m 0755 \"$SYSTEM_AUTOSTART_DIR\"",
+		"write_kiosk_desktop_file \"$SYSTEM_AUTOSTART_FILE\"",
+		"install_user_autostart \"$KIOSK_USER\"",
+		"DR600AB_KIOSK_LOG=/tmp/dr600ab-kiosk.log",
+		"Exec=env DR600AB_KIOSK_LOG=/tmp/dr600ab-kiosk.log $KIOSK_LAUNCHER",
+		"--disable-gpu",
+		`--disk-cache-dir="$CHROMIUM_CACHE_DIR"`,
+		"$SUDO rm -f /etc/systemd/system/dr600ab-kiosk.service",
 		"$SUDO systemctl restart dr600ab.service",
-		"$SUDO systemctl restart dr600ab-kiosk.service",
 	} {
 		if !strings.Contains(script, want) {
 			t.Fatalf("script missing %q\n%s", want, script)
@@ -41,6 +49,7 @@ func TestBuildDeployScriptIncrementalPreservesDataDirs(t *testing.T) {
 	for _, want := range []string{
 		"FULL_UPDATE='0'",
 		"$SUDO mkdir -p \"$INSTALL_DIR/data\" \"$INSTALL_DIR/backend/data\" \"$INSTALL_DIR/static/map\"",
+		"clear_chromium_cache \"$LEGACY_CHROMIUM_USER_DATA_DIR\"",
 		"clear_chromium_cache \"$CHROMIUM_USER_DATA_DIR\"",
 	} {
 		if !strings.Contains(script, want) {

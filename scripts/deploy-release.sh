@@ -191,13 +191,25 @@ KIOSK_HOME="$(getent passwd "$KIOSK_USER" | cut -d: -f6)"
 if [[ -z "$KIOSK_HOME" ]]; then
   KIOSK_HOME="/home/$KIOSK_USER"
 fi
-CHROMIUM_USER_DATA_DIR="$KIOSK_HOME/.chromium-kiosk"
+KIOSK_UID="$(id -u "$KIOSK_USER")"
+CHROMIUM_RUNTIME_DIR="/run/dr600ab-kiosk"
+CHROMIUM_USER_DATA_DIR="$CHROMIUM_RUNTIME_DIR/profile"
+CHROMIUM_CACHE_DIR="$CHROMIUM_RUNTIME_DIR/cache"
+LEGACY_CHROMIUM_USER_DATA_DIR="$KIOSK_HOME/.chromium-kiosk"
+KIOSK_LAUNCHER="/usr/local/bin/dr600ab-kiosk-start"
+AUTOSTART_DIR="$KIOSK_HOME/.config/autostart"
+AUTOSTART_FILE="$AUTOSTART_DIR/dr600ab-kiosk.desktop"
+SYSTEM_AUTOSTART_DIR="/etc/xdg/autostart"
+SYSTEM_AUTOSTART_FILE="$SYSTEM_AUTOSTART_DIR/dr600ab-kiosk.desktop"
 
 prepare_kiosk_xauthority() {
   local xauth_source=""
   for candidate in \
-    "$KIOSK_HOME/.Xauthority" \
+    "/run/user/$KIOSK_UID/gdm/Xauthority" \
+    "/run/user/$KIOSK_UID/lightdm/Xauthority" \
+    "/run/user/$KIOSK_UID/Xauthority" \
     "/var/run/lightdm/root/${DISPLAY_VALUE}" \
+    "$KIOSK_HOME/.Xauthority" \
     "/root/.Xauthority"; do
     if [[ -f "$candidate" ]]; then
       xauth_source="$candidate"
@@ -238,13 +250,157 @@ clear_chromium_cache() {
   "${SUDO[@]}" rm -rf "${cache_paths[@]}"
 }
 
+write_kiosk_desktop_file() {
+  local desktop_file="$1"
+  "${SUDO[@]}" tee "$desktop_file" >/dev/null <<EOF
+[Desktop Entry]
+Type=Application
+Name=DR600AB Kiosk
+Exec=env DR600AB_KIOSK_LOG=/tmp/dr600ab-kiosk.log $KIOSK_LAUNCHER
+Terminal=false
+X-GNOME-Autostart-enabled=true
+EOF
+  "${SUDO[@]}" chmod 0644 "$desktop_file" || true
+}
+
+install_user_autostart() {
+  local target_user="$1"
+  local target_home target_dir target_file
+  if ! id "$target_user" >/dev/null 2>&1; then
+    return 0
+  fi
+  target_home="$(getent passwd "$target_user" | cut -d: -f6)"
+  if [[ -z "$target_home" ]]; then
+    return 0
+  fi
+  target_dir="$target_home/.config/autostart"
+  target_file="$target_dir/dr600ab-kiosk.desktop"
+  "${SUDO[@]}" install -d -m 0755 "$target_dir"
+  "${SUDO[@]}" chown "$target_user:" "$target_dir" || true
+  write_kiosk_desktop_file "$target_file"
+  "${SUDO[@]}" chown "$target_user:" "$target_file" || true
+}
+
 "${SUDO[@]}" install -d -m 0755 "$INSTALL_DIR"
 "${SUDO[@]}" install -m 0755 "$REMOTE_TMP/dr600ab" "$INSTALL_DIR/dr600ab"
 "${SUDO[@]}" install -d -m 0755 "$INSTALL_DIR/data"
 "${SUDO[@]}" install -d -m 0755 "$INSTALL_DIR/static/map"
 "${SUDO[@]}" chown -R "$SERVICE_USER:" "$INSTALL_DIR"
-"${SUDO[@]}" install -d -m 0755 -o "$KIOSK_USER" -g "$KIOSK_USER" "$CHROMIUM_USER_DATA_DIR"
 prepare_kiosk_xauthority
+
+"${SUDO[@]}" tee "$INSTALL_DIR/dr600ab-kiosk-start" >/dev/null <<'KIOSK_EOF'
+#!/bin/sh
+set -eu
+
+if [ -n "${DR600AB_KIOSK_LOG:-}" ] && [ "${DR600AB_KIOSK_LOGGED:-0}" != "1" ]; then
+  export DR600AB_KIOSK_LOGGED=1
+  exec "$0" "$@" >> "$DR600AB_KIOSK_LOG" 2>&1
+fi
+
+DISPLAY_VALUE="${DISPLAY_VALUE:-${DISPLAY:-:0}}"
+KIOSK_HOME="${KIOSK_HOME:-$HOME}"
+KIOSK_UID="${KIOSK_UID:-$(id -u)}"
+if [ -z "${CHROMIUM_RUNTIME_DIR:-}" ]; then
+  if [ -n "${XDG_RUNTIME_DIR:-}" ] && [ -d "$XDG_RUNTIME_DIR" ]; then
+    CHROMIUM_RUNTIME_DIR="$XDG_RUNTIME_DIR/dr600ab-kiosk"
+  elif [ -d "/run/user/$KIOSK_UID" ]; then
+    CHROMIUM_RUNTIME_DIR="/run/user/$KIOSK_UID/dr600ab-kiosk"
+  else
+    CHROMIUM_RUNTIME_DIR="/tmp/dr600ab-kiosk-$KIOSK_UID"
+  fi
+fi
+CHROMIUM_USER_DATA_DIR="${CHROMIUM_USER_DATA_DIR:-$CHROMIUM_RUNTIME_DIR/profile}"
+CHROMIUM_CACHE_DIR="${CHROMIUM_CACHE_DIR:-$CHROMIUM_RUNTIME_DIR/cache}"
+APP_URL="${APP_URL:-http://127.0.0.1:18080/#/screen}"
+
+if [ -z "${CHROMIUM_CMD:-}" ]; then
+  CHROMIUM_CMD="$(command -v chromium || command -v chromium-browser || command -v google-chrome || true)"
+fi
+if [ -z "$CHROMIUM_CMD" ]; then
+  echo "Chromium command not found. Install chromium/chromium-browser/google-chrome." >&2
+  exit 1
+fi
+
+find_xauthority() {
+  if [ -n "${XAUTHORITY:-}" ] && [ -r "$XAUTHORITY" ]; then
+    echo "$XAUTHORITY"
+    return 0
+  fi
+  for candidate in \
+    "/run/user/$KIOSK_UID/gdm/Xauthority" \
+    "/run/user/$KIOSK_UID/lightdm/Xauthority" \
+    "/run/user/$KIOSK_UID/Xauthority" \
+    "/var/run/lightdm/root/$DISPLAY_VALUE"; do
+    if [ -r "$candidate" ]; then
+      echo "$candidate"
+      return 0
+    fi
+  done
+  for env_file in /proc/[0-9]*/environ; do
+    [ -r "$env_file" ] || continue
+    xauth="$(tr '\000' '\n' < "$env_file" 2>/dev/null | awk -F= '$1=="XAUTHORITY" {print substr($0, index($0,"=")+1); exit}')"
+    if [ -n "$xauth" ] && [ -r "$xauth" ]; then
+      echo "$xauth"
+      return 0
+    fi
+  done
+  for candidate in \
+    "$KIOSK_HOME/.Xauthority" \
+    "/root/.Xauthority"; do
+    if [ -r "$candidate" ]; then
+      echo "$candidate"
+      return 0
+    fi
+  done
+  return 1
+}
+
+mkdir -p "$CHROMIUM_USER_DATA_DIR" "$CHROMIUM_CACHE_DIR"
+export DISPLAY="$DISPLAY_VALUE"
+if [ -z "${XDG_RUNTIME_DIR:-}" ] || [ ! -d "$XDG_RUNTIME_DIR" ]; then
+  export XDG_RUNTIME_DIR="$CHROMIUM_RUNTIME_DIR"
+fi
+if [ -z "${DBUS_SESSION_BUS_ADDRESS:-}" ] && [ -S "/run/user/$KIOSK_UID/bus" ]; then
+  export DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$KIOSK_UID/bus"
+fi
+if xauth="$(find_xauthority)"; then
+  export XAUTHORITY="$xauth"
+else
+  unset XAUTHORITY
+  echo "Xauthority not found for display $DISPLAY_VALUE. Chromium may be unable to connect to the screen." >&2
+fi
+display_number="${DISPLAY_VALUE#:}"
+display_number="${display_number%%.*}"
+if [ ! -S "/tmp/.X11-unix/X$display_number" ]; then
+  echo "X11 socket not found: /tmp/.X11-unix/X$display_number" >&2
+fi
+
+exec "$CHROMIUM_CMD" \
+  --kiosk "$APP_URL" \
+  --no-first-run \
+  --noerrdialogs \
+  --disable-infobars \
+  --disable-session-crashed-bubble \
+  --disable-background-networking \
+  --disable-component-update \
+  --disable-extensions \
+  --disable-gpu \
+  --disable-gpu-shader-disk-cache \
+  --disk-cache-size=1 \
+  --media-cache-size=1 \
+  --user-data-dir="$CHROMIUM_USER_DATA_DIR" \
+  --disk-cache-dir="$CHROMIUM_CACHE_DIR"
+KIOSK_EOF
+"${SUDO[@]}" chmod 0755 "$INSTALL_DIR/dr600ab-kiosk-start"
+"${SUDO[@]}" install -d -m 0755 /usr/local/bin
+"${SUDO[@]}" ln -sf "$INSTALL_DIR/dr600ab-kiosk-start" "$KIOSK_LAUNCHER"
+
+"${SUDO[@]}" install -d -m 0755 "$SYSTEM_AUTOSTART_DIR"
+write_kiosk_desktop_file "$SYSTEM_AUTOSTART_FILE"
+install_user_autostart "$KIOSK_USER"
+getent passwd | awk -F: '($3 >= 1000 && $3 < 60000 && $7 !~ /(nologin|false)$/) { print $1 }' | while IFS= read -r desktop_user; do
+  install_user_autostart "$desktop_user"
+done
 
 "${SUDO[@]}" tee /etc/systemd/system/dr600ab.service >/dev/null <<EOF
 [Unit]
@@ -267,41 +423,27 @@ RestartSec=3
 WantedBy=multi-user.target
 EOF
 
-"${SUDO[@]}" tee /etc/systemd/system/dr600ab-kiosk.service >/dev/null <<EOF
-[Unit]
-Description=DR600AB Chromium Kiosk
-After=graphical.target dr600ab.service
-Wants=dr600ab.service
-
-[Service]
-Type=simple
-User=$KIOSK_USER
-Environment=DISPLAY=$DISPLAY_VALUE
-Environment=XAUTHORITY=$KIOSK_HOME/.Xauthority
-ExecStart=$CHROMIUM_CMD --kiosk "$APP_URL" --no-first-run --noerrdialogs --disable-infobars --disable-session-crashed-bubble --disable-background-networking --disable-component-update --disable-extensions --user-data-dir=$CHROMIUM_USER_DATA_DIR
-Restart=always
-RestartSec=3
-
-[Install]
-WantedBy=graphical.target
-EOF
-
 "${SUDO[@]}" systemctl stop dr600ab-kiosk.service >/dev/null 2>&1 || true
+clear_chromium_cache "$LEGACY_CHROMIUM_USER_DATA_DIR"
+"${SUDO[@]}" rm -rf "$LEGACY_CHROMIUM_USER_DATA_DIR"
 clear_chromium_cache "$CHROMIUM_USER_DATA_DIR"
 
+"${SUDO[@]}" systemctl disable --now dr600ab-kiosk.service >/dev/null 2>&1 || true
+"${SUDO[@]}" rm -f /etc/systemd/system/dr600ab-kiosk.service
 "${SUDO[@]}" systemctl daemon-reload
-"${SUDO[@]}" systemctl enable dr600ab.service dr600ab-kiosk.service
+"${SUDO[@]}" systemctl enable dr600ab.service
 "${SUDO[@]}" systemctl restart dr600ab.service
-"${SUDO[@]}" systemctl restart dr600ab-kiosk.service
 
 echo "Installed backend: $INSTALL_DIR/dr600ab"
 echo "Backend service user: $SERVICE_USER"
 echo "Kiosk service user: $KIOSK_USER"
 echo "Cleared Chromium cache: $CHROMIUM_USER_DATA_DIR"
 echo "Screen URL: $APP_URL"
+echo "Kiosk autostart: $AUTOSTART_FILE"
+echo "Kiosk system autostart: $SYSTEM_AUTOSTART_FILE"
 echo "Check status:"
 echo "  sudo systemctl status dr600ab.service"
-echo "  sudo systemctl status dr600ab-kiosk.service"
+echo "  desktop autostart starts Chromium when $KIOSK_USER logs into the graphical session"
 REMOTE
 chmod +x "$PACKAGE_TMP/install.sh"
 
