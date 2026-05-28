@@ -17,7 +17,8 @@ import (
 	"dr600ab-api/internal/store"
 	"serialport"
 	"tri-detector/client"
-	"tri-detector/parser"
+	protocolmerge "uav-protocol/merge"
+	"uav-protocol/parser"
 )
 
 // Options 配置串口默认值和重连时间参数。
@@ -52,9 +53,8 @@ type O3PlusO4Decoder interface {
 }
 
 const (
-	startDetectionCommand     = "start -freq 1"
-	didEncryptedFallbackModel = "DJI-Drone"
-	defaultBaudRate           = 460800
+	startDetectionCommand = "start -freq 1"
+	defaultBaudRate       = 460800
 )
 
 // SettingsStore 持久化最近一次侦测会话请求和公开用户设置。
@@ -327,6 +327,11 @@ func (s *Service) ScreenDetections(limit int) []model.ScreenDetectionTarget {
 // ScreenPositions 返回大屏使用的合并定位目标。
 func (s *Service) ScreenPositions(limit int) []model.ScreenPositionTarget {
 	return s.store.ListScreenPositions(limit)
+}
+
+// ScreenPositionsWithDeviceLocation 返回大屏定位目标，并按指定设备位置计算距离关系。
+func (s *Service) ScreenPositionsWithDeviceLocation(limit int, deviceLocation *model.ScreenDeviceLocationResponse) []model.ScreenPositionTarget {
+	return s.store.ListScreenPositionsWithDeviceLocation(limit, deviceLocation)
 }
 
 // Parsed 返回最新解析结果，包含无法识别的原始行。
@@ -813,11 +818,7 @@ func didEncryptedCorrelationID(data *parser.DIDEncrypted) string {
 	if data == nil {
 		return ""
 	}
-	encryptedID := strings.ToLower(strings.TrimSpace(data.EncryptedID))
-	if encryptedID == "" {
-		return ""
-	}
-	return "did_encrypted:" + encryptedID
+	return protocolmerge.DIDEncryptedCorrelationID(data.EncryptedID)
 }
 
 func screenPositionFromRID(parsed model.ParsedMessage, data *parser.RID) (model.ScreenPositionTarget, bool) {
@@ -867,10 +868,10 @@ func screenPositionFromDIDPlain(parsed model.ParsedMessage, data *parser.DIDPlai
 		Drone:            screenPointFromGPS(data.DroneGPS),
 		Pilot:            screenPointFromGPS(data.PilotGPS),
 		Home:             screenPointFromGPS(data.HomeGPS),
-		Speed:            nonZeroFloatPtr(calculateFlightSpeed(data.EastV, data.NothV, data.UpV)),
+		Speed:            nonZeroFloatPtr(calculateFlightSpeed(data.EastV, data.NorthV, data.UpV)),
 		Altitude:         nonZeroFloatPtr(data.Altitude),
 		Height:           nonZeroFloatPtr(data.Height),
-		TrajectorySpeed:  float64Ptr(calculateFlightSpeed(data.EastV, data.NothV, data.UpV)),
+		TrajectorySpeed:  float64Ptr(calculateFlightSpeed(data.EastV, data.NorthV, data.UpV)),
 		TrajectoryHeight: float64Ptr(data.Height),
 		FirstSeen:        parsed.Time,
 		LastSeen:         parsed.Time,
@@ -888,7 +889,7 @@ func screenPositionFromDIDPlain(parsed model.ParsedMessage, data *parser.DIDPlai
 }
 
 func screenPointFromGPS(gps parser.GPS) *model.ScreenPositionPoint {
-	if !validCoordinate(gps.Lat, gps.Lng) {
+	if !displayableScreenCoordinate(gps.Lat, gps.Lng) {
 		return nil
 	}
 	return &model.ScreenPositionPoint{
@@ -897,8 +898,15 @@ func screenPointFromGPS(gps parser.GPS) *model.ScreenPositionPoint {
 	}
 }
 
-func validCoordinate(lat, lng float64) bool {
-	return lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180
+func displayableScreenCoordinate(lat, lng float64) bool {
+	return !math.IsNaN(lat) &&
+		!math.IsInf(lat, 0) &&
+		!math.IsNaN(lng) &&
+		!math.IsInf(lng, 0) &&
+		lat >= -90 &&
+		lat <= 90 &&
+		lng >= -180 &&
+		lng <= 180
 }
 
 func screenPositionHasCoordinate(target model.ScreenPositionTarget) bool {

@@ -7,4 +7,5 @@ use (
 	./gpio-controller
 	./serialport
 	./tri-detector
+	./uav-protocol
 )

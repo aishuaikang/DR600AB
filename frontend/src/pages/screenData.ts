@@ -161,11 +161,11 @@ export const referenceMarkerIcons = {
   remote: remoteControlIconUrl,
   selectedRemote: selectedRemoteControlIconUrl,
   remoteBlackFly: remoteControlBlackFlyIconUrl,
-  selectedRemoteBlackFly: selectedRemoteControlBlackFlyIconUrl,
+  selectedRemoteBlackFly: selectedUavBlackFlyIconUrl,
   uav: uavIconUrl,
   selectedUav: selectedUavIconUrl,
   uavBlackFly: uavBlackFlyIconUrl,
-  selectedUavBlackFly: selectedUavBlackFlyIconUrl,
+  selectedUavBlackFly: selectedRemoteControlBlackFlyIconUrl,
   detectionOnline: detectionDeviceIconOnlineUrl,
   detectionOffline: detectionDeviceIconOfflineUrl,
 } as const;

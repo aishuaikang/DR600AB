@@ -607,14 +607,6 @@ function renderPositionLayers(
   return group;
 }
 
-function selectedPositionPoint(positions: ScreenPositionTarget[], selectedId: string) {
-  const target = positions.find((item) => item.id === selectedId);
-  if (!target) {
-    return null;
-  }
-  return target.drone ?? target.pilot ?? null;
-}
-
 export function PositionMap({
   selectedId,
   positions,
@@ -795,15 +787,6 @@ export function PositionMap({
       hasFitRealBoundsRef.current = true;
     }
   }, [deviceHeadingDeg, deviceLocation, positions, selectedId, t, whitelist]);
-
-  useEffect(() => {
-    const map = mapRef.current;
-    const point = selectedPositionPoint(positions, selectedId);
-    if (!map || !validMapPoint(point)) {
-      return;
-    }
-    map.setView([point.latitude, point.longitude], Math.max(map.getZoom(), 14), { animate: false });
-  }, [positions, selectedId]);
 
   return (
     <div className={cx("screen-map-shell", className)}>

@@ -8,6 +8,7 @@ import {
   getCompassSettings,
   getDeceptionSession,
   getDeceptionSettings,
+  getScreenStatus,
   getChannels,
   getDetectionSettings,
   getDetections,
@@ -67,6 +68,7 @@ import type {
   LocaleMeta,
   ParsedMessage,
   PortInfo,
+  ScreenRuntimeStatus,
   UserSettings,
 } from "./types";
 import { cx } from "./utils/classnames";
@@ -119,6 +121,7 @@ function App() {
   const [gpsSession, setGPSSession] = useState<GPSSessionResponse | null>(null);
   const [deceptionSession, setDeceptionSession] = useState<DeceptionSessionResponse | null>(null);
   const [compassSession, setCompassSession] = useState<CompassSessionResponse | null>(null);
+  const [adminScreenStatus, setAdminScreenStatus] = useState<ScreenRuntimeStatus | null>(null);
   const [detections, setDetections] = useState<DetectionRecord[]>([]);
   const [messages, setMessages] = useState<ParsedMessage[]>([]);
   const [gpsRecords, setGPSRecords] = useState<GPSRecord[]>([]);
@@ -147,6 +150,7 @@ function App() {
   const developerToken = developerSession?.token ?? "";
   const debugAccessBlocked = !developerActive && isDebugPage(page);
   const needsRuntimeData = page !== "screen" && page !== "settings" && page !== "whitelist" && page !== "intrusions" && page !== "deception-reports" && !debugAccessBlocked;
+  const deceptionReportsVisible = adminScreenStatus?.deception.configured !== false;
 
   const syncSerialSelection = useCallback((receivePort: string, sendPort: string, baudRate?: number) => {
     const nextReceivePort = receivePort.trim();
@@ -308,6 +312,15 @@ function App() {
     }
   }, []);
 
+  const loadAdminScreenStatus = useCallback(async () => {
+    try {
+      const response = await getScreenStatus(locale);
+      setAdminScreenStatus(response);
+    } catch {
+      // 状态只影响菜单显隐，失败时沿用当前菜单状态。
+    }
+  }, [locale]);
+
   const refreshChannels = useCallback(async () => {
     if (!developerActive) {
       setChannels([]);
@@ -325,6 +338,17 @@ function App() {
   useEffect(() => {
     void loadUserSettings();
   }, [loadUserSettings]);
+
+  useEffect(() => {
+    if (page === "screen") {
+      return;
+    }
+    void loadAdminScreenStatus();
+    const timer = window.setInterval(() => {
+      void loadAdminScreenStatus();
+    }, 5000);
+    return () => window.clearInterval(timer);
+  }, [loadAdminScreenStatus, page]);
 
   useEffect(() => {
     if (page !== "settings") {
@@ -831,6 +855,12 @@ function App() {
   }, [debugAccessBlocked, navigate]);
 
   useEffect(() => {
+    if (page === "deception-reports" && !deceptionReportsVisible) {
+      navigate("screen");
+    }
+  }, [deceptionReportsVisible, navigate, page]);
+
+  useEffect(() => {
     setMobileSidebarOpen(false);
   }, [page]);
 
@@ -935,6 +965,7 @@ function App() {
           onMobileOpen={() => setMobileSidebarOpen(true)}
           onDeveloperLogin={handleDeveloperLogin}
           onDeveloperLogout={() => void handleDeveloperLogout()}
+          showDeceptionReports={deceptionReportsVisible}
         />
 
         <div className="flex min-h-0 min-w-0 flex-col overflow-hidden">

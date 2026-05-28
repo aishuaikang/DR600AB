@@ -478,8 +478,8 @@ func TestHandleIntrusionRecordsArchivesExpiredPositionTrajectoryBeforeQuery(t *t
 		Frequency:        2437,
 		RSSI:             -66,
 		Device:           "device-a",
-		Drone:            &model.ScreenPositionPoint{Latitude: 31.25, Longitude: 121.45},
-		Pilot:            &model.ScreenPositionPoint{Latitude: 31.15, Longitude: 121.35},
+		Drone:            &model.ScreenPositionPoint{Latitude: 31.20005, Longitude: 121.40005},
+		Pilot:            &model.ScreenPositionPoint{Latitude: 31.10005, Longitude: 121.30005},
 		Speed:            &secondSpeed,
 		Height:           &secondHeight,
 		FirstSeen:        base,
@@ -536,7 +536,7 @@ func TestHandleIntrusionRecordsArchivesExpiredPositionTrajectoryBeforeQuery(t *t
 		t.Fatalf("pilot trajectory count = %d, want 2", len(record.PilotTrajectory))
 	}
 	dronePoint := record.DroneTrajectory[1]
-	if dronePoint.Latitude != 31.25 || dronePoint.Longitude != 121.45 {
+	if dronePoint.Latitude != 31.20005 || dronePoint.Longitude != 121.40005 {
 		t.Fatalf("drone trajectory point = %#v, want latest drone point", dronePoint)
 	}
 	if dronePoint.Speed == nil || *dronePoint.Speed != secondSpeed {
@@ -546,7 +546,7 @@ func TestHandleIntrusionRecordsArchivesExpiredPositionTrajectoryBeforeQuery(t *t
 		t.Fatalf("drone trajectory height = %#v, want %v", dronePoint.Height, secondHeight)
 	}
 	pilotPoint := record.PilotTrajectory[1]
-	if pilotPoint.Latitude != 31.15 || pilotPoint.Longitude != 121.35 {
+	if pilotPoint.Latitude != 31.10005 || pilotPoint.Longitude != 121.30005 {
 		t.Fatalf("pilot trajectory point = %#v, want latest pilot point", pilotPoint)
 	}
 }

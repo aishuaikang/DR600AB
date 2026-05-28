@@ -12,41 +12,24 @@ import (
 	"github.com/google/uuid"
 
 	"dr600ab-api/internal/model"
-	"tri-detector/parser"
+	"uav-protocol/diddecrypt"
+	protocolmodel "uav-protocol/model"
+	"uav-protocol/parser"
 )
 
-const (
-	o3MQTTDefaultRequestQoS = byte(1)
-	o3KeyPacketTTL          = 10 * time.Minute
-)
-
-type o3PacketType int
-
-const (
-	o3PacketUnknown o3PacketType = iota
-	o3PacketDirect
-	o3PacketKey
-	o3PacketDynamic
-)
+const o3MQTTDefaultRequestQoS = byte(1)
 
 type mqttO3PlusO4Decoder struct {
 	options O3DecryptOptions
+
+	decoderMu sync.Mutex
+	decoder   *diddecrypt.Decoder
 
 	mu            sync.Mutex
 	client        mqtt.Client
 	subMu         sync.Mutex
 	subscriptions sync.Map
 	responses     sync.Map
-	keyPackets    sync.Map
-}
-
-type o3KeyPacket struct {
-	EncryptedID string
-	Hex         string
-	Device      string
-	Frequency   float64
-	RSSI        float64
-	CachedAt    time.Time
 }
 
 type o3DecryptRequest struct {
@@ -65,41 +48,10 @@ type o3DecryptRequest struct {
 }
 
 type o3MQTTDecryptResponse struct {
-	RequestID string         `json:"request_id"`
-	Success   bool           `json:"success"`
-	Message   string         `json:"message"`
-	Data      o3DecryptAlert `json:"data"`
-}
-
-type o3DecryptAlert struct {
-	Msg      string  `json:"msg,omitempty"`
-	Note     string  `json:"note,omitempty"`
-	SN       string  `json:"sn,omitempty"`
-	Model    string  `json:"model,omitempty"`
-	Lon      float64 `json:"lon,omitempty"`
-	Lat      float64 `json:"lat,omitempty"`
-	Alt      float64 `json:"alt,omitempty"`
-	Height   float64 `json:"height,omitempty"`
-	X        float64 `json:"x,omitempty"`
-	Y        float64 `json:"y,omitempty"`
-	Z        float64 `json:"z,omitempty"`
-	PilotLon float64 `json:"pilot_lon,omitempty"`
-	PilotLat float64 `json:"pilot_lat,omitempty"`
-	HomeLon  float64 `json:"home_lon,omitempty"`
-	HomeLat  float64 `json:"home_lat,omitempty"`
-	GPSTime  string  `json:"gps_time,omitempty"`
-	SeqNum   int     `json:"seq_num,omitempty"`
-	Type     int     `json:"type,omitempty"`
-	UUID     string  `json:"uuid,omitempty"`
-	Yaw      float64 `json:"yaw,omitempty"`
-}
-
-type o3KeygenResult struct {
-	Msg     string
-	Note    string
-	Success bool
-	Err     error
-	Data    o3DecryptAlert
+	RequestID string                   `json:"request_id"`
+	Success   bool                     `json:"success"`
+	Message   string                   `json:"message"`
+	Data      diddecrypt.DecryptResult `json:"data"`
 }
 
 // NewMQTTO3PlusO4Decoder 创建 DID 加密报文的 MQTT 解密器。配置不完整时返回 nil。
@@ -115,10 +67,14 @@ func NewMQTTO3PlusO4Decoder(options O3DecryptOptions) O3PlusO4Decoder {
 	if options.ConnectTimeout <= 0 {
 		options.ConnectTimeout = 10 * time.Second
 	}
-	return &mqttO3PlusO4Decoder{options: options}
+	decoder := &mqttO3PlusO4Decoder{options: options}
+	decoder.decoder = diddecrypt.NewDecoder(decoder, diddecrypt.Options{
+		RequireDecodedCoordinate: true,
+	})
+	return decoder
 }
 
-// ParseO3PlusO4PacketMQTT 借鉴旧项目的 O3+/O4 MQTT 分支，解出目标定位摘要后返回定位目标。
+// ParseO3PlusO4PacketMQTT 解密 O3/O4 DID 加密报文并返回定位目标。
 func (d *mqttO3PlusO4Decoder) ParseO3PlusO4PacketMQTT(
 	ctx context.Context,
 	packet parser.DIDEncrypted,
@@ -128,84 +84,55 @@ func (d *mqttO3PlusO4Decoder) ParseO3PlusO4PacketMQTT(
 	if d == nil {
 		return model.ScreenPositionTarget{}, false
 	}
-
-	rawHex := strings.ToLower(strings.TrimSpace(packet.Bytes))
-	_, decryptedHex, ok := normalizeO3PacketHex(rawHex)
-	if !ok {
+	out := d.didDecoder().Decode(ctx, packet, deviceSN, receivedAt)
+	if out.Err != nil || !out.HasTarget {
 		return model.ScreenPositionTarget{}, false
 	}
-
-	encryptedID := strings.ToLower(strings.TrimSpace(packet.EncryptedID))
-	packetType := getO3PacketType(decryptedHex)
-	if encryptedID == "" || packetType == o3PacketUnknown {
-		return model.ScreenPositionTarget{}, false
-	}
-
-	sn := strings.TrimSpace(deviceSN)
-	if sn == "" {
-		sn = strings.TrimSpace(packet.Device)
-	}
-	if sn == "" {
-		return model.ScreenPositionTarget{}, false
-	}
-
-	switch packetType {
-	case o3PacketDirect:
-		result, err := d.decrypt(ctx, decryptedHex, sn)
-		if err != nil {
-			return model.ScreenPositionTarget{}, false
-		}
-		return d.positionFromDecryptResult(packet, result, receivedAt)
-
-	case o3PacketKey:
-		if d.getKeyPacket(encryptedID) != nil {
-			return model.ScreenPositionTarget{}, false
-		}
-		result := d.sendKeyPacket(ctx, decryptedHex, sn)
-		if result.Success {
-			d.cacheKeyPacket(encryptedID, decryptedHex, packet)
-		}
-		return model.ScreenPositionTarget{}, false
-
-	case o3PacketDynamic:
-		if d.getKeyPacket(encryptedID) == nil {
-			return model.ScreenPositionTarget{}, false
-		}
-		result, err := d.decrypt(ctx, decryptedHex, sn)
-		if err != nil {
-			return model.ScreenPositionTarget{}, false
-		}
-		return d.positionFromDecryptResult(packet, result, receivedAt)
-
-	default:
-		return model.ScreenPositionTarget{}, false
-	}
+	target := screenPositionFromProtocolTarget(out.Target)
+	return target, screenPositionHasCoordinate(target)
 }
 
-func (d *mqttO3PlusO4Decoder) decrypt(ctx context.Context, hexStr, sn string) (o3DecryptAlert, error) {
-	resp, err := d.publishAndWait(ctx, hexStr, sn)
+func (d *mqttO3PlusO4Decoder) didDecoder() *diddecrypt.Decoder {
+	d.decoderMu.Lock()
+	defer d.decoderMu.Unlock()
+	if d.decoder == nil {
+		d.decoder = diddecrypt.NewDecoder(d, diddecrypt.Options{
+			RequireDecodedCoordinate: true,
+		})
+	}
+	return d.decoder
+}
+
+func (d *mqttO3PlusO4Decoder) Decrypt(
+	ctx context.Context,
+	req diddecrypt.Request,
+) (diddecrypt.DecryptResult, error) {
+	resp, err := d.publishAndWait(ctx, req.DecryptedHex, req.DeviceSN)
 	if err != nil {
-		return o3DecryptAlert{}, err
+		return diddecrypt.DecryptResult{}, err
 	}
 	if resp == nil {
-		return o3DecryptAlert{}, fmt.Errorf("empty MQTT decrypt response")
+		return diddecrypt.DecryptResult{}, fmt.Errorf("empty MQTT decrypt response")
 	}
 	if !resp.Success {
-		return o3DecryptAlert{}, fmt.Errorf("MQTT decrypt failed: %s", resp.Message)
+		return diddecrypt.DecryptResult{}, fmt.Errorf("MQTT decrypt failed: %s", resp.Message)
 	}
 	return resp.Data, nil
 }
 
-func (d *mqttO3PlusO4Decoder) sendKeyPacket(ctx context.Context, hexStr, sn string) o3KeygenResult {
-	resp, err := d.publishAndWait(ctx, hexStr, sn)
+func (d *mqttO3PlusO4Decoder) SendKeyPacket(
+	ctx context.Context,
+	req diddecrypt.Request,
+) diddecrypt.KeyResult {
+	resp, err := d.publishAndWait(ctx, req.DecryptedHex, req.DeviceSN)
 	if err != nil {
-		return o3KeygenResult{Err: err}
+		return diddecrypt.KeyResult{Err: err}
 	}
 	if resp == nil {
-		return o3KeygenResult{Err: fmt.Errorf("empty MQTT keygen response")}
+		return diddecrypt.KeyResult{Err: fmt.Errorf("empty MQTT keygen response")}
 	}
 	msg := strings.TrimSpace(resp.Data.Msg)
-	return o3KeygenResult{
+	return diddecrypt.KeyResult{
 		Msg:     msg,
 		Note:    resp.Data.Note,
 		Success: msg == "keygen_succ" || msg == "key_exist",
@@ -341,109 +268,53 @@ func (d *mqttO3PlusO4Decoder) handleMessage(_ mqtt.Client, message mqtt.Message)
 	}
 }
 
-func (d *mqttO3PlusO4Decoder) cacheKeyPacket(encryptedID, hexStr string, packet parser.DIDEncrypted) {
-	d.keyPackets.Store(encryptedID, &o3KeyPacket{
-		EncryptedID: encryptedID,
-		Hex:         hexStr,
-		Device:      packet.Device,
-		Frequency:   packet.Freq,
-		RSSI:        packet.RSSI,
-		CachedAt:    time.Now(),
-	})
-}
-
-func (d *mqttO3PlusO4Decoder) getKeyPacket(encryptedID string) *o3KeyPacket {
-	value, ok := d.keyPackets.Load(encryptedID)
-	if !ok {
-		return nil
-	}
-	packet, ok := value.(*o3KeyPacket)
-	if !ok {
-		d.keyPackets.Delete(encryptedID)
-		return nil
-	}
-	if time.Since(packet.CachedAt) > o3KeyPacketTTL {
-		d.keyPackets.Delete(encryptedID)
-		return nil
-	}
-	return packet
-}
-
-func (d *mqttO3PlusO4Decoder) positionFromDecryptResult(
-	packet parser.DIDEncrypted,
-	result o3DecryptAlert,
-	receivedAt time.Time,
-) (model.ScreenPositionTarget, bool) {
-	serial := cleanO3String(result.SN)
-	if serial == "" {
-		serial = strings.TrimSpace(packet.EncryptedID)
-	}
-	modelName := strings.TrimSpace(result.Model)
-	if modelName == "" {
-		modelName = didEncryptedFallbackModel
-	}
-	if receivedAt.IsZero() {
-		receivedAt = time.Now()
-	}
-
-	target := model.ScreenPositionTarget{
-		CorrelationID:    didEncryptedCorrelationID(&packet),
-		Serial:           serial,
-		Model:            modelName,
-		Source:           string(parser.TypeDIDEncrypted),
-		Frequency:        packet.Freq,
-		RSSI:             packet.RSSI,
-		Device:           strings.TrimSpace(packet.Device),
-		Drone:            pointFromLatLng(result.Lat, result.Lon),
-		Pilot:            pointFromLatLng(result.PilotLat, result.PilotLon),
-		Home:             pointFromLatLng(result.HomeLat, result.HomeLon),
-		Height:           nonZeroFloatPtr(result.Height),
-		Altitude:         nonZeroFloatPtr(result.Alt),
-		Speed:            nonZeroFloatPtr(calculateFlightSpeed(result.X, result.Y, result.Z)),
-		TrajectorySpeed:  float64Ptr(calculateFlightSpeed(result.X, result.Y, result.Z)),
-		TrajectoryHeight: float64Ptr(result.Height),
-		Cracked:          true,
-		FirstSeen:        receivedAt,
-		LastSeen:         receivedAt,
+func screenPositionFromProtocolTarget(target protocolmodel.PositionTarget) model.ScreenPositionTarget {
+	return model.ScreenPositionTarget{
+		CorrelationID:    target.CorrelationID,
+		Serial:           target.Serial,
+		Model:            target.Model,
+		Source:           string(target.Source),
+		Frequency:        target.Frequency,
+		RSSI:             target.RSSI,
+		Device:           target.Device,
+		Drone:            screenPointFromProtocolPoint(target.Drone),
+		Pilot:            screenPointFromProtocolPoint(target.Pilot),
+		Home:             screenPointFromProtocolPoint(target.Home),
+		Height:           cloneProtocolFloat64Ptr(target.Height),
+		Altitude:         cloneProtocolFloat64Ptr(target.Altitude),
+		Speed:            cloneProtocolFloat64Ptr(target.Speed),
+		TrajectorySpeed:  cloneProtocolFloat64Ptr(target.TrajectorySpeed),
+		TrajectoryHeight: cloneProtocolFloat64Ptr(target.TrajectoryHeight),
+		Cracked:          target.Cracked,
+		FirstSeen:        target.FirstSeen,
+		LastSeen:         target.LastSeen,
 		LastRecord: model.ScreenPositionLastRecord{
-			Type:       string(parser.TypeDIDEncrypted),
-			ReceivedAt: receivedAt,
-			Device:     packet.Device,
-			Serial:     serial,
-			Model:      modelName,
-			Frequency:  packet.Freq,
-			RSSI:       packet.RSSI,
-			Cracked:    true,
+			Type:       string(target.Source),
+			ReceivedAt: target.LastSeen,
+			Device:     target.Device,
+			Serial:     target.Serial,
+			Model:      target.Model,
+			Frequency:  target.Frequency,
+			RSSI:       target.RSSI,
+			Cracked:    target.Cracked,
 		},
 	}
-	return target, screenPositionHasCoordinate(target)
 }
 
-func pointFromLatLng(lat, lng float64) *model.ScreenPositionPoint {
-	if !validCoordinate(lat, lng) {
+func screenPointFromProtocolPoint(point *protocolmodel.Point) *model.ScreenPositionPoint {
+	if point == nil {
 		return nil
 	}
-	return &model.ScreenPositionPoint{Latitude: lat, Longitude: lng}
+	return &model.ScreenPositionPoint{
+		Latitude:  point.Latitude,
+		Longitude: point.Longitude,
+	}
 }
 
-func cleanO3String(value string) string {
-	value = strings.TrimSpace(value)
-	value = strings.Trim(value, "\x00")
-	return strings.TrimSpace(value)
-}
-
-func getO3PacketType(hexStr string) o3PacketType {
-	if len(hexStr) < 2 {
-		return o3PacketUnknown
+func cloneProtocolFloat64Ptr(value *float64) *float64 {
+	if value == nil {
+		return nil
 	}
-	switch strings.ToLower(hexStr[:2]) {
-	case "6d":
-		return o3PacketDirect
-	case "aa", "a3":
-		return o3PacketKey
-	case "87", "80":
-		return o3PacketDynamic
-	default:
-		return o3PacketUnknown
-	}
+	cloned := *value
+	return &cloned
 }

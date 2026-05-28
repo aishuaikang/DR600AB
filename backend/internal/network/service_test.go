@@ -133,9 +133,11 @@ func TestValidateUpdateRequestRouteMetric(t *testing.T) {
 	invalidMetric := -2
 
 	validReq := model.NetworkInterfaceUpdateRequest{
-		Mode:        "static",
-		IPv4Address: "192.168.10.25",
-		Prefix:      24,
+		Mode: "static",
+		IPv4: []model.NetworkAddress{
+			{Address: "192.168.10.25", Prefix: 24},
+			{Address: "192.168.10.26", Prefix: 24},
+		},
 		RouteMetric: &validMetric,
 	}
 	if err := validateUpdateRequest(validReq); err != nil {
@@ -155,6 +157,83 @@ func TestValidateUpdateRequestRouteMetric(t *testing.T) {
 	}
 	if err := validateUpdateRequest(invalidReq); !errors.Is(err, ErrInvalidConfig) {
 		t.Fatalf("validateUpdateRequest() error = %v, want %v", err, ErrInvalidConfig)
+	}
+}
+
+func TestUpdateIPv4AddressesKeepsLegacySingleAddress(t *testing.T) {
+	req := model.NetworkInterfaceUpdateRequest{
+		Mode:        "static",
+		IPv4Address: "192.168.10.25",
+		Prefix:      24,
+	}
+
+	got := updateIPv4Addresses(req)
+	want := []string{"192.168.10.25/24"}
+	if len(got) != len(want) || got[0] != want[0] {
+		t.Fatalf("updateIPv4Addresses() = %+v, want %+v", got, want)
+	}
+	if err := validateUpdateRequest(req); err != nil {
+		t.Fatalf("validateUpdateRequest() legacy request error = %v, want nil", err)
+	}
+}
+
+func TestUpdateIPv4AddressesAllowsMultipleAddresses(t *testing.T) {
+	req := model.NetworkInterfaceUpdateRequest{
+		Mode: "static",
+		IPv4: []model.NetworkAddress{
+			{Address: "192.168.10.25", Prefix: 24},
+			{Address: "10.10.0.2", Prefix: 16},
+		},
+	}
+
+	got := updateIPv4Addresses(req)
+	want := []string{"192.168.10.25/24", "10.10.0.2/16"}
+	if len(got) != len(want) {
+		t.Fatalf("updateIPv4Addresses() = %+v, want %+v", got, want)
+	}
+	for index := range want {
+		if got[index] != want[index] {
+			t.Fatalf("updateIPv4Addresses()[%d] = %q, want %q", index, got[index], want[index])
+		}
+	}
+	if err := validateUpdateRequest(req); err != nil {
+		t.Fatalf("validateUpdateRequest() multiple address error = %v, want nil", err)
+	}
+}
+
+func TestValidateUpdateRequestRejectsDuplicateIPv4Address(t *testing.T) {
+	tests := []struct {
+		name string
+		req  model.NetworkInterfaceUpdateRequest
+	}{
+		{
+			name: "same prefix",
+			req: model.NetworkInterfaceUpdateRequest{
+				Mode: "static",
+				IPv4: []model.NetworkAddress{
+					{Address: "192.168.10.25", Prefix: 24},
+					{Address: "192.168.10.25", Prefix: 24},
+				},
+			},
+		},
+		{
+			name: "different prefix",
+			req: model.NetworkInterfaceUpdateRequest{
+				Mode: "static",
+				IPv4: []model.NetworkAddress{
+					{Address: "192.168.10.25", Prefix: 24},
+					{Address: "192.168.10.25", Prefix: 32},
+				},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if err := validateUpdateRequest(tt.req); !errors.Is(err, ErrInvalidConfig) {
+				t.Fatalf("validateUpdateRequest() error = %v, want %v", err, ErrInvalidConfig)
+			}
+		})
 	}
 }
 

@@ -869,12 +869,13 @@ type NetworkInterfacesResponse struct {
 
 // NetworkInterfaceUpdateRequest 更新单个网口 IPv4 配置。
 type NetworkInterfaceUpdateRequest struct {
-	Mode        string   `json:"mode"`
-	IPv4Address string   `json:"ipv4Address,omitempty"`
-	Prefix      int      `json:"prefix,omitempty"`
-	Gateway4    string   `json:"gateway4,omitempty"`
-	DNS4        []string `json:"dns4,omitempty"`
-	RouteMetric *int     `json:"routeMetric,omitempty"`
+	Mode        string           `json:"mode"`
+	IPv4Address string           `json:"ipv4Address,omitempty"`
+	IPv4        []NetworkAddress `json:"ipv4,omitempty"`
+	Prefix      int              `json:"prefix,omitempty"`
+	Gateway4    string           `json:"gateway4,omitempty"`
+	DNS4        []string         `json:"dns4,omitempty"`
+	RouteMetric *int             `json:"routeMetric,omitempty"`
 }
 
 // NetworkInterfaceUpdateResponse 返回更新后的网口状态和提示。

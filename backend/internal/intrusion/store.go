@@ -17,6 +17,8 @@ import (
 	"time"
 
 	"dr600ab-api/internal/model"
+	protocolmerge "uav-protocol/merge"
+	protocolmodel "uav-protocol/model"
 
 	_ "modernc.org/sqlite"
 )
@@ -219,10 +221,10 @@ func (s *Store) ArchivePosition(target model.ScreenPositionTarget) error {
 		return nil
 	}
 	deviceLocation := s.currentDeviceLocation()
-	pilotDistanceM, droneDistanceM, droneDirectionDeg, deviceDirectionDeg := model.ScreenPositionRelations(
-		deviceLocation,
-		target.Drone,
-		target.Pilot,
+	relations := protocolmerge.PositionRelations(
+		deviceLocationToProtocolPoint(deviceLocation),
+		positionPointToProtocol(target.Drone),
+		positionPointToProtocol(target.Pilot),
 	)
 	record := model.IntrusionRecord{
 		ID:                 intrusionRecordID(model.IntrusionTargetTypePosition, target.ID, target.FirstSeen),
@@ -246,10 +248,10 @@ func (s *Store) ArchivePosition(target model.ScreenPositionTarget) error {
 		Home:               clonePoint(target.Home),
 		DroneTrajectory:    cloneTrajectory(target.DroneTrajectory),
 		PilotTrajectory:    cloneTrajectory(target.PilotTrajectory),
-		PilotDistanceM:     cloneFloat(pilotDistanceM),
-		DroneDistanceM:     cloneFloat(droneDistanceM),
-		DroneDirectionDeg:  cloneFloat(droneDirectionDeg),
-		DeviceDirectionDeg: cloneFloat(deviceDirectionDeg),
+		PilotDistanceM:     cloneFloat(relations.PilotDistanceM),
+		DroneDistanceM:     cloneFloat(relations.DroneDistanceM),
+		DroneDirectionDeg:  cloneFloat(relations.DroneDirectionDeg),
+		DeviceDirectionDeg: cloneFloat(relations.DeviceDirectionDeg),
 		Height:             cloneFloat(target.Height),
 		Altitude:           cloneFloat(target.Altitude),
 		Speed:              cloneFloat(target.Speed),
@@ -601,6 +603,26 @@ func validGeoPoint(point *model.GeoPoint) bool {
 		point.Longitude >= -180 &&
 		point.Longitude <= 180 &&
 		!(point.Latitude == 0 && point.Longitude == 0)
+}
+
+func deviceLocationToProtocolPoint(location *model.ScreenDeviceLocationResponse) *protocolmodel.Point {
+	if location == nil || !location.Valid || location.Point == nil {
+		return nil
+	}
+	return &protocolmodel.Point{
+		Latitude:  location.Point.Latitude,
+		Longitude: location.Point.Longitude,
+	}
+}
+
+func positionPointToProtocol(point *model.ScreenPositionPoint) *protocolmodel.Point {
+	if point == nil {
+		return nil
+	}
+	return &protocolmodel.Point{
+		Latitude:  point.Latitude,
+		Longitude: point.Longitude,
+	}
 }
 
 func cloneTrajectory(points []model.ScreenPositionTrackPoint) []model.ScreenPositionTrackPoint {

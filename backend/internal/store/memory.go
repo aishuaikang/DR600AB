@@ -6,24 +6,22 @@ import (
 	"encoding/hex"
 	"fmt"
 	"log/slog"
-	"math"
 	"slices"
 	"strings"
 	"sync"
 	"time"
 
 	"dr600ab-api/internal/model"
+	protocolmerge "uav-protocol/merge"
+	protocolmodel "uav-protocol/model"
 )
 
 const (
-	screenDetectionBaseThresholdMHz = 15.0
-	screenDetectionTTL              = 60 * time.Second
-	screenPositionTTL               = 60 * time.Second
-	screenPositionTrajectoryLimit   = 120
-	screenPositionTrajectoryJitterM = 3.0
-	screenDetectionEventType        = "screen.detection.updated"
-	screenPositionEventType         = "screen.position.updated"
-	uncrackedDJIDroneModel          = "DJI-Drone"
+	screenDetectionTTL       = 60 * time.Second
+	screenPositionTTL        = 60 * time.Second
+	screenDetectionEventType = "screen.detection.updated"
+	screenPositionEventType  = "screen.position.updated"
+	uncrackedDJIDroneModel   = "DJI-Drone"
 )
 
 // MemoryStore 在内存中保存有上限的记录，并广播运行时事件。
@@ -174,6 +172,22 @@ func (s *MemoryStore) ListScreenPositions(limit int) []model.ScreenPositionTarge
 	items := latestScreenPositions(s.positions, limit)
 	archiver := s.archiver
 	deviceLocation := s.currentDeviceLocationLocked()
+	s.mu.Unlock()
+
+	s.archiveExpiredScreenTargets(archiver)
+	applyPositionRelations(items, deviceLocation)
+	return items
+}
+
+// ListScreenPositionsWithDeviceLocation returns screen position targets with relations
+// calculated from the supplied device location. Distances are omitted only when the
+// device location or target coordinates are unavailable.
+func (s *MemoryStore) ListScreenPositionsWithDeviceLocation(limit int, deviceLocation *model.ScreenDeviceLocationResponse) []model.ScreenPositionTarget {
+	s.mu.Lock()
+	now := time.Now()
+	s.pruneExpiredScreenPositionsLocked(now)
+	items := latestScreenPositions(s.positions, limit)
+	archiver := s.archiver
 	s.mu.Unlock()
 
 	s.archiveExpiredScreenTargets(archiver)
@@ -519,20 +533,15 @@ func appendScreenPositionTrajectory(
 	speed *float64,
 	height *float64,
 ) []model.ScreenPositionTrackPoint {
-	result := normalizedScreenPositionTrajectory(trajectory)
-	if !validScreenPositionTrackCoordinate(point) || seenAt.IsZero() {
-		return compactScreenPositionTrajectory(result)
-	}
-
-	next := model.ScreenPositionTrackPoint{
-		Latitude:  point.Latitude,
-		Longitude: point.Longitude,
-		Speed:     cloneFloat64Ptr(speed),
-		Height:    cloneFloat64Ptr(height),
-		Time:      seenAt,
-	}
-	result = append(result, next)
-	return trimScreenPositionTrajectory(deduplicateScreenPositionTrajectory(result))
+	merged := protocolmerge.AppendTrajectory(
+		screenTrackPointsToProtocol(trajectory),
+		screenPositionPointToProtocol(point),
+		seenAt,
+		speed,
+		height,
+		protocolmerge.TrajectoryOptions{},
+	)
+	return protocolTrackPointsToScreen(merged)
 }
 
 func screenPositionTrajectoryValue(primary, fallback *float64) *float64 {
@@ -546,136 +555,12 @@ func mergeScreenPositionTrajectories(
 	current []model.ScreenPositionTrackPoint,
 	incoming []model.ScreenPositionTrackPoint,
 ) []model.ScreenPositionTrackPoint {
-	if len(current) == 0 {
-		return compactScreenPositionTrajectory(incoming)
-	}
-	if len(incoming) == 0 {
-		return compactScreenPositionTrajectory(current)
-	}
-
-	merged := append(normalizedScreenPositionTrajectory(current), normalizedScreenPositionTrajectory(incoming)...)
-	return compactScreenPositionTrajectory(merged)
-}
-
-func compactScreenPositionTrajectory(points []model.ScreenPositionTrackPoint) []model.ScreenPositionTrackPoint {
-	return trimScreenPositionTrajectory(deduplicateScreenPositionTrajectory(normalizedScreenPositionTrajectory(points)))
-}
-
-func normalizedScreenPositionTrajectory(points []model.ScreenPositionTrackPoint) []model.ScreenPositionTrackPoint {
-	if len(points) == 0 {
-		return nil
-	}
-	out := make([]model.ScreenPositionTrackPoint, 0, len(points))
-	for _, point := range points {
-		if !validTrackPointCoordinate(point.Latitude, point.Longitude) || point.Time.IsZero() {
-			continue
-		}
-		point.Speed = cloneFloat64Ptr(point.Speed)
-		point.Height = cloneFloat64Ptr(point.Height)
-		out = append(out, point)
-	}
-	return out
-}
-
-func deduplicateScreenPositionTrajectory(points []model.ScreenPositionTrackPoint) []model.ScreenPositionTrackPoint {
-	if len(points) <= 1 {
-		return points
-	}
-	slices.SortFunc(points, func(a, b model.ScreenPositionTrackPoint) int {
-		if result := a.Time.Compare(b.Time); result != 0 {
-			return result
-		}
-		if a.Latitude < b.Latitude {
-			return -1
-		}
-		if a.Latitude > b.Latitude {
-			return 1
-		}
-		if a.Longitude < b.Longitude {
-			return -1
-		}
-		if a.Longitude > b.Longitude {
-			return 1
-		}
-		return 0
-	})
-
-	out := points[:0]
-	for _, point := range points {
-		if len(out) > 0 && screenPositionTrackPointsWithinJitter(out[len(out)-1], point) {
-			out[len(out)-1] = mergeScreenPositionTrackPoint(out[len(out)-1], point)
-			continue
-		}
-		out = append(out, point)
-	}
-	clear(points[len(out):])
-	return out
-}
-
-func trimScreenPositionTrajectory(points []model.ScreenPositionTrackPoint) []model.ScreenPositionTrackPoint {
-	if len(points) <= screenPositionTrajectoryLimit {
-		return points
-	}
-	return points[len(points)-screenPositionTrajectoryLimit:]
-}
-
-func screenPositionTrackPointsWithinJitter(a, b model.ScreenPositionTrackPoint) bool {
-	return screenPositionTrackPointDistanceM(a, b) <= screenPositionTrajectoryJitterM
-}
-
-func mergeScreenPositionTrackPoint(current, latest model.ScreenPositionTrackPoint) model.ScreenPositionTrackPoint {
-	merged := latest
-	if latest.Speed == nil {
-		merged.Speed = cloneFloat64Ptr(current.Speed)
-	} else {
-		merged.Speed = cloneFloat64Ptr(latest.Speed)
-	}
-	if latest.Height == nil {
-		merged.Height = cloneFloat64Ptr(current.Height)
-	} else {
-		merged.Height = cloneFloat64Ptr(latest.Height)
-	}
-	return merged
-}
-
-func screenPositionTrackPointDistanceM(a, b model.ScreenPositionTrackPoint) float64 {
-	const earthRadiusM = 6_371_000
-
-	lat1 := degreesToRadians(a.Latitude)
-	lat2 := degreesToRadians(b.Latitude)
-	deltaLat := degreesToRadians(b.Latitude - a.Latitude)
-	deltaLon := degreesToRadians(b.Longitude - a.Longitude)
-	value := math.Sin(deltaLat/2)*math.Sin(deltaLat/2) +
-		math.Cos(lat1)*math.Cos(lat2)*math.Sin(deltaLon/2)*math.Sin(deltaLon/2)
-	if value < 0 {
-		value = 0
-	}
-	if value > 1 {
-		value = 1
-	}
-	return earthRadiusM * 2 * math.Atan2(math.Sqrt(value), math.Sqrt(1-value))
-}
-
-func degreesToRadians(value float64) float64 {
-	return value * math.Pi / 180
-}
-
-func validScreenPositionTrackCoordinate(point *model.ScreenPositionPoint) bool {
-	return point != nil && validTrackPointCoordinate(point.Latitude, point.Longitude)
-}
-
-func validTrackPointCoordinate(latitude, longitude float64) bool {
-	return finiteFloat64(latitude) &&
-		finiteFloat64(longitude) &&
-		latitude >= -90 &&
-		latitude <= 90 &&
-		longitude >= -180 &&
-		longitude <= 180 &&
-		!(latitude == 0 && longitude == 0)
-}
-
-func finiteFloat64(value float64) bool {
-	return !math.IsNaN(value) && !math.IsInf(value, 0)
+	merged := protocolmerge.MergeTrajectories(
+		screenTrackPointsToProtocol(current),
+		screenTrackPointsToProtocol(incoming),
+		protocolmerge.TrajectoryOptions{},
+	)
+	return protocolTrackPointsToScreen(merged)
 }
 
 func (s *MemoryStore) pruneExpiredScreenPositionsLocked(now time.Time) {
@@ -695,10 +580,10 @@ func (s *MemoryStore) pruneExpiredScreenPositionsLocked(now time.Time) {
 }
 
 func screenPositionTargetMatches(existing, incoming model.ScreenPositionTarget) bool {
-	if screenPositionSerialMatches(existing.Serial, incoming.Serial) {
-		return true
-	}
-	return screenPositionPendingEncryptedTargetMatches(existing, incoming)
+	return protocolmerge.PositionMatches(
+		screenPositionTargetToProtocol(existing),
+		screenPositionTargetToProtocol(incoming),
+	)
 }
 
 func isUncrackedDJIDroneTarget(target model.ScreenPositionTarget) bool {
@@ -706,12 +591,7 @@ func isUncrackedDJIDroneTarget(target model.ScreenPositionTarget) bool {
 }
 
 func normalizeScreenTargetModel(modelName string) string {
-	modelName = stringsTrim(modelName)
-	prefix, suffix, ok := strings.Cut(modelName, "-")
-	if !ok || stringsTrim(suffix) == "" || !isDecimalString(stringsTrim(prefix)) {
-		return modelName
-	}
-	return stringsTrim(suffix)
+	return protocolmerge.NormalizeDetectionModel(modelName)
 }
 
 func newScreenDetectionSerial() string {
@@ -733,126 +613,6 @@ func appendScreenTargetSources(current []string, values ...string) []string {
 	return current
 }
 
-func isDecimalString(value string) bool {
-	if value == "" {
-		return false
-	}
-	for _, r := range value {
-		if r < '0' || r > '9' {
-			return false
-		}
-	}
-	return true
-}
-
-func screenPositionPendingEncryptedTargetMatches(existing, incoming model.ScreenPositionTarget) bool {
-	existingCorrelationID := stringsTrim(existing.CorrelationID)
-	incomingCorrelationID := stringsTrim(incoming.CorrelationID)
-	return existingCorrelationID != "" &&
-		incomingCorrelationID != "" &&
-		existingCorrelationID == incomingCorrelationID &&
-		(screenPositionIsPendingEncrypted(existing) || screenPositionIsPendingEncrypted(incoming))
-}
-
-func screenPositionIsPendingEncrypted(target model.ScreenPositionTarget) bool {
-	if target.Cracked || stringsTrim(target.CorrelationID) == "" {
-		return false
-	}
-	return strings.TrimPrefix(stringsTrim(target.CorrelationID), "did_encrypted:") == strings.ToLower(stringsTrim(target.Serial))
-}
-
-func screenPositionSerialMatches(existing, incoming string) bool {
-	existingRaw := strings.ToUpper(stringsTrim(existing))
-	incomingRaw := strings.ToUpper(stringsTrim(incoming))
-	existing = screenPositionCanonicalSerial(existingRaw)
-	incoming = screenPositionCanonicalSerial(incomingRaw)
-	if existing == "" || incoming == "" {
-		return false
-	}
-	if existing == incoming {
-		return true
-	}
-
-	const ridSerialPrefix = "1581"
-	if screenPositionTrimRIDSerialPrefix(existing) == incoming {
-		return true
-	}
-	if screenPositionTrimRIDSerialPrefix(incoming) == existing {
-		return true
-	}
-	if screenPositionSerialSuffixMatches(existing, incoming, existingRaw, incomingRaw) {
-		return true
-	}
-	return false
-}
-
-func screenPositionCanonicalSerial(serial string) string {
-	var builder strings.Builder
-	builder.Grow(len(serial))
-	for _, r := range serial {
-		switch {
-		case r >= '0' && r <= '9':
-			builder.WriteRune(r)
-		case r >= 'A' && r <= 'Z':
-			builder.WriteRune(r)
-		}
-	}
-	return builder.String()
-}
-
-func screenPositionTrimRIDSerialPrefix(serial string) string {
-	const ridSerialPrefix = "1581"
-	if len(serial) <= len(ridSerialPrefix) || !strings.HasPrefix(serial, ridSerialPrefix) {
-		return serial
-	}
-	return strings.TrimPrefix(serial, ridSerialPrefix)
-}
-
-func screenPositionSerialSuffixMatches(existing, incoming, existingRaw, incomingRaw string) bool {
-	const minSuffixLength = 10
-	shorter, longer := existing, incoming
-	if len(shorter) > len(longer) {
-		shorter, longer = longer, shorter
-	}
-	commonSuffixLength := screenPositionCommonSuffixLength(existing, incoming)
-	if commonSuffixLength < minSuffixLength {
-		return false
-	}
-	if screenPositionSerialHasCorruptedPrefix(existingRaw, existing, commonSuffixLength) ||
-		screenPositionSerialHasCorruptedPrefix(incomingRaw, incoming, commonSuffixLength) {
-		return true
-	}
-	return len(shorter) == commonSuffixLength && len(longer)-len(shorter) >= 4
-}
-
-func screenPositionSerialHasCorruptedPrefix(raw, canonical string, suffixLength int) bool {
-	if suffixLength >= len(canonical) {
-		return false
-	}
-	if len(canonical)-suffixLength > 3 {
-		return false
-	}
-	for _, r := range raw {
-		return !screenPositionSerialRuneIsCanonical(r)
-	}
-	return false
-}
-
-func screenPositionSerialRuneIsCanonical(r rune) bool {
-	return (r >= '0' && r <= '9') || (r >= 'A' && r <= 'Z')
-}
-
-func screenPositionCommonSuffixLength(left, right string) int {
-	count := 0
-	for count < len(left) && count < len(right) {
-		if left[len(left)-1-count] != right[len(right)-1-count] {
-			break
-		}
-		count++
-	}
-	return count
-}
-
 func screenPositionMergeBaseIndex(
 	positions []model.ScreenPositionTarget,
 	matches []int,
@@ -871,38 +631,20 @@ func screenPositionMergeBaseIndex(
 }
 
 func shouldKeepDecodedScreenPositionFields(existing, incoming model.ScreenPositionTarget) bool {
-	if !existing.Cracked || incoming.Cracked {
-		return false
-	}
-	existingCorrelationID := stringsTrim(existing.CorrelationID)
-	incomingCorrelationID := stringsTrim(incoming.CorrelationID)
-	if existingCorrelationID != "" && incomingCorrelationID != "" && existingCorrelationID == incomingCorrelationID {
-		return true
-	}
-	return screenPositionSerialMatches(existing.Serial, incoming.Serial)
+	return protocolmerge.ShouldKeepDecodedPositionFields(
+		screenPositionTargetToProtocol(existing),
+		screenPositionTargetToProtocol(incoming),
+	)
 }
 
 func screenDetectionTargetMatches(target model.ScreenDetectionTarget, record model.DetectionRecord) bool {
-	if target.Model == "" || record.Model == "" {
-		return false
-	}
-	freqDiff := math.Abs(target.Frequency - record.Frequency)
-	switch {
-	case isAutelType(target.Model) || isAutelType(record.Model):
-		return freqDiff <= screenDetectionBaseThresholdMHz+25 && (target.Model == record.Model || (isAutelType(target.Model) && isAutelType(record.Model)))
-	case target.Model == "O3+_ofdm_datalink" || record.Model == "O3+_ofdm_datalink":
-		return freqDiff <= screenDetectionBaseThresholdMHz+5 && target.Model == record.Model
-	default:
-		return freqDiff <= screenDetectionBaseThresholdMHz && (target.Model == record.Model || (isDJIType(target.Model) && isDJIType(record.Model)))
-	}
-}
-
-func isAutelType(model string) bool {
-	return model == "Autel_type1" || model == "Autel_type2" || model == "Autel_type3" || model == "Autel_type4" || model == "Autel_type5"
-}
-
-func isDJIType(model string) bool {
-	return model == "DJI_OC123_10M" || model == "DJI_OC123_20M"
+	return protocolmerge.DetectionMatches(
+		target.Model,
+		target.Frequency,
+		record.Model,
+		record.Frequency,
+		protocolmerge.DetectionOptions{},
+	)
 }
 
 func latestScreenDetections(items []model.ScreenDetectionTarget, limit int) []model.ScreenDetectionTarget {
@@ -1001,16 +743,91 @@ func applyPositionRelations(items []model.ScreenPositionTarget, deviceLocation *
 }
 
 func withPositionRelations(target model.ScreenPositionTarget, deviceLocation *model.ScreenDeviceLocationResponse) model.ScreenPositionTarget {
-	pilotDistanceM, droneDistanceM, droneDirectionDeg, deviceDirectionDeg := model.ScreenPositionRelations(
-		deviceLocation,
-		target.Drone,
-		target.Pilot,
+	relations := protocolmerge.PositionRelations(
+		screenDeviceLocationToProtocolPoint(deviceLocation),
+		screenPositionPointToProtocol(target.Drone),
+		screenPositionPointToProtocol(target.Pilot),
 	)
-	target.PilotDistanceM = pilotDistanceM
-	target.DroneDistanceM = droneDistanceM
-	target.DroneDirectionDeg = droneDirectionDeg
-	target.DeviceDirectionDeg = deviceDirectionDeg
+	target.PilotDistanceM = relations.PilotDistanceM
+	target.DroneDistanceM = relations.DroneDistanceM
+	target.DroneDirectionDeg = relations.DroneDirectionDeg
+	target.DeviceDirectionDeg = relations.DeviceDirectionDeg
 	return target
+}
+
+func screenPositionTargetToProtocol(target model.ScreenPositionTarget) protocolmodel.PositionTarget {
+	return protocolmodel.PositionTarget{
+		CorrelationID: target.CorrelationID,
+		Serial:        target.Serial,
+		Model:         target.Model,
+		Source:        protocolmodel.MessageType(target.Source),
+		Frequency:     target.Frequency,
+		RSSI:          target.RSSI,
+		Device:        target.Device,
+		Drone:         screenPositionPointToProtocol(target.Drone),
+		Pilot:         screenPositionPointToProtocol(target.Pilot),
+		Home:          screenPositionPointToProtocol(target.Home),
+		Height:        cloneFloat64Ptr(target.Height),
+		Altitude:      cloneFloat64Ptr(target.Altitude),
+		Speed:         cloneFloat64Ptr(target.Speed),
+		Cracked:       target.Cracked,
+		FirstSeen:     target.FirstSeen,
+		LastSeen:      target.LastSeen,
+	}
+}
+
+func screenDeviceLocationToProtocolPoint(location *model.ScreenDeviceLocationResponse) *protocolmodel.Point {
+	if location == nil || !location.Valid || location.Point == nil {
+		return nil
+	}
+	return &protocolmodel.Point{
+		Latitude:  location.Point.Latitude,
+		Longitude: location.Point.Longitude,
+	}
+}
+
+func screenPositionPointToProtocol(point *model.ScreenPositionPoint) *protocolmodel.Point {
+	if point == nil {
+		return nil
+	}
+	return &protocolmodel.Point{
+		Latitude:  point.Latitude,
+		Longitude: point.Longitude,
+	}
+}
+
+func screenTrackPointsToProtocol(points []model.ScreenPositionTrackPoint) []protocolmodel.TrackPoint {
+	if len(points) == 0 {
+		return nil
+	}
+	out := make([]protocolmodel.TrackPoint, 0, len(points))
+	for _, point := range points {
+		out = append(out, protocolmodel.TrackPoint{
+			Latitude:  point.Latitude,
+			Longitude: point.Longitude,
+			Speed:     cloneFloat64Ptr(point.Speed),
+			Height:    cloneFloat64Ptr(point.Height),
+			Time:      point.Time,
+		})
+	}
+	return out
+}
+
+func protocolTrackPointsToScreen(points []protocolmodel.TrackPoint) []model.ScreenPositionTrackPoint {
+	if len(points) == 0 {
+		return nil
+	}
+	out := make([]model.ScreenPositionTrackPoint, 0, len(points))
+	for _, point := range points {
+		out = append(out, model.ScreenPositionTrackPoint{
+			Latitude:  point.Latitude,
+			Longitude: point.Longitude,
+			Speed:     cloneFloat64Ptr(point.Speed),
+			Height:    cloneFloat64Ptr(point.Height),
+			Time:      point.Time,
+		})
+	}
+	return out
 }
 
 func cloneDeviceLocation(location *model.ScreenDeviceLocationResponse) *model.ScreenDeviceLocationResponse {

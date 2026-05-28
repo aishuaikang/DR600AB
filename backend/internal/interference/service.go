@@ -269,13 +269,9 @@ func (s *Service) applyScreenStrike(
 		s.strikeTimer = nil
 	}
 
-	selectedSet := make(map[string]bool, len(selected))
 	for _, id := range selected {
-		selectedSet[id] = true
-	}
-	for _, id := range s.screenStrikeChannelIDsLocked() {
-		if _, err := s.setStateLocked(id, selectedSet[id], locale); err != nil {
-			_ = s.stopScreenStrikeChannelsLocked(locale)
+		if _, err := s.setStateLocked(id, true, locale); err != nil {
+			_ = s.stopScreenStrikeChannelIDsLocked(selected, locale)
 			s.clearScreenStrikeLocked()
 			state := s.screenStrikeStateLocked(time.Now())
 			s.createFailedReportLocked(req, selected, startedAt, err, state)
@@ -326,11 +322,10 @@ func (s *Service) setStateLocked(id string, enabled bool, locale string) (model.
 		return model.GpioChannel{}, fmt.Errorf("%s", s.translator.T(locale, "errors", "channel_not_found"))
 	}
 
-	if state.pin == nil {
-		state.pin = s.pinFactory(state.def.Pin)
-	}
-
 	if enabled {
+		if state.pin == nil {
+			state.pin = s.pinFactory(state.def.Pin)
+		}
 		if !state.initialized {
 			if err := state.pin.Setup(); err != nil {
 				return s.markError(state, err)
@@ -464,13 +459,35 @@ func (s *Service) screenStrikeHasHighChannelLocked() bool {
 }
 
 func (s *Service) stopScreenStrikeChannelsLocked(locale string) error {
+	return s.stopScreenStrikeChannelIDsLocked(s.controlledScreenStrikeChannelIDsLocked(), locale)
+}
+
+func (s *Service) stopScreenStrikeChannelIDsLocked(ids []string, locale string) error {
 	var firstErr error
-	for _, id := range s.screenStrikeChannelIDsLocked() {
+	for _, id := range ids {
 		if _, err := s.setStateLocked(id, false, locale); err != nil && firstErr == nil {
 			firstErr = err
 		}
 	}
 	return firstErr
+}
+
+func (s *Service) controlledScreenStrikeChannelIDsLocked() []string {
+	if len(s.strikeChannelIDs) > 0 {
+		return append([]string(nil), s.strikeChannelIDs...)
+	}
+
+	ids := make([]string, 0, 3)
+	for _, id := range s.screenStrikeChannelIDsLocked() {
+		state := s.channels[id]
+		if state == nil {
+			continue
+		}
+		if state.initialized || state.pin != nil || state.enabled {
+			ids = append(ids, id)
+		}
+	}
+	return ids
 }
 
 func (s *Service) clearScreenStrikeLocked() {
@@ -496,6 +513,9 @@ func (s *Service) screenStrikeStateLocked(now time.Time) model.ScreenStrikeState
 		}
 	}
 
+	if s.strikeActive {
+		activeChannelIDs = append([]string(nil), s.strikeChannelIDs...)
+	}
 	active := len(activeChannelIDs) > 0
 	state := model.ScreenStrikeState{
 		Active:           active,

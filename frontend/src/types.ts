@@ -789,6 +789,7 @@ export interface NetworkInterfacesResponse {
 
 export interface NetworkInterfaceUpdateRequest {
   mode: "dhcp" | "static";
+  ipv4?: NetworkAddress[];
   ipv4Address?: string;
   prefix?: number;
   gateway4?: string;

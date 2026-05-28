@@ -1,27 +1,27 @@
-package detection
+package diddecrypt
 
 import "strings"
 
-const o3CRC24Poly = 0x864CFB
+const crc24Poly = 0x864CFB
 
-var o3CRC24Table [256]uint32
+var crc24Table [256]uint32
 
 func init() {
 	for i := 0; i < 256; i++ {
 		crc := uint32(i) << 16
 		for j := 0; j < 8; j++ {
 			if crc&0x800000 != 0 {
-				crc = (crc << 1) ^ o3CRC24Poly
+				crc = (crc << 1) ^ crc24Poly
 			} else {
 				crc <<= 1
 			}
 		}
-		o3CRC24Table[i] = crc & 0xFFFFFF
+		crc24Table[i] = crc & 0xFFFFFF
 	}
 }
 
 var (
-	o3Interleave176 = [176]int{
+	interleave176 = [176]int{
 		101, 48, 167, 63, 1, 40, 27, 171, 74, 28, 117, 159, 21, 126, 138, 175,
 		114, 125, 37, 149, 100, 110, 122, 4, 116, 42, 111, 174, 50, 57, 86, 107,
 		83, 132, 95, 108, 47, 161, 148, 145, 141, 19, 98, 44, 87, 24, 137, 173,
@@ -35,7 +35,7 @@ var (
 		6, 36, 5, 26, 34, 133, 43, 78, 112, 135, 143, 157, 169, 23, 53, 13,
 	}
 
-	o3Mask176 = [176]byte{
+	mask176 = [176]byte{
 		0xf2, 0x3b, 0x9b, 0x7c, 0xe3, 0xc2, 0x74, 0x05, 0xd1, 0x71, 0x9d, 0xca, 0xeb, 0xbc, 0x2d, 0x67,
 		0xef, 0xea, 0x69, 0xe4, 0x0f, 0x5a, 0xcf, 0x03, 0x23, 0x34, 0x33, 0x9a, 0x45, 0x33, 0x04, 0xbe,
 		0x71, 0xee, 0x77, 0x6b, 0xd8, 0x86, 0x34, 0xab, 0xd6, 0x05, 0xae, 0x61, 0xd4, 0x80, 0xb5, 0x6d,
@@ -49,16 +49,16 @@ var (
 		0x9b, 0x04, 0x04, 0x30, 0x96, 0x0f, 0x5e, 0xa1, 0xb7, 0xb1, 0x15, 0x74, 0x71, 0x5a, 0x27, 0xac,
 	}
 
-	o3ReverseInterleave176 = func() [176]int {
+	reverseInterleave176 = func() [176]int {
 		var rev [176]int
 		for i := 0; i < 176; i++ {
-			rev[o3Interleave176[i]] = i
+			rev[interleave176[i]] = i
 		}
 		return rev
 	}()
 )
 
-var o3HexToNibble = [256]byte{
+var hexToNibble = [256]byte{
 	'0': 0x0, '1': 0x1, '2': 0x2, '3': 0x3,
 	'4': 0x4, '5': 0x5, '6': 0x6, '7': 0x7,
 	'8': 0x8, '9': 0x9,
@@ -66,73 +66,66 @@ var o3HexToNibble = [256]byte{
 	'A': 0xa, 'B': 0xb, 'C': 0xc, 'D': 0xd, 'E': 0xe, 'F': 0xf,
 }
 
-var o3NibbleToHex = [16]byte{
-	'0', '1', '2', '3', '4', '5', '6', '7',
-	'8', '9', 'a', 'b', 'c', 'd', 'e', 'f',
-}
+var nibbleToHex = [16]byte{'0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'a', 'b', 'c', 'd', 'e', 'f'}
 
-func normalizeO3PacketHex(hexStr string) (encrypted string, decrypted string, ok bool) {
+func NormalizePacketHex(hexStr string) (encrypted string, decrypted string, ok bool) {
 	hexStr = strings.ToLower(strings.TrimSpace(hexStr))
-	if len(hexStr) != 352 || !isO3HexString(hexStr) {
+	if len(hexStr) != 352 || !isHexString(hexStr) {
 		return "", "", false
 	}
-
-	if o3CRC24Hex(hexStr) == 0 {
-		return normalize176HexStr(hexStr, false), hexStr, true
+	if crc24Hex(hexStr) == 0 {
+		return Normalize176Hex(hexStr, false), hexStr, true
 	}
-
-	decrypted = normalize176HexStr(hexStr, true)
-	if o3CRC24Hex(decrypted) == 0 {
+	decrypted = Normalize176Hex(hexStr, true)
+	if crc24Hex(decrypted) == 0 {
 		return hexStr, decrypted, true
 	}
-
 	return "", "", false
 }
 
-func normalize176HexStr(hexStr string, toDecrypted bool) string {
+func Normalize176Hex(hexStr string, toDecrypted bool) string {
 	if len(hexStr) != 352 {
 		return hexStr
 	}
-
 	var result [352]byte
 	if toDecrypted {
 		var tmp [176]byte
 		for i := 0; i < 176; i++ {
-			hi := o3HexToNibble[hexStr[i*2]]
-			lo := o3HexToNibble[hexStr[i*2+1]]
-			tmp[i] = (hi<<4 | lo) ^ o3Mask176[i]
+			hi := hexToNibble[hexStr[i*2]]
+			lo := hexToNibble[hexStr[i*2+1]]
+			tmp[i] = (hi<<4 | lo) ^ mask176[i]
 		}
 		for i := 0; i < 176; i++ {
-			idx := o3Interleave176[i]
-			result[idx*2] = o3NibbleToHex[tmp[i]>>4]
-			result[idx*2+1] = o3NibbleToHex[tmp[i]&0x0f]
+			idx := interleave176[i]
+			result[idx*2] = nibbleToHex[tmp[i]>>4]
+			result[idx*2+1] = nibbleToHex[tmp[i]&0x0f]
 		}
-	} else {
-		var tmp [176]byte
-		for i := 0; i < 176; i++ {
-			hi := o3HexToNibble[hexStr[i*2]]
-			lo := o3HexToNibble[hexStr[i*2+1]]
-			tmp[o3ReverseInterleave176[i]] = hi<<4 | lo
-		}
-		for i := 0; i < 176; i++ {
-			b := tmp[i] ^ o3Mask176[i]
-			result[i*2] = o3NibbleToHex[b>>4]
-			result[i*2+1] = o3NibbleToHex[b&0x0f]
-		}
+		return string(result[:])
+	}
+	var tmp [176]byte
+	for i := 0; i < 176; i++ {
+		hi := hexToNibble[hexStr[i*2]]
+		lo := hexToNibble[hexStr[i*2+1]]
+		tmp[reverseInterleave176[i]] = hi<<4 | lo
+	}
+	for i := 0; i < 176; i++ {
+		b := tmp[i] ^ mask176[i]
+		result[i*2] = nibbleToHex[b>>4]
+		result[i*2+1] = nibbleToHex[b&0x0f]
 	}
 	return string(result[:])
 }
 
-func o3CRC24Hex(hexStr string) uint32 {
+func crc24Hex(hexStr string) uint32 {
 	crc := uint32(0)
 	for i := 0; i < len(hexStr); i += 2 {
-		b := uint32(o3HexToNibble[hexStr[i]]<<4 | o3HexToNibble[hexStr[i+1]])
-		crc = ((crc << 8) ^ o3CRC24Table[((crc>>16)^b)&0xFF]) & 0xFFFFFF
+		b := uint32(hexToNibble[hexStr[i]]<<4 | hexToNibble[hexStr[i+1]])
+		crc = ((crc << 8) ^ crc24Table[((crc>>16)^b)&0xFF]) & 0xFFFFFF
 	}
 	return crc
 }
 
-func isO3HexString(value string) bool {
+func isHexString(value string) bool {
 	for i := 0; i < len(value); i++ {
 		c := value[i]
 		if (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F') {

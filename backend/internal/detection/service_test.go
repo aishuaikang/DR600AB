@@ -15,7 +15,8 @@ import (
 	"dr600ab-api/internal/settings"
 	"dr600ab-api/internal/store"
 	"serialport"
-	"tri-detector/parser"
+	"uav-protocol/diddecrypt"
+	"uav-protocol/parser"
 )
 
 func TestIngestLineStoresParsedAndDetectionRecords(t *testing.T) {
@@ -79,7 +80,7 @@ func TestIngestLineStoresScreenPositionFromRID(t *testing.T) {
 	}
 }
 
-func TestIngestLineStoresScreenPositionFromRIDWithoutCoordinates(t *testing.T) {
+func TestIngestLineStoresScreenPositionFromRIDWithZeroCoordinates(t *testing.T) {
 	tr, err := i18n.New("zh-CN")
 	if err != nil {
 		t.Fatalf("i18n.New() error = %v", err)
@@ -97,10 +98,10 @@ func TestIngestLineStoresScreenPositionFromRIDWithoutCoordinates(t *testing.T) {
 		t.Fatalf("serial = %q, want RID serial", items[0].Serial)
 	}
 	if items[0].Drone == nil || items[0].Drone.Latitude != 0 || items[0].Drone.Longitude != 0 {
-		t.Fatalf("expected zero drone point, got %#v", items[0].Drone)
+		t.Fatalf("expected zero drone point to be retained for display, got %#v", items[0].Drone)
 	}
 	if items[0].Pilot == nil || items[0].Pilot.Latitude != 0 || items[0].Pilot.Longitude != 0 {
-		t.Fatalf("expected zero pilot point, got %#v", items[0].Pilot)
+		t.Fatalf("expected zero pilot point to be retained for display, got %#v", items[0].Pilot)
 	}
 }
 
@@ -212,16 +213,15 @@ func TestIngestLineStoresScreenPositionFromDIDEncryptedDecoder(t *testing.T) {
 	}
 }
 
-func TestO3DecryptResultKeepsZeroCoordinates(t *testing.T) {
-	decoder := &mqttO3PlusO4Decoder{}
+func TestO3DecryptResultKeepsZeroCoordinatesForDisplay(t *testing.T) {
 	receivedAt := time.Now()
 
-	target, ok := decoder.positionFromDecryptResult(parser.DIDEncrypted{
+	target := screenPositionFromProtocolTarget(diddecrypt.TargetFromDecryptResult(parser.DIDEncrypted{
 		Device:      "4745",
 		EncryptedID: "86ca8046",
 		Freq:        5776.5,
 		RSSI:        -76,
-	}, o3DecryptAlert{
+	}, diddecrypt.DecryptResult{
 		SN:       "o3-sn",
 		Model:    "DJI O3",
 		Lat:      0,
@@ -230,19 +230,22 @@ func TestO3DecryptResultKeepsZeroCoordinates(t *testing.T) {
 		PilotLon: 0,
 		HomeLat:  0,
 		HomeLon:  0,
-	}, receivedAt)
+	}, receivedAt, true))
 
-	if !ok {
-		t.Fatalf("expected zero coordinates to produce a screen position target")
-	}
 	if target.Drone == nil || target.Drone.Latitude != 0 || target.Drone.Longitude != 0 {
-		t.Fatalf("expected zero drone point, got %#v", target.Drone)
+		t.Fatalf("expected zero drone point to be retained for display, got %#v", target.Drone)
 	}
 	if target.Pilot == nil || target.Pilot.Latitude != 0 || target.Pilot.Longitude != 0 {
-		t.Fatalf("expected zero pilot point, got %#v", target.Pilot)
+		t.Fatalf("expected zero pilot point to be retained for display, got %#v", target.Pilot)
 	}
 	if target.Home == nil || target.Home.Latitude != 0 || target.Home.Longitude != 0 {
-		t.Fatalf("expected zero home point, got %#v", target.Home)
+		t.Fatalf("expected zero home point to be retained for display, got %#v", target.Home)
+	}
+	if target.TrajectorySpeed == nil || *target.TrajectorySpeed != 0 {
+		t.Fatalf("expected zero trajectory speed to be retained, got %#v", target.TrajectorySpeed)
+	}
+	if target.TrajectoryHeight == nil || *target.TrajectoryHeight != 0 {
+		t.Fatalf("expected zero trajectory height to be retained, got %#v", target.TrajectoryHeight)
 	}
 }
 
@@ -697,6 +700,73 @@ func TestReconnectsAfterPortClosesAutomatically(t *testing.T) {
 	reconnectedPort := ports[openCount-1]
 	mu.Unlock()
 	assertPortWrites(t, reconnectedPort, startDetectionCommand+"\n")
+
+	_ = svc.Stop("zh-CN")
+}
+
+func TestReconnectSendsStartCommandToSeparateTxPort(t *testing.T) {
+	tr, err := i18n.New("zh-CN")
+	if err != nil {
+		t.Fatalf("i18n.New() error = %v", err)
+	}
+
+	st := store.NewMemoryStore(10, 10)
+	svc := NewService(st, tr, settings.NewStore(filepath.Join(t.TempDir(), "settings.json")), Options{
+		ReconnectInitialDelay: 10 * time.Millisecond,
+		ReconnectMaxDelay:     20 * time.Millisecond,
+	})
+
+	var mu sync.Mutex
+	opened := map[string][]*fakeSerialPort{}
+	svc.SetSerialOpener(func(cfg *serialport.Config) (serial.Port, error) {
+		port := newFakeSerialPort()
+		mu.Lock()
+		opened[cfg.PortName] = append(opened[cfg.PortName], port)
+		mu.Unlock()
+		return port, nil
+	})
+
+	resp, err := svc.Start(model.DetectionSessionRequest{
+		RxPortName: "/dev/rx",
+		TxPortName: "/dev/tx",
+		BaudRate:   115200,
+		DataBits:   8,
+		StopBits:   1,
+		Parity:     "none",
+	}, "zh-CN")
+	if err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+	if !resp.Active {
+		t.Fatal("expected session to be active")
+	}
+
+	mu.Lock()
+	if len(opened["/dev/rx"]) != 1 || len(opened["/dev/tx"]) != 1 {
+		rxCount, txCount := len(opened["/dev/rx"]), len(opened["/dev/tx"])
+		mu.Unlock()
+		t.Fatalf("opened rx/tx counts = %d/%d, want 1/1", rxCount, txCount)
+	}
+	firstRX := opened["/dev/rx"][0]
+	firstTX := opened["/dev/tx"][0]
+	mu.Unlock()
+	assertPortWrites(t, firstRX)
+	assertPortWrites(t, firstTX, startDetectionCommand+"\n")
+	firstRX.Close()
+
+	waitForCondition(t, 2*time.Second, func() bool {
+		mu.Lock()
+		rxCount, txCount := len(opened["/dev/rx"]), len(opened["/dev/tx"])
+		mu.Unlock()
+		return rxCount >= 2 && txCount >= 2 && svc.Current("zh-CN").Active
+	})
+
+	mu.Lock()
+	reconnectedRX := opened["/dev/rx"][len(opened["/dev/rx"])-1]
+	reconnectedTX := opened["/dev/tx"][len(opened["/dev/tx"])-1]
+	mu.Unlock()
+	assertPortWrites(t, reconnectedRX)
+	assertPortWrites(t, reconnectedTX, startDetectionCommand+"\n")
 
 	_ = svc.Stop("zh-CN")
 }

@@ -62,7 +62,21 @@ func (s *Server) handleScreenDetections(c *fiber.Ctx) error {
 // handleScreenPositions 返回大屏使用的合并定位目标列表。
 func (s *Server) handleScreenPositions(c *fiber.Ctx) error {
 	locale := s.resolveLocale(c)
-	items := s.detection.ScreenPositions(parseLimit(c, 100))
+	deviceLocation, err := s.currentScreenDeviceLocation()
+	if err != nil {
+		return s.respondError(
+			c,
+			fiber.StatusInternalServerError,
+			"internal",
+			s.translator.T(locale, "errors", "internal"),
+			err.Error(),
+		)
+	}
+	var location *model.ScreenDeviceLocationResponse
+	if deviceLocation.Valid {
+		location = &deviceLocation
+	}
+	items := s.detection.ScreenPositionsWithDeviceLocation(parseLimit(c, 100), location)
 	if err := s.maybePruneIntrusionsByCurrentUserSettings(); err != nil {
 		return s.respondError(
 			c,

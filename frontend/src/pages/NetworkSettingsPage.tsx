@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import type { TFunction } from "i18next";
-import { ArrowDown, ArrowUp, Cable, CircleAlert, Eye, EyeOff, RefreshCw, Save, Wifi } from "lucide-react";
+import { ArrowDown, ArrowUp, Cable, CircleAlert, Eye, EyeOff, Plus, RefreshCw, Save, Trash2, Wifi } from "lucide-react";
 
 import {
   connectWiFi,
@@ -14,29 +14,34 @@ import { LoadingSpinner } from "../components/LoadingState";
 import { Panel, PanelBody } from "../components/Panel";
 import { SectionHeader } from "../components/SectionHeader";
 import type { Banner } from "../app/types";
-import type { NetworkInterface, NetworkInterfaceUpdateRequest, WiFiNetwork } from "../types";
+import type { NetworkAddress, NetworkInterface, NetworkInterfaceUpdateRequest, WiFiNetwork } from "../types";
 import { cx } from "../utils/classnames";
 import { extractErrorMessage } from "../utils/session";
 
 type Draft = {
   mode: "dhcp" | "static";
-  ipv4Address: string;
-  prefix: string;
+  ipv4: Array<{ address: string; prefix: string }>;
   gateway4: string;
   dns4: string;
   routeMetric: string;
 };
 
 function toDraft(item: NetworkInterface): Draft {
-  const [primary] = item.ipv4;
   return {
     mode: item.ipv4Method === "manual" ? "static" : "dhcp",
-    ipv4Address: primary?.address ?? "",
-    prefix: primary?.prefix ? String(primary.prefix) : "24",
+    ipv4: addressesToDraft(item.ipv4),
     gateway4: item.gateway4 ?? "",
     dns4: item.dns4.join(", "),
     routeMetric: typeof item.routeMetric === "number" ? String(item.routeMetric) : "",
   };
+}
+
+function addressesToDraft(addresses: NetworkAddress[]) {
+  const items = addresses.length ? addresses : [{ address: "", prefix: 24 }];
+  return items.map((item) => ({
+    address: item.address ?? "",
+    prefix: item.prefix ? String(item.prefix) : "24",
+  }));
 }
 
 function parseDNS(value: string) {
@@ -67,12 +72,23 @@ function validateDraft(draft: Draft, t: TFunction) {
   if (draft.routeMetric.trim() && !isRouteMetric(draft.routeMetric)) {
     return t("networkInvalidRouteMetric", { ns: "settings" });
   }
-  if (!isIPv4(draft.ipv4Address)) {
+  const addresses = draft.ipv4.map((item) => ({
+    address: item.address.trim(),
+    prefix: Number(item.prefix),
+  }));
+  if (!addresses.length || addresses.some((item) => !isIPv4(item.address))) {
     return t("networkInvalidIPv4", { ns: "settings" });
   }
-  const prefix = Number(draft.prefix);
-  if (!Number.isInteger(prefix) || prefix < 1 || prefix > 32) {
+  if (addresses.some((item) => !Number.isInteger(item.prefix) || item.prefix < 1 || item.prefix > 32)) {
     return t("networkInvalidPrefix", { ns: "settings" });
+  }
+  const seen = new Set<string>();
+  for (const item of addresses) {
+    const key = item.address;
+    if (seen.has(key)) {
+      return t("networkDuplicateIPv4", { ns: "settings" });
+    }
+    seen.add(key);
   }
   if (draft.gateway4.trim() && !isIPv4(draft.gateway4)) {
     return t("networkInvalidGateway", { ns: "settings" });
@@ -91,8 +107,10 @@ function buildPayload(draft: Draft): NetworkInterfaceUpdateRequest {
   }
   return {
     mode: "static",
-    ipv4Address: draft.ipv4Address.trim(),
-    prefix: Number(draft.prefix),
+    ipv4: draft.ipv4.map((item) => ({
+      address: item.address.trim(),
+      prefix: Number(item.prefix),
+    })),
     gateway4: draft.gateway4.trim(),
     dns4: parseDNS(draft.dns4),
     routeMetric,
@@ -139,6 +157,28 @@ function formatAddresses(addresses: NetworkInterface["ipv4"]) {
     return "-";
   }
   return addresses.map((item) => `${item.address}/${item.prefix || ""}`).join(", ");
+}
+
+function updateDraftAddress(draft: Draft, index: number, patch: Partial<Draft["ipv4"][number]>): Draft {
+  return {
+    ...draft,
+    ipv4: draft.ipv4.map((item, itemIndex) => (itemIndex === index ? { ...item, ...patch } : item)),
+  };
+}
+
+function addDraftAddress(draft: Draft): Draft {
+  return {
+    ...draft,
+    ipv4: [...draft.ipv4, { address: "", prefix: "24" }],
+  };
+}
+
+function removeDraftAddress(draft: Draft, index: number): Draft {
+  const next = draft.ipv4.filter((_, itemIndex) => itemIndex !== index);
+  return {
+    ...draft,
+    ipv4: next.length ? next : [{ address: "", prefix: "24" }],
+  };
 }
 
 function pickDefaultInterface(items: NetworkInterface[]) {
@@ -300,29 +340,55 @@ function InterfaceCard({
           </button>
         </div>
 
-        <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_5rem]">
-          <label className="grid gap-1.5">
-            <span className="text-xs font-medium text-base-content/60">{t("networkIPv4Address", { ns: "settings" })}</span>
-            <input
-              className="input input-sm input-bordered w-full bg-base-100"
-              value={draft.ipv4Address}
-              inputMode="decimal"
+        <div className="grid gap-2">
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-xs font-medium text-base-content/60">{t("networkIPv4Addresses", { ns: "settings" })}</span>
+            <button
+              className="btn btn-ghost btn-xs h-7 min-h-7 rounded-lg px-2"
+              type="button"
               disabled={!editable || draft.mode === "dhcp" || busy}
-              onChange={(event) => onDraftChange({ ...draft, ipv4Address: event.target.value })}
-              placeholder="192.168.10.10"
-            />
-          </label>
-          <label className="grid gap-1.5">
-            <span className="text-xs font-medium text-base-content/60">{t("networkPrefix", { ns: "settings" })}</span>
-            <input
-              className="input input-sm input-bordered w-full bg-base-100"
-              value={draft.prefix}
-              inputMode="numeric"
-              disabled={!editable || draft.mode === "dhcp" || busy}
-              onChange={(event) => onDraftChange({ ...draft, prefix: event.target.value.replace(/\D/g, "").slice(0, 2) })}
-              placeholder="24"
-            />
-          </label>
+              onClick={() => onDraftChange(addDraftAddress(draft))}
+            >
+              <Plus size={13} />
+              {t("networkAddIPv4", { ns: "settings" })}
+            </button>
+          </div>
+          {draft.ipv4.map((address, index) => (
+            <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_5rem_2rem]" key={index}>
+              <label className="grid gap-1.5">
+                <span className="sr-only">{t("networkIPv4Address", { ns: "settings" })}</span>
+                <input
+                  className="input input-sm input-bordered w-full bg-base-100"
+                  value={address.address}
+                  inputMode="decimal"
+                  disabled={!editable || draft.mode === "dhcp" || busy}
+                  onChange={(event) => onDraftChange(updateDraftAddress(draft, index, { address: event.target.value }))}
+                  placeholder="192.168.10.10"
+                />
+              </label>
+              <label className="grid gap-1.5">
+                <span className="sr-only">{t("networkPrefix", { ns: "settings" })}</span>
+                <input
+                  className="input input-sm input-bordered w-full bg-base-100"
+                  value={address.prefix}
+                  inputMode="numeric"
+                  disabled={!editable || draft.mode === "dhcp" || busy}
+                  onChange={(event) => onDraftChange(updateDraftAddress(draft, index, { prefix: event.target.value.replace(/\D/g, "").slice(0, 2) }))}
+                  placeholder="24"
+                />
+              </label>
+              <button
+                className="btn btn-ghost btn-sm h-8 min-h-8 rounded-lg px-0 text-error"
+                type="button"
+                disabled={!editable || draft.mode === "dhcp" || busy || draft.ipv4.length <= 1}
+                aria-label={t("networkRemoveIPv4", { ns: "settings" })}
+                title={t("networkRemoveIPv4", { ns: "settings" })}
+                onClick={() => onDraftChange(removeDraftAddress(draft, index))}
+              >
+                <Trash2 size={14} />
+              </button>
+            </div>
+          ))}
         </div>
 
         <label className="grid gap-1.5">

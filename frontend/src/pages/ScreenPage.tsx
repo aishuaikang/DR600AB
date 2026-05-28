@@ -2900,8 +2900,6 @@ export function ScreenPage({
     }
   }, [alarmSettings, onUserSettingsChange, t, userSettings]);
 
-  const selectedPosition = positions.find((target) => target.id === selectedId) ?? null;
-
   const enterAdmin = useCallback(() => {
     window.location.hash = "#/settings";
   }, []);

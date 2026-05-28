@@ -46,6 +46,7 @@ export function Sidebar({
   onMobileOpen,
   onDeveloperLogin,
   onDeveloperLogout,
+  showDeceptionReports = true,
 }: {
   appTitle: string;
   page: Page;
@@ -61,6 +62,7 @@ export function Sidebar({
   onMobileOpen: () => void;
   onDeveloperLogin: (code: string) => Promise<void>;
   onDeveloperLogout: () => void;
+  showDeceptionReports?: boolean;
 }) {
   const [languageOpen, setLanguageOpen] = useState(false);
   const [developerOpen, setDeveloperOpen] = useState(false);
@@ -71,6 +73,9 @@ export function Sidebar({
   const debugNavActive = debugPageItems.some((item) => item.id === page);
   const debugGroupOpen = debugNavActive || debugOpen;
   const developerExpiryLabel = formatDeveloperExpiry(developerExpiresAt);
+  const visibleUserPageItems = showDeceptionReports
+    ? userPageItems
+    : userPageItems.filter((item) => item.id !== "deception-reports");
 
   const handleNavigate = (nextPage: Page) => {
     onNavigate(nextPage);
@@ -183,7 +188,7 @@ export function Sidebar({
         </div>
 
         <nav className="admin-nav flex min-h-0 gap-2 overflow-x-auto pb-1 xl:flex-col xl:overflow-y-auto xl:overflow-x-hidden" aria-label={appTitle}>
-          {userPageItems.map((item) => {
+          {visibleUserPageItems.map((item) => {
             const Icon = item.icon;
             const active = page === item.id;
             return (

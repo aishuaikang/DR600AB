@@ -174,11 +174,10 @@ func (s *Service) UpdateInterface(
 			return model.NetworkInterface{}, err
 		}
 	} else {
-		address := fmt.Sprintf("%s/%d", strings.TrimSpace(req.IPv4Address), req.Prefix)
 		args := []string{
 			"connection", "modify", target.ConnectionName,
 			"ipv4.method", "manual",
-			"ipv4.addresses", address,
+			"ipv4.addresses", strings.Join(updateIPv4Addresses(req), ","),
 			"ipv4.gateway", strings.TrimSpace(req.Gateway4),
 			"ipv4.dns", strings.Join(trimStrings(req.DNS4), ","),
 		}
@@ -655,6 +654,22 @@ func parseNetworkAddress(value string) model.NetworkAddress {
 	return model.NetworkAddress{Address: address, Prefix: prefix}
 }
 
+func updateIPv4Addresses(req model.NetworkInterfaceUpdateRequest) []string {
+	addresses := req.IPv4
+	if len(addresses) == 0 && strings.TrimSpace(req.IPv4Address) != "" {
+		addresses = []model.NetworkAddress{{
+			Address: req.IPv4Address,
+			Prefix:  req.Prefix,
+		}}
+	}
+
+	out := make([]string, 0, len(addresses))
+	for _, item := range addresses {
+		out = append(out, fmt.Sprintf("%s/%d", strings.TrimSpace(item.Address), item.Prefix))
+	}
+	return out
+}
+
 func validateInterfaceName(name string) error {
 	if _, err := net.InterfaceByName(name); err == nil {
 		return nil
@@ -679,12 +694,8 @@ func validateUpdateRequest(req model.NetworkInterfaceUpdateRequest) error {
 	case "dhcp":
 		return nil
 	case "static":
-		ip := net.ParseIP(strings.TrimSpace(req.IPv4Address))
-		if ip == nil || ip.To4() == nil {
-			return fmt.Errorf("%w: invalid ipv4 address", ErrInvalidConfig)
-		}
-		if req.Prefix < 1 || req.Prefix > 32 {
-			return fmt.Errorf("%w: invalid ipv4 prefix", ErrInvalidConfig)
+		if err := validateUpdateIPv4Addresses(req); err != nil {
+			return err
 		}
 		if strings.TrimSpace(req.Gateway4) != "" {
 			gateway := net.ParseIP(strings.TrimSpace(req.Gateway4))
@@ -702,6 +713,36 @@ func validateUpdateRequest(req model.NetworkInterfaceUpdateRequest) error {
 	default:
 		return fmt.Errorf("%w: invalid ipv4 mode", ErrInvalidConfig)
 	}
+}
+
+func validateUpdateIPv4Addresses(req model.NetworkInterfaceUpdateRequest) error {
+	addresses := req.IPv4
+	if len(addresses) == 0 && strings.TrimSpace(req.IPv4Address) != "" {
+		addresses = []model.NetworkAddress{{
+			Address: req.IPv4Address,
+			Prefix:  req.Prefix,
+		}}
+	}
+	if len(addresses) == 0 {
+		return fmt.Errorf("%w: invalid ipv4 address", ErrInvalidConfig)
+	}
+	seen := map[string]struct{}{}
+	for _, item := range addresses {
+		address := strings.TrimSpace(item.Address)
+		ip := net.ParseIP(address)
+		if ip == nil || ip.To4() == nil {
+			return fmt.Errorf("%w: invalid ipv4 address", ErrInvalidConfig)
+		}
+		if item.Prefix < 1 || item.Prefix > 32 {
+			return fmt.Errorf("%w: invalid ipv4 prefix", ErrInvalidConfig)
+		}
+		key := ip.To4().String()
+		if _, ok := seen[key]; ok {
+			return fmt.Errorf("%w: duplicate ipv4 address", ErrInvalidConfig)
+		}
+		seen[key] = struct{}{}
+	}
+	return nil
 }
 
 func validateWiFiRequest(req model.WiFiConnectRequest) error {

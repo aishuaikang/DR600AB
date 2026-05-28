@@ -18,6 +18,7 @@ type fakePin struct {
 	cleanup int
 	value   int
 	highErr error
+	lowErr  error
 }
 
 func (f *fakePin) Setup() error {
@@ -35,6 +36,9 @@ func (f *fakePin) SetHigh() error {
 }
 
 func (f *fakePin) SetLow() error {
+	if f.lowErr != nil {
+		return f.lowErr
+	}
 	f.low++
 	f.value = 0
 	return nil
@@ -199,7 +203,7 @@ func TestListChannelsReturnsEmptyBandsForReservedChannel(t *testing.T) {
 	}
 }
 
-func TestSetScreenStrikeStartsSelectedChannelsAndStopsUnselected(t *testing.T) {
+func TestSetScreenStrikeStartsOnlySelectedChannels(t *testing.T) {
 	svc, pins := newStrikeTestService(t)
 	defer svc.Shutdown()
 
@@ -223,6 +227,67 @@ func TestSetScreenStrikeStartsSelectedChannelsAndStopsUnselected(t *testing.T) {
 	}
 	if pins["io2"].value != 0 {
 		t.Fatalf("unselected io2 value = %d, want low", pins["io2"].value)
+	}
+	if pins["io2"].low != 0 || pins["io2"].cleanup != 0 {
+		t.Fatalf("unselected io2 low/cleanup = %d/%d, want untouched", pins["io2"].low, pins["io2"].cleanup)
+	}
+}
+
+func TestSetScreenStrikeDoesNotTouchUnselectedChannelWithLowError(t *testing.T) {
+	svc, pins := newStrikeTestService(t)
+	defer svc.Shutdown()
+
+	pins["io3"].lowErr = errors.New("operation not permitted")
+
+	state, err := svc.SetScreenStrike(model.ScreenStrikeRequest{
+		Enabled:         true,
+		ChannelIDs:      []string{"io1"},
+		DurationSeconds: 60,
+	}, "zh-CN")
+	if err != nil {
+		t.Fatalf("SetScreenStrike() error = %v", err)
+	}
+
+	if !state.Active || !reflect.DeepEqual(state.ChannelIDs, []string{"io1"}) {
+		t.Fatalf("state = %+v, want active with io1 only", state)
+	}
+	if pins["io1"].value != 1 {
+		t.Fatalf("io1 value = %d, want high", pins["io1"].value)
+	}
+	if pins["io3"].low != 0 || pins["io3"].cleanup != 0 {
+		t.Fatalf("io3 low/cleanup = %d/%d, want untouched", pins["io3"].low, pins["io3"].cleanup)
+	}
+}
+
+func TestScreenStrikeStateUsesSelectedChannelsWhileStrikeIsActive(t *testing.T) {
+	svc, pins := newStrikeTestService(t)
+	defer svc.Shutdown()
+
+	if _, err := svc.SetScreenStrike(model.ScreenStrikeRequest{
+		Enabled:         true,
+		ChannelIDs:      []string{"io1"},
+		DurationSeconds: 60,
+	}, "zh-CN"); err != nil {
+		t.Fatalf("SetScreenStrike() error = %v", err)
+	}
+
+	pins["io3"].value = 1
+	state := svc.ScreenStrikeState()
+	if !reflect.DeepEqual(state.ChannelIDs, []string{"io1"}) {
+		t.Fatalf("channel IDs = %+v, want selected io1 only", state.ChannelIDs)
+	}
+	if !state.Active || state.RemainingSeconds <= 0 {
+		t.Fatalf("state = %+v, want active countdown", state)
+	}
+	var io3 model.GpioChannel
+	for _, channel := range state.Channels {
+		if channel.ID == "io3" {
+			io3 = channel
+			break
+		}
+	}
+	if !io3.Enabled || io3.ActualLevel != "high" {
+		t.Fatalf("io3 channel = %+v, want actual high still visible", io3)
 	}
 }
 
@@ -252,6 +317,35 @@ func TestSetScreenStrikeStopTurnsOffAllStrikeChannels(t *testing.T) {
 		if pin.value != 0 {
 			t.Fatalf("%s value = %d, want low", id, pin.value)
 		}
+	}
+}
+
+func TestSetScreenStrikeStopDoesNotTouchUnselectedChannel(t *testing.T) {
+	svc, pins := newStrikeTestService(t)
+	defer svc.Shutdown()
+
+	pins["io3"].lowErr = errors.New("operation not permitted")
+
+	if _, err := svc.SetScreenStrike(model.ScreenStrikeRequest{
+		Enabled:         true,
+		ChannelIDs:      []string{"io1"},
+		DurationSeconds: 60,
+	}, "zh-CN"); err != nil {
+		t.Fatalf("SetScreenStrike(start) error = %v", err)
+	}
+
+	state, err := svc.SetScreenStrike(model.ScreenStrikeRequest{Enabled: false}, "zh-CN")
+	if err != nil {
+		t.Fatalf("SetScreenStrike(stop) error = %v", err)
+	}
+	if state.Active || state.RemainingSeconds != 0 || len(state.ChannelIDs) != 0 {
+		t.Fatalf("state after stop = %+v, want inactive", state)
+	}
+	if pins["io1"].value != 0 || pins["io1"].low != 1 {
+		t.Fatalf("io1 value/low = %d/%d, want stopped", pins["io1"].value, pins["io1"].low)
+	}
+	if pins["io3"].low != 0 || pins["io3"].cleanup != 0 {
+		t.Fatalf("unselected io3 low/cleanup = %d/%d, want untouched", pins["io3"].low, pins["io3"].cleanup)
 	}
 }
 
@@ -341,6 +435,32 @@ func TestScreenStrikeTimeoutStopsChannels(t *testing.T) {
 	}
 }
 
+func TestScreenStrikeTimeoutDoesNotTouchUnselectedChannel(t *testing.T) {
+	svc, pins := newStrikeTestService(t)
+	defer svc.Shutdown()
+
+	pins["io3"].lowErr = errors.New("operation not permitted")
+
+	if _, err := svc.applyScreenStrike(true, []string{"io1"}, 20*time.Millisecond, 10, "zh-CN"); err != nil {
+		t.Fatalf("applyScreenStrike() error = %v", err)
+	}
+
+	deadline := time.Now().Add(500 * time.Millisecond)
+	for {
+		state := svc.ScreenStrikeState()
+		if !state.Active && pins["io1"].value == 0 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("strike did not time out, state=%+v io1=%d", state, pins["io1"].value)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if pins["io3"].low != 0 || pins["io3"].cleanup != 0 {
+		t.Fatalf("unselected io3 low/cleanup = %d/%d, want untouched", pins["io3"].low, pins["io3"].cleanup)
+	}
+}
+
 func TestSetScreenStrikeCreatesAndCompletesReport(t *testing.T) {
 	svc, _ := newStrikeTestService(t)
 	defer svc.Shutdown()
@@ -419,6 +539,7 @@ func TestSetScreenStrikeCreatesFailedReportOnPinError(t *testing.T) {
 	reports := &fakeInterferenceReportStore{}
 	svc.SetReportStore(reports)
 	pins["io2"].highErr = errors.New("gpio high failed")
+	pins["io3"].lowErr = errors.New("operation not permitted")
 
 	state, err := svc.SetScreenStrike(model.ScreenStrikeRequest{
 		Enabled:         true,
@@ -440,6 +561,9 @@ func TestSetScreenStrikeCreatesFailedReportOnPinError(t *testing.T) {
 	}
 	if failed.LastError == "" || failed.EndedAt == nil {
 		t.Fatalf("failed report = %+v, want error and end time", failed)
+	}
+	if pins["io3"].low != 0 || pins["io3"].cleanup != 0 {
+		t.Fatalf("unselected io3 low/cleanup = %d/%d, want untouched", pins["io3"].low, pins["io3"].cleanup)
 	}
 }
 

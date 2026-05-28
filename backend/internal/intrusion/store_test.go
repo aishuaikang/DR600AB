@@ -265,6 +265,35 @@ func TestStoreIgnoresDuplicateArchive(t *testing.T) {
 	}
 }
 
+func TestStoreArchivesZeroHomePointForDisplay(t *testing.T) {
+	store := newTestStore(t)
+	base := time.Now().UTC()
+
+	if err := store.ArchivePosition(model.ScreenPositionTarget{
+		ID:        "position-zero-home",
+		Serial:    "sn-zero-home",
+		Model:     "DJI Mini",
+		Source:    "did_plain",
+		Home:      &model.ScreenPositionPoint{Latitude: 0, Longitude: 0},
+		FirstSeen: base,
+		LastSeen:  base.Add(time.Second),
+		HitCount:  1,
+	}); err != nil {
+		t.Fatalf("ArchivePosition() error = %v", err)
+	}
+
+	items, err := store.List(QueryOptions{Limit: 10, TargetType: model.IntrusionTargetTypePosition})
+	if err != nil {
+		t.Fatalf("List() error = %v", err)
+	}
+	if len(items) != 1 {
+		t.Fatalf("items count = %d, want 1", len(items))
+	}
+	if items[0].Home == nil || items[0].Home.Latitude != 0 || items[0].Home.Longitude != 0 {
+		t.Fatalf("home point = %#v, want retained 0,0 point", items[0].Home)
+	}
+}
+
 func TestStoreDeletesRecordsByID(t *testing.T) {
 	store := newTestStore(t)
 	base := time.Now().UTC()
