@@ -281,10 +281,33 @@ install_user_autostart() {
   "${SUDO[@]}" chown "$target_user:" "$target_file" || true
 }
 
+migrate_legacy_database() {
+  local name="$1"
+  local legacy="$INSTALL_DIR/backend/data/$name"
+  local target="$INSTALL_DIR/data/$name"
+  local suffix
+
+  if [[ ! -f "$legacy" || -f "$target" ]]; then
+    return 0
+  fi
+
+  echo "Migrating legacy database: $legacy -> $target"
+  "${SUDO[@]}" mv "$legacy" "$target"
+  for suffix in -wal -shm; do
+    if [[ -f "$legacy$suffix" && ! -f "$target$suffix" ]]; then
+      "${SUDO[@]}" mv "$legacy$suffix" "$target$suffix"
+    fi
+  done
+}
+
 "${SUDO[@]}" install -d -m 0755 "$INSTALL_DIR"
+"${SUDO[@]}" systemctl stop dr600ab.service >/dev/null 2>&1 || true
 "${SUDO[@]}" install -m 0755 "$REMOTE_TMP/dr600ab" "$INSTALL_DIR/dr600ab"
 "${SUDO[@]}" install -d -m 0755 "$INSTALL_DIR/data"
 "${SUDO[@]}" install -d -m 0755 "$INSTALL_DIR/static/map"
+migrate_legacy_database intrusions.db
+migrate_legacy_database deception-reports.db
+migrate_legacy_database interference-reports.db
 "${SUDO[@]}" chown -R "$SERVICE_USER:" "$INSTALL_DIR"
 prepare_kiosk_xauthority
 
@@ -401,7 +424,6 @@ install_user_autostart "$KIOSK_USER"
 getent passwd | awk -F: '($3 >= 1000 && $3 < 60000 && $7 !~ /(nologin|false)$/) { print $1 }' | while IFS= read -r desktop_user; do
   install_user_autostart "$desktop_user"
 done
-
 "${SUDO[@]}" tee /etc/systemd/system/dr600ab.service >/dev/null <<EOF
 [Unit]
 Description=DR600AB Backend
@@ -414,6 +436,9 @@ User=$SERVICE_USER
 WorkingDirectory=$INSTALL_DIR
 Environment=API_ADDR=$API_HOST:$API_PORT
 Environment=API_SETTINGS_PATH=$INSTALL_DIR/data/detection-settings.json
+Environment=API_INTRUSION_DB_PATH=$INSTALL_DIR/data/intrusions.db
+Environment=API_DECEPTION_REPORT_DB_PATH=$INSTALL_DIR/data/deception-reports.db
+Environment=API_INTERFERENCE_REPORT_DB_PATH=$INSTALL_DIR/data/interference-reports.db
 Environment=API_OFFLINE_MAP_PATH=$INSTALL_DIR/static/map
 ExecStart=$INSTALL_DIR/dr600ab
 Restart=always

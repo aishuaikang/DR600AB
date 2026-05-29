@@ -38,6 +38,14 @@ func TestBuildDeployScript(t *testing.T) {
 			t.Fatalf("script missing %q\n%s", want, script)
 		}
 	}
+	for _, forbidden := range []string{
+		"API_DB_KEY_FILE",
+		"db.key",
+	} {
+		if strings.Contains(script, forbidden) {
+			t.Fatalf("script contains %q\n%s", forbidden, script)
+		}
+	}
 }
 
 func TestBuildDeployScriptIncrementalPreservesDataDirs(t *testing.T) {
@@ -49,6 +57,9 @@ func TestBuildDeployScriptIncrementalPreservesDataDirs(t *testing.T) {
 	for _, want := range []string{
 		"FULL_UPDATE='0'",
 		"$SUDO mkdir -p \"$INSTALL_DIR/data\" \"$INSTALL_DIR/backend/data\" \"$INSTALL_DIR/static/map\"",
+		"migrate_legacy_database intrusions.db",
+		"migrate_legacy_database deception-reports.db",
+		"migrate_legacy_database interference-reports.db",
 		"clear_chromium_cache \"$LEGACY_CHROMIUM_USER_DATA_DIR\"",
 		"clear_chromium_cache \"$CHROMIUM_USER_DATA_DIR\"",
 	} {

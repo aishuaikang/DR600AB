@@ -2,6 +2,7 @@
 package config
 
 import (
+	"fmt"
 	"os"
 	"strconv"
 	"strings"
@@ -16,6 +17,7 @@ type Config struct {
 	IntrusionDBPath          string
 	DeceptionReportDBPath    string
 	InterferenceReportDBPath string
+	DBKey                    string
 	OfflineMapPath           string
 	DetectionDefaultBaud     int
 	DefaultBaudRate          int
@@ -46,7 +48,12 @@ type O3DecryptConfig struct {
 }
 
 // Load 读取环境变量，并返回带默认值的配置。
-func Load() Config {
+func Load() (Config, error) {
+	dbKey, err := envSecret("API_DB_KEY", "API_DB_KEY_FILE")
+	if err != nil {
+		return Config{}, err
+	}
+
 	return Config{
 		Addr:                     envString("API_ADDR", ":18080"),
 		DefaultLocale:            envString("API_DEFAULT_LOCALE", "zh-CN"),
@@ -54,6 +61,7 @@ func Load() Config {
 		IntrusionDBPath:          envString("API_INTRUSION_DB_PATH", "./backend/data/intrusions.db"),
 		DeceptionReportDBPath:    envString("API_DECEPTION_REPORT_DB_PATH", "./backend/data/deception-reports.db"),
 		InterferenceReportDBPath: envString("API_INTERFERENCE_REPORT_DB_PATH", "./backend/data/interference-reports.db"),
+		DBKey:                    dbKey,
 		OfflineMapPath:           envString("API_OFFLINE_MAP_PATH", "./static/map"),
 		DetectionDefaultBaud:     envInt("API_DETECTION_DEFAULT_BAUD", 460800),
 		DefaultBaudRate:          envInt("API_DEFAULT_BAUD", 115200),
@@ -78,7 +86,7 @@ func Load() Config {
 			Timeout:        time.Duration(envInt("API_O3_DECRYPT_TIMEOUT_MS", 10000)) * time.Millisecond,
 			ConnectTimeout: time.Duration(envInt("API_O3_DECRYPT_CONNECT_TIMEOUT_MS", 10000)) * time.Millisecond,
 		},
-	}
+	}, nil
 }
 
 // envString 返回去除空白后的环境变量值，空值时返回默认值。
@@ -87,6 +95,25 @@ func envString(key, fallback string) string {
 		return v
 	}
 	return fallback
+}
+
+func envSecret(valueKey, fileKey string) (string, error) {
+	if v := strings.TrimSpace(os.Getenv(valueKey)); v != "" {
+		return v, nil
+	}
+	path := strings.TrimSpace(os.Getenv(fileKey))
+	if path == "" {
+		return "", nil
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", fmt.Errorf("读取 %s 指定的密钥文件失败: %w", fileKey, err)
+	}
+	secret := strings.TrimSpace(string(data))
+	if secret == "" {
+		return "", fmt.Errorf("%s 指定的密钥文件为空: %s", fileKey, path)
+	}
+	return secret, nil
 }
 
 // envInt 解析整数环境变量，失败时返回默认值。

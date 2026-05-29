@@ -10,5 +10,6 @@ require (
 require (
 	github.com/chzyer/readline v1.5.1 // indirect
 	github.com/creack/goselect v0.1.2 // indirect
-	golang.org/x/sys v0.28.0 // indirect
+	github.com/stretchr/testify v1.11.1 // indirect
+	golang.org/x/sys v0.45.0 // indirect
 )

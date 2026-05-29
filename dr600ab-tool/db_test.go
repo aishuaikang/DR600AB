@@ -1,17 +1,18 @@
 package main
 
 import (
-	"database/sql"
+	"bytes"
+	"encoding/csv"
 	"os"
 	"path/filepath"
 	"testing"
 
-	_ "modernc.org/sqlite"
+	"sqlitecrypto"
 )
 
 func TestQueryIntrusionsAndCSV(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "intrusions.db")
-	db, err := sql.Open("sqlite", dbPath)
+	db, err := sqlitecrypto.Open(dbPath, sqlitecrypto.Config{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -64,11 +65,77 @@ func TestQueryIntrusionsAndCSV(t *testing.T) {
 	if len(data) < 3 || data[0] != 0xEF || data[1] != 0xBB || data[2] != 0xBF {
 		t.Fatalf("csv missing utf-8 bom")
 	}
+	rows := readCSVRows(t, data)
+	wantHeader := []string{"类型", "型号", "序列号", "频点", "信号", "首次发现", "最后发现", "持续时间", "坐标", "飞手距离", "无人机距离", "速度", "高度"}
+	assertCSVRow(t, rows[0], wantHeader)
+	wantRecord := []string{
+		"定位",
+		"Mavic",
+		"SN1",
+		"5745 MHz",
+		"-61 dBm",
+		"2026-05-24T01:00:00Z",
+		"2026-05-24T01:03:00Z",
+		"3 分 0 秒",
+		"设备: 39.000000, 116.000000 / 无人机: 39.100000, 116.100000 / 返航点: 39.200000, 116.200000",
+		"1.2 km",
+		"800 m",
+		"15.2 m/s",
+		"120 m",
+	}
+	assertCSVRow(t, rows[1], wantRecord)
+}
+
+func TestQueryIntrusionsReadsEncryptedDatabase(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "intrusions.db")
+	key := "test-db-key"
+	db, err := sqlitecrypto.Open(dbPath, sqlitecrypto.Config{Key: key})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = db.Exec(`CREATE TABLE intrusion_records (
+		id TEXT, target_id TEXT, target_type TEXT, model TEXT, serial TEXT, device TEXT,
+		frequency REAL, rssi REAL, first_seen TEXT, last_seen TEXT, duration_seconds INTEGER,
+		hit_count INTEGER, source TEXT, sources_json TEXT, cracked INTEGER, device_location_json TEXT,
+		drone_json TEXT, pilot_json TEXT, home_json TEXT, drone_trajectory_json TEXT, pilot_trajectory_json TEXT,
+		pilot_distance_m REAL, drone_distance_m REAL, drone_direction_deg REAL, device_direction_deg REAL,
+		height REAL, altitude REAL, speed REAL, last_record_json TEXT, archived_at TEXT
+	);
+	INSERT INTO intrusion_records VALUES (
+		'id-1', 'target-1', 'position', 'Mavic', 'SN1', 'dev', 5745, -61,
+		'2026-05-24T01:00:00Z', '2026-05-24T01:03:00Z', 180, 3, 'rid', '["rid"]',
+		1, '', '{"latitude":39.1,"longitude":116.1}', '', '', '', '',
+		NULL, NULL, NULL, NULL, NULL, NULL, NULL, '', '2026-05-24T01:04:00Z'
+	);`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	encrypted, err := sqlitecrypto.IsEncrypted(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !encrypted {
+		t.Fatal("database is not encrypted")
+	}
+
+	records, err := queryIntrusions(dbPath, normalizeIntrusionQuery(IntrusionQuery{TargetType: "position"}), key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(records) != 1 || records[0].ID != "id-1" {
+		t.Fatalf("unexpected records: %+v", records)
+	}
+	if _, err := queryIntrusions(dbPath, normalizeIntrusionQuery(IntrusionQuery{}), "wrong-key"); err == nil {
+		t.Fatalf("query with wrong key error = nil, want error")
+	}
 }
 
 func TestQueryDeceptionReports(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "deception-reports.db")
-	db, err := sql.Open("sqlite", dbPath)
+	db, err := sqlitecrypto.Open(dbPath, sqlitecrypto.Config{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -121,11 +188,13 @@ func TestQueryDeceptionReports(t *testing.T) {
 	if len(data) < 3 || data[0] != 0xEF || data[1] != 0xBB || data[2] != 0xBF {
 		t.Fatalf("csv missing utf-8 bom")
 	}
+	rows := readCSVRows(t, data)
+	assertCSVRow(t, rows[1], []string{"已完成", "2026-05-24T01:00:00Z", "2026-05-24T01:05:00Z", "5 分 0 秒", "定点诱骗", ""})
 }
 
 func TestQueryInterferenceReportsAndCSV(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "interference-reports.db")
-	db, err := sql.Open("sqlite", dbPath)
+	db, err := sqlitecrypto.Open(dbPath, sqlitecrypto.Config{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -181,5 +250,82 @@ func TestQueryInterferenceReportsAndCSV(t *testing.T) {
 	}
 	if len(data) < 3 || data[0] != 0xEF || data[1] != 0xBB || data[2] != 0xBF {
 		t.Fatalf("csv missing utf-8 bom")
+	}
+	rows := readCSVRows(t, data)
+	assertCSVRow(t, rows[1], []string{
+		"已完成",
+		"2026-05-24T01:00:00Z",
+		"2026-05-24T01:02:00Z",
+		"2 分 0 秒",
+		"433M/800M/900M/1.4G，2.4G/5.2G/5.8G",
+		"3 分 0 秒",
+		"denied",
+	})
+}
+
+func TestQueryReportsUseLocalDateBoundaries(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "interference-reports.db")
+	db, err := sqlitecrypto.Open(dbPath, sqlitecrypto.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = db.Exec(`CREATE TABLE interference_reports (
+		id TEXT, status TEXT, started_at TEXT, ended_at TEXT, duration_seconds INTEGER,
+		requested_duration_seconds INTEGER, channel_ids_json TEXT, channel_labels_json TEXT,
+		channel_pins_json TEXT, summary TEXT, last_error TEXT, abnormal_reason TEXT,
+		created_at TEXT, updated_at TEXT
+	);
+	INSERT INTO interference_reports VALUES (
+		'local-day', 'completed', '2026-05-23T16:30:00Z', '2026-05-23T16:31:00Z',
+		60, 60, '[]', '[]', '[]', '', '', '',
+		'2026-05-23T16:30:00Z', '2026-05-23T16:31:00Z'
+	);
+	INSERT INTO interference_reports VALUES (
+		'previous-local-day', 'completed', '2026-05-23T15:30:00Z', '2026-05-23T15:31:00Z',
+		60, 60, '[]', '[]', '[]', '', '', '',
+		'2026-05-23T15:30:00Z', '2026-05-23T15:31:00Z'
+	);`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	reports, err := queryInterferenceReports(dbPath, normalizeInterferenceReportQuery(InterferenceReportQuery{
+		DateFrom: "2026-05-24",
+		DateTo:   "2026-05-24",
+		Locale:   "zh-CN",
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(reports) != 1 {
+		t.Fatalf("got %d reports, want 1: %+v", len(reports), reports)
+	}
+	if reports[0].ID != "local-day" {
+		t.Fatalf("got report %q, want local-day", reports[0].ID)
+	}
+}
+
+func readCSVRows(t *testing.T, data []byte) [][]string {
+	t.Helper()
+	reader := csv.NewReader(bytes.NewReader(bytes.TrimPrefix(data, []byte{0xEF, 0xBB, 0xBF})))
+	rows, err := reader.ReadAll()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return rows
+}
+
+func assertCSVRow(t *testing.T, got []string, want []string) {
+	t.Helper()
+	if len(got) != len(want) {
+		t.Fatalf("csv row length = %d, want %d\n got: %#v\nwant: %#v", len(got), len(want), got, want)
+	}
+	for index := range want {
+		if got[index] != want[index] {
+			t.Fatalf("csv row[%d] = %q, want %q\n got: %#v\nwant: %#v", index, got[index], want[index], got, want)
+		}
 	}
 }

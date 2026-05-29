@@ -273,6 +273,22 @@ install_user_autostart() {
   $SUDO chown "$target_user:" "$target_file" || true
 }
 
+migrate_legacy_database() {
+  name="$1"
+  legacy="$INSTALL_DIR/backend/data/$name"
+  target="$INSTALL_DIR/data/$name"
+  if [ ! -f "$legacy" ] || [ -f "$target" ]; then
+    return 0
+  fi
+  echo "迁移旧数据库: $legacy -> $target"
+  $SUDO mv "$legacy" "$target"
+  for suffix in -wal -shm; do
+    if [ -f "$legacy$suffix" ] && [ ! -f "$target$suffix" ]; then
+      $SUDO mv "$legacy$suffix" "$target$suffix"
+    fi
+  done
+}
+
 EXTRACT_DIR="$TASK_DIR/extract"
 rm -rf "$EXTRACT_DIR"
 mkdir -p "$EXTRACT_DIR"
@@ -297,6 +313,9 @@ else
   $SUDO mkdir -p "$INSTALL_DIR/data" "$INSTALL_DIR/backend/data" "$INSTALL_DIR/static/map"
 fi
 $SUDO mkdir -p "$INSTALL_DIR/data" "$INSTALL_DIR/backend/data" "$INSTALL_DIR/static/map"
+migrate_legacy_database intrusions.db
+migrate_legacy_database deception-reports.db
+migrate_legacy_database interference-reports.db
 $SUDO install -m 0755 "$BINARY" "$INSTALL_DIR/dr600ab"
 $SUDO chown -R "$SERVICE_USER:" "$INSTALL_DIR" || true
 prepare_kiosk_xauthority

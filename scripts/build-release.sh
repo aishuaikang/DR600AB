@@ -20,7 +20,7 @@ Options:
   -h, --help            Show this help.
 
 Environment:
-  CGO_ENABLED           Passed to go build when set.
+  CGO_ENABLED           Passed to go build when set. Default: Go toolchain default.
   CC                    Passed to go build when set.
   CXX                   Passed to go build when set.
 EOF

@@ -112,6 +112,19 @@ func (a *App) downloadIfExists(remotePath, localPath string) (bool, error) {
 	return true, nil
 }
 
+func (a *App) readRemoteTextFile(remotePath string) (string, error) {
+	remotePath = cleanRemotePath(remotePath)
+	if remotePath == "" {
+		return "", fmt.Errorf("远程文件路径不能为空")
+	}
+	quotedPath := shellQuote(remotePath)
+	output, err := a.runCommand(fmt.Sprintf(`if [ -r %[1]s ]; then cat %[1]s; elif command -v sudo >/dev/null 2>&1; then sudo -n cat %[1]s; else cat %[1]s; fi`, quotedPath))
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(output), nil
+}
+
 func remoteDir(remotePath string) string {
 	idx := strings.LastIndex(remotePath, "/")
 	if idx <= 0 {

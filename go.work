@@ -6,6 +6,7 @@ use (
 	./gnss-spoofer
 	./gpio-controller
 	./serialport
+	./sqlitecrypto
 	./tri-detector
 	./uav-protocol
 )

@@ -17,10 +17,9 @@ import (
 	"time"
 
 	"dr600ab-api/internal/model"
+	"sqlitecrypto"
 	protocolmerge "uav-protocol/merge"
 	protocolmodel "uav-protocol/model"
-
-	_ "modernc.org/sqlite"
 )
 
 const defaultQueryLimit = 200
@@ -30,6 +29,11 @@ type Store struct {
 	db                     *sql.DB
 	mu                     sync.RWMutex
 	deviceLocationProvider DeviceLocationProvider
+}
+
+// Options configures Store database access.
+type Options struct {
+	DBKey string
 }
 
 // DeviceLocationProvider returns the current device location for newly archived records.
@@ -43,7 +47,7 @@ type QueryOptions struct {
 }
 
 // NewStore opens and initializes an intrusion SQLite database.
-func NewStore(path string) (*Store, error) {
+func NewStore(path string, options ...Options) (*Store, error) {
 	path = strings.TrimSpace(path)
 	if path == "" {
 		return &Store{}, nil
@@ -52,11 +56,10 @@ func NewStore(path string) (*Store, error) {
 		return nil, fmt.Errorf("创建入侵记录目录失败: %w", err)
 	}
 
-	db, err := sql.Open("sqlite", path)
+	db, err := sqlitecrypto.Open(path, sqlitecrypto.Config{Key: storeOptions(options).DBKey})
 	if err != nil {
 		return nil, fmt.Errorf("打开入侵记录库失败: %w", err)
 	}
-	db.SetMaxOpenConns(1)
 
 	store := &Store{db: db}
 	if err := store.init(); err != nil {
@@ -64,6 +67,13 @@ func NewStore(path string) (*Store, error) {
 		return nil, err
 	}
 	return store, nil
+}
+
+func storeOptions(options []Options) Options {
+	if len(options) == 0 {
+		return Options{}
+	}
+	return options[0]
 }
 
 // SetDeviceLocationProvider sets the source used to stamp new intrusion records with device location.

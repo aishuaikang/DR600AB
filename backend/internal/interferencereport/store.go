@@ -18,8 +18,7 @@ import (
 
 	"dr600ab-api/internal/model"
 	"gpio-controller/board"
-
-	_ "modernc.org/sqlite"
+	"sqlitecrypto"
 )
 
 const defaultQueryLimit = 200
@@ -43,8 +42,13 @@ type Store struct {
 	mu sync.Mutex
 }
 
+// Options configures Store database access.
+type Options struct {
+	DBKey string
+}
+
 // NewStore opens and initializes an interference report SQLite database.
-func NewStore(path string) (*Store, error) {
+func NewStore(path string, options ...Options) (*Store, error) {
 	path = strings.TrimSpace(path)
 	if path == "" {
 		return &Store{}, nil
@@ -53,11 +57,10 @@ func NewStore(path string) (*Store, error) {
 		return nil, fmt.Errorf("创建干扰报告目录失败: %w", err)
 	}
 
-	db, err := sql.Open("sqlite", path)
+	db, err := sqlitecrypto.Open(path, sqlitecrypto.Config{Key: storeOptions(options).DBKey})
 	if err != nil {
 		return nil, fmt.Errorf("打开干扰报告库失败: %w", err)
 	}
-	db.SetMaxOpenConns(1)
 
 	store := &Store{db: db}
 	if err := store.init(); err != nil {
@@ -65,6 +68,13 @@ func NewStore(path string) (*Store, error) {
 		return nil, err
 	}
 	return store, nil
+}
+
+func storeOptions(options []Options) Options {
+	if len(options) == 0 {
+		return Options{}
+	}
+	return options[0]
 }
 
 // Close closes the underlying database.

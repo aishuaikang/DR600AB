@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	_ "modernc.org/sqlite"
+	"sqlitecrypto"
 )
 
 var gpioErrorPrefixPattern = regexp.MustCompile(`^(?:导出 GPIO\d+\s*(?:后等待就绪)?失败|取消导出 GPIO\d+ 失败|设置 GPIO\d+ 为输出模式失败|(?:读取|写入|检查|解析) GPIO\d+/\S+ 失败):\s*`)
@@ -33,11 +33,11 @@ var (
 var (
 	intrusionCSVHeaderZh = []string{
 		"类型", "型号", "序列号", "频点", "信号", "首次发现", "最后发现", "持续时间",
-		"飞手距离", "无人机距离", "速度", "高度", "坐标",
+		"坐标", "飞手距离", "无人机距离", "速度", "高度",
 	}
 	intrusionCSVHeaderEn = []string{
 		"Type", "Model", "Serial", "Frequency", "Signal", "First seen", "Last seen", "Duration",
-		"Pilot Distance", "Drone Distance", "Speed", "Height", "Coordinates",
+		"Coordinates", "Pilot Distance", "Drone Distance", "Speed", "Height",
 	}
 	interferenceReportCSVHeaderZh = []string{"状态", "开始时间", "结束时间", "持续时间", "干扰频段", "设置时长", "错误"}
 	interferenceReportCSVHeaderEn = []string{"Status", "Started", "Ended", "Duration", "Interference Bands", "Set Duration", "Error"}
@@ -191,7 +191,11 @@ func (a *App) ListIntrusions(query IntrusionQuery) ([]IntrusionRecord, error) {
 		return nil, err
 	}
 	defer cleanup()
-	return queryIntrusions(localPath, normalizeIntrusionQuery(query))
+	key, err := a.remoteDBKey(query.InstallDir)
+	if err != nil {
+		return nil, err
+	}
+	return queryIntrusions(localPath, normalizeIntrusionQuery(query), key)
 }
 
 func (a *App) ExportIntrusionsCSV(query IntrusionQuery) (ExportResult, error) {
@@ -218,7 +222,11 @@ func (a *App) ListDeceptionReports(query DeceptionReportQuery) ([]DeceptionRepor
 		return nil, err
 	}
 	defer cleanup()
-	return queryDeceptionReports(localPath, normalizeDeceptionReportQuery(query))
+	key, err := a.remoteDBKey(query.InstallDir)
+	if err != nil {
+		return nil, err
+	}
+	return queryDeceptionReports(localPath, normalizeDeceptionReportQuery(query), key)
 }
 
 func (a *App) GetDeceptionReport(id string, installDir string) (DeceptionReportDetail, error) {
@@ -231,7 +239,11 @@ func (a *App) GetDeceptionReport(id string, installDir string) (DeceptionReportD
 		return DeceptionReportDetail{}, err
 	}
 	defer cleanup()
-	return getDeceptionReport(localPath, id)
+	key, err := a.remoteDBKey(installDir)
+	if err != nil {
+		return DeceptionReportDetail{}, err
+	}
+	return getDeceptionReport(localPath, id, key)
 }
 
 func (a *App) ExportDeceptionReportsCSV(query DeceptionReportQuery) (ExportResult, error) {
@@ -258,7 +270,11 @@ func (a *App) ListInterferenceReports(query InterferenceReportQuery) ([]Interfer
 		return nil, err
 	}
 	defer cleanup()
-	return queryInterferenceReports(localPath, normalizeInterferenceReportQuery(query))
+	key, err := a.remoteDBKey(query.InstallDir)
+	if err != nil {
+		return nil, err
+	}
+	return queryInterferenceReports(localPath, normalizeInterferenceReportQuery(query), key)
 }
 
 func (a *App) ExportInterferenceReportsCSV(query InterferenceReportQuery) (ExportResult, error) {
@@ -313,6 +329,22 @@ func (a *App) snapshotDB(installDir, fileName string) (string, func(), error) {
 	return localPath, cleanup, nil
 }
 
+func (a *App) remoteDBKey(installDir string) (string, error) {
+	installDir = a.getInstallDir(installDir)
+	remotePath := a.firstExistingRemotePath([]string{
+		remoteJoin(installDir, "data", "db.key"),
+		remoteJoin(installDir, "backend", "data", "db.key"),
+	})
+	if remotePath == "" {
+		return "", nil
+	}
+	key, err := a.readRemoteTextFile(remotePath)
+	if err != nil {
+		return "", fmt.Errorf("读取数据库密钥失败: %w", err)
+	}
+	return strings.TrimSpace(key), nil
+}
+
 func normalizeIntrusionQuery(query IntrusionQuery) IntrusionQuery {
 	query.TargetType = strings.TrimSpace(query.TargetType)
 	if query.TargetType == "all" {
@@ -351,23 +383,24 @@ func normalizeInterferenceReportQuery(query InterferenceReportQuery) Interferenc
 	return query
 }
 
-func queryIntrusions(path string, query IntrusionQuery) ([]IntrusionRecord, error) {
-	db, err := sql.Open("sqlite", path)
+func queryIntrusions(path string, query IntrusionQuery, dbKey ...string) ([]IntrusionRecord, error) {
+	db, err := openReportDB(path, dbKey...)
 	if err != nil {
 		return nil, err
 	}
 	defer db.Close()
 	clauses := []string{"1=1"}
 	args := []any{}
+	location := reportQueryLocation(query.Locale)
 	if query.TargetType != "" {
 		clauses = append(clauses, "target_type = ?")
 		args = append(args, query.TargetType)
 	}
-	if from := dateStart(query.DateFrom); from != "" {
+	if from := dateStart(query.DateFrom, location); from != "" {
 		clauses = append(clauses, "last_seen >= ?")
 		args = append(args, from)
 	}
-	if to := dateEnd(query.DateTo); to != "" {
+	if to := dateEnd(query.DateTo, location); to != "" {
 		clauses = append(clauses, "first_seen <= ?")
 		args = append(args, to)
 	}
@@ -429,14 +462,15 @@ func queryIntrusions(path string, query IntrusionQuery) ([]IntrusionRecord, erro
 	return records, rows.Err()
 }
 
-func queryDeceptionReports(path string, query DeceptionReportQuery) ([]DeceptionReportSummary, error) {
-	db, err := sql.Open("sqlite", path)
+func queryDeceptionReports(path string, query DeceptionReportQuery, dbKey ...string) ([]DeceptionReportSummary, error) {
+	db, err := openReportDB(path, dbKey...)
 	if err != nil {
 		return nil, err
 	}
 	defer db.Close()
 	clauses := []string{"1=1"}
 	args := []any{}
+	location := reportQueryLocation(query.Locale)
 	if query.Status != "" {
 		clauses = append(clauses, "status = ?")
 		args = append(args, query.Status)
@@ -445,11 +479,11 @@ func queryDeceptionReports(path string, query DeceptionReportQuery) ([]Deception
 		clauses = append(clauses, "mode = ?")
 		args = append(args, query.Mode)
 	}
-	if from := dateStart(query.DateFrom); from != "" {
+	if from := dateStart(query.DateFrom, location); from != "" {
 		clauses = append(clauses, "started_at >= ?")
 		args = append(args, from)
 	}
-	if to := dateEnd(query.DateTo); to != "" {
+	if to := dateEnd(query.DateTo, location); to != "" {
 		clauses = append(clauses, "started_at <= ?")
 		args = append(args, to)
 	}
@@ -475,8 +509,8 @@ func queryDeceptionReports(path string, query DeceptionReportQuery) ([]Deception
 	return reports, rows.Err()
 }
 
-func getDeceptionReport(path, id string) (DeceptionReportDetail, error) {
-	db, err := sql.Open("sqlite", path)
+func getDeceptionReport(path, id string, dbKey ...string) (DeceptionReportDetail, error) {
+	db, err := openReportDB(path, dbKey...)
 	if err != nil {
 		return DeceptionReportDetail{}, err
 	}
@@ -525,23 +559,24 @@ func scanDeceptionReportSummary(scan scanner, extra ...*sql.NullString) (Decepti
 	return report, nil
 }
 
-func queryInterferenceReports(path string, query InterferenceReportQuery) ([]InterferenceReportSummary, error) {
-	db, err := sql.Open("sqlite", path)
+func queryInterferenceReports(path string, query InterferenceReportQuery, dbKey ...string) ([]InterferenceReportSummary, error) {
+	db, err := openReportDB(path, dbKey...)
 	if err != nil {
 		return nil, err
 	}
 	defer db.Close()
 	clauses := []string{"1=1"}
 	args := []any{}
+	location := reportQueryLocation(query.Locale)
 	if query.Status != "" {
 		clauses = append(clauses, "status = ?")
 		args = append(args, query.Status)
 	}
-	if from := dateStart(query.DateFrom); from != "" {
+	if from := dateStart(query.DateFrom, location); from != "" {
 		clauses = append(clauses, "started_at >= ?")
 		args = append(args, from)
 	}
-	if to := dateEnd(query.DateTo); to != "" {
+	if to := dateEnd(query.DateTo, location); to != "" {
 		clauses = append(clauses, "started_at <= ?")
 		args = append(args, to)
 	}
@@ -564,6 +599,14 @@ func queryInterferenceReports(path string, query InterferenceReportQuery) ([]Int
 		reports = append(reports, report)
 	}
 	return reports, rows.Err()
+}
+
+func openReportDB(path string, dbKey ...string) (*sql.DB, error) {
+	key := ""
+	if len(dbKey) > 0 {
+		key = dbKey[0]
+	}
+	return sqlitecrypto.Open(path, sqlitecrypto.Config{Key: key})
 }
 
 func scanInterferenceReportSummary(scan scanner) (InterferenceReportSummary, error) {
@@ -615,16 +658,16 @@ func writeIntrusionsCSV(path string, records []IntrusionRecord, locale string) e
 			intrusionTargetTypeLabel(record.TargetType, locale),
 			record.DisplayModel,
 			record.Serial,
-			formatFloat(record.Frequency),
-			formatFloat(record.RSSI),
+			formatFrequency(record.Frequency),
+			formatRSSI(record.RSSI),
 			record.FirstSeen,
 			record.LastSeen,
-			fmt.Sprintf("%d", record.DurationSeconds),
-			formatFloatPtr(record.PilotDistanceM),
-			formatFloatPtr(record.DroneDistanceM),
-			formatFloatPtr(record.Speed),
-			formatFloatPtr(record.Height),
+			formatDuration(record.DurationSeconds, locale),
 			formatCoordinateSummary(record, locale),
+			formatDistancePtr(record.PilotDistanceM),
+			formatDistancePtr(record.DroneDistanceM),
+			formatMetricPtr(record.Speed, "m/s", 1),
+			formatMetricPtr(record.Height, "m", 0),
 		}); err != nil {
 			return err
 		}
@@ -655,7 +698,7 @@ func writeDeceptionReportsCSV(path string, reports []DeceptionReportSummary, loc
 			reportStatusLabel(report.Status, locale),
 			report.StartedAt,
 			report.EndedAt,
-			fmt.Sprintf("%d", report.DurationSeconds),
+			formatDuration(report.DurationSeconds, locale),
 			deceptionModeLabel(report.Mode, locale),
 			errText,
 		}); err != nil {
@@ -688,9 +731,9 @@ func writeInterferenceReportsCSV(path string, reports []InterferenceReportSummar
 			reportStatusLabel(report.Status, locale),
 			report.StartedAt,
 			report.EndedAt,
-			fmt.Sprintf("%d", report.DurationSeconds),
-			strings.Join(report.ChannelLabels, "/"),
-			fmt.Sprintf("%d", report.RequestedDurationSeconds),
+			formatDuration(report.DurationSeconds, locale),
+			formatInterferenceChannelLabels(report.ChannelLabels, locale),
+			formatDuration(int64(report.RequestedDurationSeconds), locale),
 			errText,
 		}); err != nil {
 			return err
@@ -699,24 +742,24 @@ func writeInterferenceReportsCSV(path string, reports []InterferenceReportSummar
 	return writer.Error()
 }
 
-func dateStart(value string) string {
+func dateStart(value string, location *time.Location) string {
 	value = strings.TrimSpace(value)
 	if value == "" {
 		return ""
 	}
-	t, err := time.Parse("2006-01-02", value)
+	t, err := time.ParseInLocation("2006-01-02", value, location)
 	if err != nil {
 		return ""
 	}
 	return t.UTC().Format(time.RFC3339Nano)
 }
 
-func dateEnd(value string) string {
+func dateEnd(value string, location *time.Location) string {
 	value = strings.TrimSpace(value)
 	if value == "" {
 		return ""
 	}
-	t, err := time.Parse("2006-01-02", value)
+	t, err := time.ParseInLocation("2006-01-02", value, location)
 	if err != nil {
 		return ""
 	}
@@ -770,11 +813,78 @@ func formatFloat(value float64) string {
 	return strings.TrimRight(strings.TrimRight(fmt.Sprintf("%.3f", value), "0"), ".")
 }
 
-func formatFloatPtr(value *float64) string {
+func formatFrequency(value float64) string {
+	if value == 0 {
+		return ""
+	}
+	return formatFloatWithDigits(value, 1) + " MHz"
+}
+
+func formatRSSI(value float64) string {
+	if value == 0 {
+		return ""
+	}
+	return formatFloatWithDigits(value, 0) + " dBm"
+}
+
+func formatMetricPtr(value *float64, unit string, digits int) string {
 	if value == nil {
 		return ""
 	}
-	return formatFloat(*value)
+	return formatFloatWithDigits(*value, digits) + " " + unit
+}
+
+func formatDistancePtr(value *float64) string {
+	if value == nil {
+		return ""
+	}
+	distance := *value
+	if distance >= 1000 || distance <= -1000 {
+		digits := 1
+		if distance >= 100000 || distance <= -100000 {
+			digits = 0
+		}
+		return formatFloatWithDigits(distance/1000, digits) + " km"
+	}
+	return formatFloatWithDigits(distance, 0) + " m"
+}
+
+func formatDuration(seconds int64, locale string) string {
+	if seconds <= 0 {
+		return ""
+	}
+	minutes := seconds / 60
+	rest := seconds % 60
+	if minutes <= 0 {
+		if isEnglishLocale(locale) {
+			return fmt.Sprintf("%ds", rest)
+		}
+		return fmt.Sprintf("%d 秒", rest)
+	}
+	if isEnglishLocale(locale) {
+		return fmt.Sprintf("%dm %ds", minutes, rest)
+	}
+	return fmt.Sprintf("%d 分 %d 秒", minutes, rest)
+}
+
+func formatFloatWithDigits(value float64, digits int) string {
+	format := fmt.Sprintf("%%.%df", digits)
+	formatted := fmt.Sprintf(format, value)
+	if digits <= 0 {
+		return formatted
+	}
+	return strings.TrimRight(strings.TrimRight(formatted, "0"), ".")
+}
+
+func formatInterferenceChannelLabels(labels []string, locale string) string {
+	if len(labels) == 0 {
+		return ""
+	}
+	separator := ", "
+	if !isEnglishLocale(locale) {
+		separator = "，"
+	}
+	return strings.Join(labels, separator)
 }
 
 func formatCoordinateSummary(record IntrusionRecord, locale string) string {
@@ -829,6 +939,17 @@ func csvHeaders(locale string, zh []string, en []string) []string {
 func isEnglishLocale(locale string) bool {
 	locale = strings.ToLower(strings.TrimSpace(locale))
 	return strings.HasPrefix(locale, "en")
+}
+
+func reportQueryLocation(locale string) *time.Location {
+	if isEnglishLocale(locale) {
+		return time.Local
+	}
+	location, err := time.LoadLocation("Asia/Shanghai")
+	if err != nil {
+		return time.Local
+	}
+	return location
 }
 
 func intrusionTargetTypeLabel(value, locale string) string {

@@ -36,16 +36,16 @@ func New(cfg config.Config) (*App, error) {
 
 	state := store.NewMemoryStore(cfg.MaxDetectionRecords, cfg.MaxParsedMessages)
 	settingsStore := settings.NewStore(cfg.SettingsPath)
-	intrusionStore, err := intrusion.NewStore(cfg.IntrusionDBPath)
+	intrusionStore, err := intrusion.NewStore(cfg.IntrusionDBPath, intrusion.Options{DBKey: cfg.DBKey})
 	if err != nil {
 		return nil, err
 	}
-	reportStore, err := deceptionreport.NewStore(cfg.DeceptionReportDBPath)
+	reportStore, err := deceptionreport.NewStore(cfg.DeceptionReportDBPath, deceptionreport.Options{DBKey: cfg.DBKey})
 	if err != nil {
 		_ = intrusionStore.Close()
 		return nil, err
 	}
-	interferenceReportStore, err := interferencereport.NewStore(cfg.InterferenceReportDBPath)
+	interferenceReportStore, err := interferencereport.NewStore(cfg.InterferenceReportDBPath, interferencereport.Options{DBKey: cfg.DBKey})
 	if err != nil {
 		_ = intrusionStore.Close()
 		_ = reportStore.Close()

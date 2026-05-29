@@ -1,0 +1,19 @@
+module sqlitecrypto
+
+go 1.25.0
+
+require (
+	github.com/ncruces/go-sqlite3 v0.34.3
+	gorm.io/gorm v1.30.1
+)
+
+require (
+	github.com/jinzhu/inflection v1.0.0 // indirect
+	github.com/jinzhu/now v1.1.5 // indirect
+	github.com/ncruces/go-sqlite3-wasm/v2 v2.5.35301 // indirect
+	github.com/ncruces/julianday v1.0.0 // indirect
+	golang.org/x/crypto v0.52.0 // indirect
+	golang.org/x/sys v0.45.0 // indirect
+	golang.org/x/text v0.37.0 // indirect
+	lukechampine.com/adiantum v1.1.1 // indirect
+)

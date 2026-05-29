@@ -59,7 +59,7 @@ function formatDuration(seconds: number) {
   if (!Number.isFinite(seconds) || seconds <= 0) return "-";
   const minutes = Math.floor(seconds / 60);
   const rest = Math.round(seconds % 60);
-  return minutes > 0 ? `${minutes}分${String(rest).padStart(2, "0")}秒` : `${rest}秒`;
+  return minutes > 0 ? `${minutes} 分 ${rest} 秒` : `${rest} 秒`;
 }
 
 function formatNumber(value?: number, digits = 1) {
@@ -94,9 +94,9 @@ function formatDistance(value?: number) {
 }
 
 function formatChannelLabels(report: InterferenceReportSummary) {
-  if (report.channelLabels?.length) return report.channelLabels.join(" / ");
-  if (report.channelIds?.length) return report.channelIds.join(" / ");
-  if (report.channelPins?.length) return report.channelPins.map((pin) => `GPIO${pin}`).join(" / ");
+  if (report.channelLabels?.length) return report.channelLabels.join("，");
+  if (report.channelIds?.length) return report.channelIds.join("，");
+  if (report.channelPins?.length) return report.channelPins.map((pin) => `GPIO${pin}`).join("，");
   return "-";
 }
 
@@ -144,9 +144,9 @@ function statusLabel(status: string) {
     case "completed":
       return "已完成";
     case "failed":
-      return "失败";
+      return "启动失败";
     case "abnormal":
-      return "异常";
+      return "异常闭合";
     default:
       return status || "-";
   }
@@ -569,7 +569,7 @@ export function App() {
     setBusy("intrusions");
     setDBProgress([]);
     try {
-      const items = await api.listIntrusions({ installDir, ...intrusionQuery, limit: 1000 });
+      const items = await api.listIntrusions({ installDir, ...intrusionQuery, limit: 1000, locale: uiLocale });
       const safeItems = Array.isArray(items) ? items : [];
       setIntrusions(safeItems);
       setNotice({ tone: "success", message: `已加载 ${safeItems.length} 条目标入侵记录` });
@@ -596,7 +596,7 @@ export function App() {
     setBusy("interference-reports");
     setDBProgress([]);
     try {
-      const items = await api.listInterferenceReports({ installDir, ...interferenceQuery, limit: 1000 });
+      const items = await api.listInterferenceReports({ installDir, ...interferenceQuery, limit: 1000, locale: uiLocale });
       const safeItems = Array.isArray(items) ? items : [];
       setInterferenceReports(safeItems);
       setNotice({ tone: "success", message: `已加载 ${safeItems.length} 条干扰报告` });
@@ -623,7 +623,7 @@ export function App() {
     setBusy("deception-reports");
     setDBProgress([]);
     try {
-      const items = await api.listDeceptionReports({ installDir, ...reportQuery, limit: 1000 });
+      const items = await api.listDeceptionReports({ installDir, ...reportQuery, limit: 1000, locale: uiLocale });
       const safeItems = Array.isArray(items) ? items : [];
       setReports(safeItems);
       setNotice({ tone: "success", message: `已加载 ${safeItems.length} 条诱骗报告` });

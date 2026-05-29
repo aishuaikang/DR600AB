@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"dr600ab-api/internal/model"
+	"sqlitecrypto"
 )
 
 func TestStoreArchivesAndListsRecords(t *testing.T) {
@@ -226,6 +227,28 @@ func TestStoreMigratesDeviceLocationColumn(t *testing.T) {
 		if !found {
 			t.Fatalf("%s column not migrated", column)
 		}
+	}
+}
+
+func TestStoreCreatesEncryptedDatabase(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "intrusions.db")
+	store, err := NewStore(path, Options{DBKey: "test-db-key"})
+	if err != nil {
+		t.Fatalf("NewStore(encrypted) error = %v", err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	encrypted, err := sqlitecrypto.IsEncrypted(path)
+	if err != nil {
+		t.Fatalf("IsEncrypted() error = %v", err)
+	}
+	if !encrypted {
+		t.Fatalf("database is not encrypted")
+	}
+	if _, err := NewStore(path, Options{DBKey: "wrong-key"}); err == nil {
+		t.Fatalf("NewStore() with wrong key error = nil, want error")
 	}
 }
 
