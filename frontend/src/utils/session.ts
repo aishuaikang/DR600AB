@@ -11,9 +11,10 @@ import type {
   PortInfo,
 } from "../types";
 
-export function serialKey(receivePort: string, sendPort: string, baudRate?: number) {
-  const baudRatePart = typeof baudRate === "number" ? `|${baudRate}` : "";
-  return `${receivePort.trim()}|${sendPort.trim()}${baudRatePart}`;
+export function serialKey(receivePort: string, sendPort: string, rxBaudRate?: number, txBaudRate?: number) {
+  const rxBaudRatePart = typeof rxBaudRate === "number" ? `|${rxBaudRate}` : "";
+  const txBaudRatePart = typeof txBaudRate === "number" ? `|${txBaudRate}` : "";
+  return `${receivePort.trim()}|${sendPort.trim()}${rxBaudRatePart}${txBaudRatePart}`;
 }
 
 export function resolveInitialPorts(

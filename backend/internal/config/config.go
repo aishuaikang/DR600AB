@@ -20,6 +20,14 @@ type Config struct {
 	DBKey                    string
 	OfflineMapPath           string
 	DetectionDefaultBaud     int
+	DetectionDefaultRxBaud   int
+	DetectionDefaultTxBaud   int
+	FPVTCPHost               string
+	FPVTCPPort               int
+	FPVBindRetryInterval     time.Duration
+	FPVMaxFrameBytes         int
+	FPVFirstFrameTimeout     time.Duration
+	FPVReadIdleTimeout       time.Duration
 	DefaultBaudRate          int
 	DefaultDataBits          int
 	DefaultStopBits          int
@@ -53,6 +61,7 @@ func Load() (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	legacyDetectionBaud := envInt("API_DETECTION_DEFAULT_BAUD", 0)
 
 	return Config{
 		Addr:                     envString("API_ADDR", ":18080"),
@@ -63,7 +72,15 @@ func Load() (Config, error) {
 		InterferenceReportDBPath: envString("API_INTERFERENCE_REPORT_DB_PATH", "./backend/data/interference-reports.db"),
 		DBKey:                    dbKey,
 		OfflineMapPath:           envString("API_OFFLINE_MAP_PATH", "./static/map"),
-		DetectionDefaultBaud:     envInt("API_DETECTION_DEFAULT_BAUD", 460800),
+		DetectionDefaultBaud:     legacyDetectionBaud,
+		DetectionDefaultRxBaud:   envInt("API_DETECTION_DEFAULT_RX_BAUD", firstNonZero(legacyDetectionBaud, 115200)),
+		DetectionDefaultTxBaud:   envInt("API_DETECTION_DEFAULT_TX_BAUD", firstNonZero(legacyDetectionBaud, 460800)),
+		FPVTCPHost:               envString("API_FPV_TCP_HOST", "192.168.8.10"),
+		FPVTCPPort:               envInt("API_FPV_TCP_PORT", 49600),
+		FPVBindRetryInterval:     time.Duration(envInt("API_FPV_BIND_RETRY_MS", 1000)) * time.Millisecond,
+		FPVMaxFrameBytes:         envInt("API_FPV_MAX_FRAME_MB", 32) * 1024 * 1024,
+		FPVFirstFrameTimeout:     time.Duration(envInt("API_FPV_FIRST_FRAME_TIMEOUT_MS", 3000)) * time.Millisecond,
+		FPVReadIdleTimeout:       time.Duration(envInt("API_FPV_READ_IDLE_TIMEOUT_MS", 30000)) * time.Millisecond,
 		DefaultBaudRate:          envInt("API_DEFAULT_BAUD", 115200),
 		DefaultDataBits:          envInt("API_DEFAULT_DATA_BITS", 8),
 		DefaultStopBits:          envInt("API_DEFAULT_STOP_BITS", 1),
@@ -127,6 +144,13 @@ func envInt(key string, fallback int) int {
 		return fallback
 	}
 	return v
+}
+
+func firstNonZero(value, fallback int) int {
+	if value == 0 {
+		return fallback
+	}
+	return value
 }
 
 // envBool 解析布尔环境变量，空值或无法识别时返回默认值。

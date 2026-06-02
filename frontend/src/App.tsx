@@ -51,7 +51,8 @@ import { WhitelistPage } from "./pages/WhitelistPage";
 import { getStoredSettings, persistSettings } from "./preferences";
 import {
   COMPASS_SERIAL_PROFILE,
-  DETECTION_DEFAULT_BAUD_RATE,
+  DETECTION_DEFAULT_RX_BAUD_RATE,
+  DETECTION_DEFAULT_TX_BAUD_RATE,
   FIXED_SERIAL_PROFILE,
   normalizeSerialBaudRate,
 } from "./serial-profile";
@@ -106,6 +107,13 @@ import {
   sessionBannerText,
 } from "./utils/session";
 
+function detectionBaudRates(source?: { baudRate?: number; rxBaudRate?: number; txBaudRate?: number }) {
+  const legacyBaudRate = source?.baudRate ? normalizeSerialBaudRate(source.baudRate) : undefined;
+  const rxBaudRate = normalizeSerialBaudRate(source?.rxBaudRate, legacyBaudRate ?? DETECTION_DEFAULT_RX_BAUD_RATE);
+  const txBaudRate = normalizeSerialBaudRate(source?.txBaudRate, legacyBaudRate ?? DETECTION_DEFAULT_TX_BAUD_RATE);
+  return { rxBaudRate, txBaudRate };
+}
+
 function App() {
   const { t, i18n } = useTranslation();
   const [page, navigate] = useHashPage();
@@ -129,7 +137,8 @@ function App() {
   const [userSettings, setUserSettings] = useState<UserSettings>({});
   const [selectedReceivePort, setSelectedReceivePort] = useState("");
   const [selectedSendPort, setSelectedSendPort] = useState("");
-  const [selectedDetectionBaudRate, setSelectedDetectionBaudRate] = useState(DETECTION_DEFAULT_BAUD_RATE);
+  const [selectedDetectionRxBaudRate, setSelectedDetectionRxBaudRate] = useState(DETECTION_DEFAULT_RX_BAUD_RATE);
+  const [selectedDetectionTxBaudRate, setSelectedDetectionTxBaudRate] = useState(DETECTION_DEFAULT_TX_BAUD_RATE);
   const [selectedGPSDataPort, setSelectedGPSDataPort] = useState("");
   const [selectedGPSControlPort, setSelectedGPSControlPort] = useState("");
   const [selectedDeceptionPort, setSelectedDeceptionPort] = useState("");
@@ -152,14 +161,16 @@ function App() {
   const needsRuntimeData = page !== "screen" && page !== "settings" && page !== "whitelist" && page !== "intrusions" && page !== "deception-reports" && !debugAccessBlocked;
   const deceptionReportsVisible = adminScreenStatus?.deception.configured !== false;
 
-  const syncSerialSelection = useCallback((receivePort: string, sendPort: string, baudRate?: number) => {
+  const syncSerialSelection = useCallback((receivePort: string, sendPort: string, rxBaudRate?: number, txBaudRate?: number) => {
     const nextReceivePort = receivePort.trim();
     const nextSendPort = sendPort.trim();
-    const nextBaudRate = normalizeSerialBaudRate(baudRate);
-    lastAppliedSerialRef.current = nextReceivePort || nextSendPort ? serialKey(nextReceivePort, nextSendPort, nextBaudRate) : "";
+    const nextRxBaudRate = normalizeSerialBaudRate(rxBaudRate);
+    const nextTxBaudRate = normalizeSerialBaudRate(txBaudRate, nextRxBaudRate);
+    lastAppliedSerialRef.current = nextReceivePort || nextSendPort ? serialKey(nextReceivePort, nextSendPort, nextRxBaudRate, nextTxBaudRate) : "";
     setSelectedReceivePort(nextReceivePort);
     setSelectedSendPort(nextSendPort);
-    setSelectedDetectionBaudRate(nextBaudRate);
+    setSelectedDetectionRxBaudRate(nextRxBaudRate);
+    setSelectedDetectionTxBaudRate(nextTxBaudRate);
   }, []);
 
   const syncGPSSelection = useCallback((dataPort: string, controlPort: string) => {
@@ -261,7 +272,8 @@ function App() {
       setChannels(normalizeGpioChannels(channelsRes.channels));
 
       const { receivePort, sendPort } = resolveInitialPorts(sessionRes, settingsRes, portsRes.ports);
-      syncSerialSelection(receivePort, sendPort, sessionRes.baudRate || settingsRes.baudRate);
+      const baudRates = detectionBaudRates(sessionRes.baudRate || sessionRes.rxBaudRate || sessionRes.txBaudRate ? sessionRes : settingsRes);
+      syncSerialSelection(receivePort, sendPort, baudRates.rxBaudRate, baudRates.txBaudRate);
       const { dataPort, controlPort } = resolveInitialGPSPorts(gpsSessionRes, gpsSettingsRes, portsRes.ports);
       syncGPSSelection(dataPort, controlPort);
       syncDeceptionSelection(deceptionSessionRes.portName || deceptionSettingsRes.portName || "");
@@ -334,6 +346,15 @@ function App() {
     void i18n.changeLanguage(locale);
     persistLocale(locale);
   }, [i18n, locale]);
+
+  const handleLocaleChange = useCallback(
+    (nextLocale: string) => {
+      setLocale(nextLocale);
+      void i18n.changeLanguage(nextLocale);
+      persistLocale(nextLocale);
+    },
+    [i18n],
+  );
 
   useEffect(() => {
     void loadUserSettings();
@@ -418,8 +439,9 @@ function App() {
     }
     const receivePort = selectedReceivePort.trim();
     const sendPort = selectedSendPort.trim();
-    const baudRate = normalizeSerialBaudRate(selectedDetectionBaudRate);
-    const currentKey = receivePort || sendPort ? serialKey(receivePort, sendPort, baudRate) : "";
+    const rxBaudRate = normalizeSerialBaudRate(selectedDetectionRxBaudRate);
+    const txBaudRate = normalizeSerialBaudRate(selectedDetectionTxBaudRate, rxBaudRate);
+    const currentKey = receivePort || sendPort ? serialKey(receivePort, sendPort, rxBaudRate, txBaudRate) : "";
     if (currentKey === lastAppliedSerialRef.current) {
       return;
     }
@@ -433,7 +455,9 @@ function App() {
               portName: receivePort,
               rxPortName: receivePort,
               txPortName: sendPort,
-              baudRate,
+              baudRate: rxBaudRate,
+              rxBaudRate,
+              txBaudRate,
               dataBits: FIXED_SERIAL_PROFILE.dataBits,
               stopBits: FIXED_SERIAL_PROFILE.stopBits,
               parity: FIXED_SERIAL_PROFILE.parity,
@@ -457,7 +481,7 @@ function App() {
     }, 350);
 
     return () => window.clearTimeout(timer);
-  }, [bootstrap, developerToken, locale, needsRuntimeData, selectedDetectionBaudRate, selectedReceivePort, selectedSendPort, t]);
+  }, [bootstrap, developerToken, locale, needsRuntimeData, selectedDetectionRxBaudRate, selectedDetectionTxBaudRate, selectedReceivePort, selectedSendPort, t]);
 
   useEffect(() => {
     if (!needsRuntimeData) {
@@ -598,7 +622,8 @@ function App() {
           const nextReceivePort = event.payload.rxPortName || event.payload.portName || "";
           const nextSendPort = event.payload.txPortName || nextReceivePort || "";
           if (nextReceivePort || nextSendPort) {
-            syncSerialSelection(nextReceivePort, nextSendPort || nextReceivePort, event.payload.baudRate);
+            const baudRates = detectionBaudRates(event.payload);
+            syncSerialSelection(nextReceivePort, nextSendPort || nextReceivePort, baudRates.rxBaudRate, baudRates.txBaudRate);
           }
           setBanner({
             kind: sessionBannerKind(event.payload),
@@ -612,7 +637,8 @@ function App() {
           const nextReceivePort = event.payload.rxPortName || event.payload.portName || "";
           const nextSendPort = event.payload.txPortName || nextReceivePort || "";
           if (nextReceivePort || nextSendPort) {
-            syncSerialSelection(nextReceivePort, nextSendPort || nextReceivePort, event.payload.baudRate);
+            const baudRates = detectionBaudRates(event.payload);
+            syncSerialSelection(nextReceivePort, nextSendPort || nextReceivePort, baudRates.rxBaudRate, baudRates.txBaudRate);
           }
           setBanner({
             kind: sessionBannerKind(event.payload),
@@ -626,7 +652,8 @@ function App() {
           const nextReceivePort = event.payload.rxPortName || event.payload.portName || "";
           const nextSendPort = event.payload.txPortName || nextReceivePort || "";
           if (nextReceivePort || nextSendPort) {
-            syncSerialSelection(nextReceivePort, nextSendPort || nextReceivePort, event.payload.baudRate);
+            const baudRates = detectionBaudRates(event.payload);
+            syncSerialSelection(nextReceivePort, nextSendPort || nextReceivePort, baudRates.rxBaudRate, baudRates.txBaudRate);
           }
           setBanner({
             kind: sessionBannerKind(event.payload),
@@ -779,7 +806,8 @@ function App() {
     : t("idle", { ns: "common" });
   const currentReceivePort = session?.rxPortName || session?.portName || selectedReceivePort;
   const currentSendPort = session?.txPortName || selectedSendPort;
-  const currentDetectionBaudRate = session?.baudRate || selectedDetectionBaudRate;
+  const currentDetectionRxBaudRate = session?.rxBaudRate || session?.baudRate || selectedDetectionRxBaudRate;
+  const currentDetectionTxBaudRate = session?.txBaudRate || session?.baudRate || selectedDetectionTxBaudRate;
   const gpsActive = Boolean(gpsSession?.active);
   const gpsSessionStateLabel = gpsSession
     ? gpsSessionBannerText(gpsSession, gpsActive ? t("active", { ns: "common" }) : t("idle", { ns: "common" }))
@@ -940,7 +968,7 @@ function App() {
         developerActive={developerActive}
         visibleMapLayers={mapLayerOptions}
         userSettings={userSettings}
-        onLocaleChange={setLocale}
+        onLocaleChange={handleLocaleChange}
         onUserSettingsChange={handleUserSettingsChange}
       />
     );
@@ -959,7 +987,7 @@ function App() {
           developerExpiresAt={developerExpiresAt}
           mobileOpen={mobileSidebarOpen}
           t={t}
-          onLocaleChange={setLocale}
+          onLocaleChange={handleLocaleChange}
           onNavigate={navigate}
           onMobileClose={() => setMobileSidebarOpen(false)}
           onMobileOpen={() => setMobileSidebarOpen(true)}
@@ -1063,7 +1091,8 @@ function App() {
                     ports={ports}
                     selectedReceivePort={selectedReceivePort}
                     selectedSendPort={selectedSendPort}
-                    selectedDetectionBaudRate={selectedDetectionBaudRate}
+                    selectedDetectionRxBaudRate={selectedDetectionRxBaudRate}
+                    selectedDetectionTxBaudRate={selectedDetectionTxBaudRate}
                     selectedGPSDataPort={selectedGPSDataPort}
                     selectedGPSControlPort={selectedGPSControlPort}
                     selectedDeceptionPort={selectedDeceptionPort}
@@ -1071,7 +1100,8 @@ function App() {
                     sessionStateLabel={sessionStateLabel}
                     currentReceivePort={currentReceivePort}
                     currentSendPort={currentSendPort}
-                    currentDetectionBaudRate={currentDetectionBaudRate}
+                    currentDetectionRxBaudRate={currentDetectionRxBaudRate}
+                    currentDetectionTxBaudRate={currentDetectionTxBaudRate}
                     gpsBanner={gpsBanner}
                     gpsSession={gpsSession}
                     gpsSessionStateLabel={gpsSessionStateLabel}
@@ -1094,7 +1124,8 @@ function App() {
                     onRefresh={() => void bootstrap()}
                     onReceivePortChange={setSelectedReceivePort}
                     onSendPortChange={setSelectedSendPort}
-                    onDetectionBaudRateChange={setSelectedDetectionBaudRate}
+                    onDetectionRxBaudRateChange={setSelectedDetectionRxBaudRate}
+                    onDetectionTxBaudRateChange={setSelectedDetectionTxBaudRate}
                     onGPSDataPortChange={setSelectedGPSDataPort}
                     onGPSControlPortChange={setSelectedGPSControlPort}
                     onDeceptionPortChange={setSelectedDeceptionPort}

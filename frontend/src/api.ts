@@ -50,6 +50,9 @@ import type {
   ScreenDeceptionRequest,
   ScreenDeceptionResponse,
   ScreenDeceptionState,
+  ScreenFpvFrame,
+  ScreenFpvStatus,
+  ScreenFpvVideoHandlers,
   ScreenPositionTarget,
   ScreenRuntimeStatus,
   ScreenStrikeRequest,
@@ -98,6 +101,21 @@ export class ApiRequestError extends Error {
   }
 }
 
+async function readApiRequestError(response: Response, fallbackMessage: string): Promise<ApiRequestError> {
+  let payload: ApiErrorPayload | null = null;
+  try {
+    payload = (await response.json()) as ApiErrorPayload;
+  } catch {
+    payload = null;
+  }
+  return new ApiRequestError(
+    payload?.message || fallbackMessage,
+    response.status,
+    payload?.code,
+    payload?.details,
+  );
+}
+
 async function requestJson<T>(path: string, init: RequestInit = {}, locale?: string): Promise<T> {
   const headers = new Headers(init.headers);
   headers.set("Accept", "application/json");
@@ -115,21 +133,10 @@ async function requestJson<T>(path: string, init: RequestInit = {}, locale?: str
   });
 
   if (!response.ok) {
-    let payload: ApiErrorPayload | null = null;
-    try {
-      payload = (await response.json()) as ApiErrorPayload;
-    } catch {
-      payload = null;
-    }
     const fallbackMessage = locale
       ? i18n.getFixedT(locale, "common")("requestFailed")
       : i18n.t("requestFailed", { ns: "common" });
-    const error = new ApiRequestError(
-      payload?.message || fallbackMessage,
-      response.status,
-      payload?.code,
-      payload?.details,
-    );
+    const error = await readApiRequestError(response, fallbackMessage);
     if (response.status === 401 && headers.has("X-Developer-Token")) {
       unauthorizedHandler?.(error);
     }
@@ -518,6 +525,77 @@ function parseStreamEvent<T>(raw: string): EventMessage<T> | null {
   }
 }
 
+function parseSSEPayload<T>(raw: string): T | null {
+  try {
+    return JSON.parse(raw) as T;
+  } catch {
+    return null;
+  }
+}
+
+function dispatchSSEBlock(raw: string, dispatch: (event: string, data: string) => void) {
+  let event = "message";
+  const dataLines: string[] = [];
+
+  for (const line of raw.split("\n")) {
+    if (!line || line.startsWith(":")) {
+      continue;
+    }
+    const separator = line.indexOf(":");
+    const field = separator === -1 ? line : line.slice(0, separator);
+    let value = separator === -1 ? "" : line.slice(separator + 1);
+    if (value.startsWith(" ")) {
+      value = value.slice(1);
+    }
+
+    if (field === "event") {
+      event = value;
+    } else if (field === "data") {
+      dataLines.push(value);
+    }
+  }
+
+  if (dataLines.length) {
+    dispatch(event, dataLines.join("\n"));
+  }
+}
+
+async function readSSEStream(response: Response, dispatch: (event: string, data: string) => void) {
+  if (!response.body) {
+    throw new Error(i18n.t("fpvVideoConnectionError", { ns: "screen" }));
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+
+  try {
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) {
+        break;
+      }
+      buffer += decoder.decode(value, { stream: true });
+      buffer = buffer.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+
+      let separator = buffer.indexOf("\n\n");
+      while (separator !== -1) {
+        dispatchSSEBlock(buffer.slice(0, separator), dispatch);
+        buffer = buffer.slice(separator + 2);
+        separator = buffer.indexOf("\n\n");
+      }
+    }
+
+    buffer += decoder.decode();
+    buffer = buffer.replace(/\r\n/g, "\n").replace(/\r/g, "\n").trim();
+    if (buffer) {
+      dispatchSSEBlock(buffer, dispatch);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+}
+
 export function openDetectionStream(locale: string, developerToken: string, handlers: StreamHandlers): () => void {
   const params = new URLSearchParams({ locale });
   if (developerToken) {
@@ -614,4 +692,48 @@ export function openScreenStream(handlers: ScreenStreamHandlers): () => void {
   };
 
   return () => source.close();
+}
+
+export function openScreenFpvVideo(frequency: number, handlers: ScreenFpvVideoHandlers): () => void {
+  const params = new URLSearchParams({ frequency: String(frequency) });
+  const controller = new AbortController();
+  const fallbackMessage = i18n.t("fpvVideoConnectionError", { ns: "screen" });
+
+  void (async () => {
+    try {
+      const response = await fetch(`${API_PREFIX}/screen/fpv/video?${params.toString()}`, {
+        headers: { Accept: "text/event-stream" },
+        signal: controller.signal,
+      });
+
+      if (!response.ok) {
+        throw await readApiRequestError(response, fallbackMessage);
+      }
+
+      await readSSEStream(response, (event, data) => {
+        if (event === "status") {
+          const status = parseSSEPayload<ScreenFpvStatus>(data);
+          if (status) {
+            handlers.onStatus?.(status);
+          }
+        } else if (event === "frame") {
+          const frame = parseSSEPayload<ScreenFpvFrame>(data);
+          if (frame) {
+            handlers.onFrame?.(frame);
+          }
+        }
+      });
+
+      if (!controller.signal.aborted) {
+        handlers.onError?.(new Error(fallbackMessage));
+      }
+    } catch (error) {
+      if (controller.signal.aborted) {
+        return;
+      }
+      handlers.onError?.(error instanceof ApiRequestError ? error : new Error(fallbackMessage));
+    }
+  })();
+
+  return () => controller.abort();
 }

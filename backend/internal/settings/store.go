@@ -418,6 +418,8 @@ func isEmptyDetectionSettings(req model.DetectionSessionRequest) bool {
 		req.RxPortName == "" &&
 		req.TxPortName == "" &&
 		req.BaudRate == 0 &&
+		req.RxBaudRate == 0 &&
+		req.TxBaudRate == 0 &&
 		req.DataBits == 0 &&
 		req.StopBits == 0 &&
 		req.Parity == "" &&

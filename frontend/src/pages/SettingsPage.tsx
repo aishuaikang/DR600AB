@@ -9,7 +9,8 @@ import { PortSelect } from "../components/PortSelect";
 import { SectionHeader } from "../components/SectionHeader";
 import type { Banner } from "../app/types";
 import {
-  DETECTION_DEFAULT_BAUD_RATE,
+  DETECTION_DEFAULT_RX_BAUD_RATE,
+  DETECTION_DEFAULT_TX_BAUD_RATE,
   SERIAL_BAUD_RATE_LIMITS,
   normalizeSerialBaudRate,
 } from "../serial-profile";
@@ -44,7 +45,8 @@ export function SettingsPage({
   ports,
   selectedReceivePort,
   selectedSendPort,
-  selectedDetectionBaudRate,
+  selectedDetectionRxBaudRate,
+  selectedDetectionTxBaudRate,
   selectedGPSDataPort,
   selectedGPSControlPort,
   selectedDeceptionPort,
@@ -52,7 +54,8 @@ export function SettingsPage({
   sessionStateLabel,
   currentReceivePort,
   currentSendPort,
-  currentDetectionBaudRate,
+  currentDetectionRxBaudRate,
+  currentDetectionTxBaudRate,
   gpsBanner,
   gpsSession,
   gpsSessionStateLabel,
@@ -75,7 +78,8 @@ export function SettingsPage({
   onRefresh,
   onReceivePortChange,
   onSendPortChange,
-  onDetectionBaudRateChange,
+  onDetectionRxBaudRateChange,
+  onDetectionTxBaudRateChange,
   onGPSDataPortChange,
   onGPSControlPortChange,
   onDeceptionPortChange,
@@ -88,7 +92,8 @@ export function SettingsPage({
   ports: PortInfo[];
   selectedReceivePort: string;
   selectedSendPort: string;
-  selectedDetectionBaudRate: number;
+  selectedDetectionRxBaudRate: number;
+  selectedDetectionTxBaudRate: number;
   selectedGPSDataPort: string;
   selectedGPSControlPort: string;
   selectedDeceptionPort: string;
@@ -96,7 +101,8 @@ export function SettingsPage({
   sessionStateLabel: string;
   currentReceivePort: string;
   currentSendPort: string;
-  currentDetectionBaudRate: number;
+  currentDetectionRxBaudRate: number;
+  currentDetectionTxBaudRate: number;
   gpsBanner: Banner;
   gpsSession: GPSSessionResponse | null;
   gpsSessionStateLabel: string;
@@ -119,7 +125,8 @@ export function SettingsPage({
   onRefresh: () => void;
   onReceivePortChange: (value: string) => void;
   onSendPortChange: (value: string) => void;
-  onDetectionBaudRateChange: (value: number) => void;
+  onDetectionRxBaudRateChange: (value: number) => void;
+  onDetectionTxBaudRateChange: (value: number) => void;
   onGPSDataPortChange: (value: string) => void;
   onGPSControlPortChange: (value: string) => void;
   onDeceptionPortChange: (value: string) => void;
@@ -139,10 +146,12 @@ export function SettingsPage({
     kind: "idle",
     text: "",
   });
-  const [detectionBaudRateDraft, setDetectionBaudRateDraft] = useState(() => formatBaudRate(selectedDetectionBaudRate));
+  const [detectionRxBaudRateDraft, setDetectionRxBaudRateDraft] = useState(() => formatBaudRate(selectedDetectionRxBaudRate));
+  const [detectionTxBaudRateDraft, setDetectionTxBaudRateDraft] = useState(() => formatBaudRate(selectedDetectionTxBaudRate));
   const normalizedStrikeLabels = strikeLabelDrafts.map(normalizeStrikeLabel);
   const strikeLabelsChanged = normalizedStrikeLabels.join("|") !== savedStrikeLabels.map(normalizeStrikeLabel).join("|");
-  const detectionBaudRate = normalizeSerialBaudRate(selectedDetectionBaudRate);
+  const detectionRxBaudRate = normalizeSerialBaudRate(selectedDetectionRxBaudRate);
+  const detectionTxBaudRate = normalizeSerialBaudRate(selectedDetectionTxBaudRate, detectionRxBaudRate);
   const compassPitch = compassSession?.lastPitch ?? compassSession?.lastRecord?.pitch;
   const compassRoll = compassSession?.lastRoll ?? compassSession?.lastRecord?.roll;
   const compassHeading = compassSession?.lastHeading ?? compassSession?.lastRecord?.heading;
@@ -153,8 +162,12 @@ export function SettingsPage({
   }, [savedStrikeLabels.join("|")]);
 
   useEffect(() => {
-    setDetectionBaudRateDraft(formatBaudRate(selectedDetectionBaudRate));
-  }, [selectedDetectionBaudRate]);
+    setDetectionRxBaudRateDraft(formatBaudRate(selectedDetectionRxBaudRate));
+  }, [selectedDetectionRxBaudRate]);
+
+  useEffect(() => {
+    setDetectionTxBaudRateDraft(formatBaudRate(selectedDetectionTxBaudRate));
+  }, [selectedDetectionTxBaudRate]);
 
   const handleToggleLocale = (locale: string) => {
     if (locale === currentLocale) {
@@ -216,11 +229,19 @@ export function SettingsPage({
     }
   };
 
-  const commitDetectionBaudRate = () => {
-    const nextBaudRate = normalizeSerialBaudRate(Number(detectionBaudRateDraft), detectionBaudRate);
-    setDetectionBaudRateDraft(formatBaudRate(nextBaudRate));
-    if (nextBaudRate !== selectedDetectionBaudRate) {
-      onDetectionBaudRateChange(nextBaudRate);
+  const commitDetectionRxBaudRate = () => {
+    const nextBaudRate = normalizeSerialBaudRate(Number(detectionRxBaudRateDraft), detectionRxBaudRate);
+    setDetectionRxBaudRateDraft(formatBaudRate(nextBaudRate));
+    if (nextBaudRate !== selectedDetectionRxBaudRate) {
+      onDetectionRxBaudRateChange(nextBaudRate);
+    }
+  };
+
+  const commitDetectionTxBaudRate = () => {
+    const nextBaudRate = normalizeSerialBaudRate(Number(detectionTxBaudRateDraft), detectionTxBaudRate);
+    setDetectionTxBaudRateDraft(formatBaudRate(nextBaudRate));
+    if (nextBaudRate !== selectedDetectionTxBaudRate) {
+      onDetectionTxBaudRateChange(nextBaudRate);
     }
   };
 
@@ -234,13 +255,14 @@ export function SettingsPage({
           />
 
           <div className="grid gap-3 xl:grid-cols-[minmax(0,1fr)_auto]">
-            <div className="grid gap-3 md:grid-cols-3">
+            <div className="grid gap-3 md:grid-cols-3 xl:grid-cols-5">
               <InfoTile label={t("sessionTitle", { ns: "detection" })}>
                 {sessionStateLabel}
               </InfoTile>
               <InfoTile label={t("receivePort", { ns: "detection" })} value={currentReceivePort || t("unknown", { ns: "common" })} />
               <InfoTile label={t("sendPort", { ns: "detection" })} value={currentSendPort || t("unknown", { ns: "common" })} />
-              <InfoTile label={t("detectionBaudRate", { ns: "settings" })} value={`${currentDetectionBaudRate || DETECTION_DEFAULT_BAUD_RATE} bps`} />
+              <InfoTile label={t("detectionRxBaudRate", { ns: "settings" })} value={`${currentDetectionRxBaudRate || DETECTION_DEFAULT_RX_BAUD_RATE} bps`} />
+              <InfoTile label={t("detectionTxBaudRate", { ns: "settings" })} value={`${currentDetectionTxBaudRate || DETECTION_DEFAULT_TX_BAUD_RATE} bps`} />
             </div>
           </div>
           {banner.kind === "error" ? <BannerAlert banner={banner} /> : null}
@@ -359,7 +381,7 @@ export function SettingsPage({
             }
           />
 
-          <div className="grid gap-3 md:grid-cols-3">
+          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
             <PortSelect
               label={t("detectionReceivePort", { ns: "settings" })}
               placeholder={t("selectDetectionReceivePort", { ns: "settings" })}
@@ -377,7 +399,7 @@ export function SettingsPage({
               onChange={onSendPortChange}
             />
             <label className="grid gap-1.5">
-              <span className="text-xs font-medium text-base-content/60">{t("detectionBaudRate", { ns: "settings" })}</span>
+              <span className="text-xs font-medium text-base-content/60">{t("detectionRxBaudRate", { ns: "settings" })}</span>
               <input
                 className="input input-bordered input-sm w-full bg-base-100"
                 type="number"
@@ -385,11 +407,11 @@ export function SettingsPage({
                 min={SERIAL_BAUD_RATE_LIMITS.min}
                 max={SERIAL_BAUD_RATE_LIMITS.max}
                 step={100}
-                value={detectionBaudRateDraft}
+                value={detectionRxBaudRateDraft}
                 onChange={(event) => {
-                  setDetectionBaudRateDraft(event.target.value);
+                  setDetectionRxBaudRateDraft(event.target.value);
                 }}
-                onBlur={commitDetectionBaudRate}
+                onBlur={commitDetectionRxBaudRate}
                 onKeyDown={(event) => {
                   if (event.key === "Enter") {
                     event.currentTarget.blur();
@@ -397,7 +419,31 @@ export function SettingsPage({
                 }}
               />
               <span className="text-xs leading-5 text-base-content/50">
-                {t("detectionBaudRateHint", { ns: "settings" })}
+                {t("detectionRxBaudRateHint", { ns: "settings" })}
+              </span>
+            </label>
+            <label className="grid gap-1.5">
+              <span className="text-xs font-medium text-base-content/60">{t("detectionTxBaudRate", { ns: "settings" })}</span>
+              <input
+                className="input input-bordered input-sm w-full bg-base-100"
+                type="number"
+                inputMode="numeric"
+                min={SERIAL_BAUD_RATE_LIMITS.min}
+                max={SERIAL_BAUD_RATE_LIMITS.max}
+                step={100}
+                value={detectionTxBaudRateDraft}
+                onChange={(event) => {
+                  setDetectionTxBaudRateDraft(event.target.value);
+                }}
+                onBlur={commitDetectionTxBaudRate}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") {
+                    event.currentTarget.blur();
+                  }
+                }}
+              />
+              <span className="text-xs leading-5 text-base-content/50">
+                {t("detectionTxBaudRateHint", { ns: "settings" })}
               </span>
             </label>
           </div>

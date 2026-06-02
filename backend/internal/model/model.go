@@ -25,6 +25,8 @@ type DetectionSessionRequest struct {
 	RxPortName    string `json:"rxPortName,omitempty"`
 	TxPortName    string `json:"txPortName,omitempty"`
 	BaudRate      int    `json:"baudRate"`
+	RxBaudRate    int    `json:"rxBaudRate,omitempty"`
+	TxBaudRate    int    `json:"txBaudRate,omitempty"`
 	DataBits      int    `json:"dataBits"`
 	StopBits      int    `json:"stopBits"`
 	Parity        string `json:"parity"`
@@ -40,6 +42,8 @@ type DetectionSessionResponse struct {
 	RxPortName    string    `json:"rxPortName,omitempty"`
 	TxPortName    string    `json:"txPortName,omitempty"`
 	BaudRate      int       `json:"baudRate,omitempty"`
+	RxBaudRate    int       `json:"rxBaudRate,omitempty"`
+	TxBaudRate    int       `json:"txBaudRate,omitempty"`
 	DataBits      int       `json:"dataBits,omitempty"`
 	StopBits      int       `json:"stopBits,omitempty"`
 	Parity        string    `json:"parity,omitempty"`

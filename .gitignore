@@ -24,5 +24,6 @@ frontend/vite.config.d.ts
 
 tri-detector/cmd/serial-sampler/tmp/
 tri-detector/cmd/serial-sampler/sample-*/
+tri-detector/tri-detector
 
 backend/tmp/

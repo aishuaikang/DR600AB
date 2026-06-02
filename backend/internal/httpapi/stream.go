@@ -101,7 +101,12 @@ func writeEvent(w *bufio.Writer, evt model.Event) error {
 	if err != nil {
 		return err
 	}
-	if _, err := fmt.Fprintf(w, "event: %s\n", evt.Type); err != nil {
+	return writeSSEPayload(w, evt.Type, payload)
+}
+
+// writeSSEPayload writes a named SSE event with a JSON payload.
+func writeSSEPayload(w *bufio.Writer, event string, payload []byte) error {
+	if _, err := fmt.Fprintf(w, "event: %s\n", event); err != nil {
 		return err
 	}
 	if _, err := fmt.Fprintf(w, "data: %s\n\n", payload); err != nil {

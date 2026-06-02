@@ -2,6 +2,7 @@ package detection
 
 import (
 	"context"
+	"errors"
 	"io"
 	"path/filepath"
 	"sync"
@@ -413,6 +414,108 @@ func TestStartSessionSupportsSeparateReceiveAndSendPorts(t *testing.T) {
 	}
 }
 
+func TestSendCommandsWritesToActiveTXPort(t *testing.T) {
+	tr, err := i18n.New("zh-CN")
+	if err != nil {
+		t.Fatalf("i18n.New() error = %v", err)
+	}
+	st := store.NewMemoryStore(10, 10)
+	svc := NewService(st, tr, settings.NewStore(filepath.Join(t.TempDir(), "settings.json")), Options{})
+
+	ports := map[string]*fakeSerialPort{}
+	svc.SetSerialOpener(func(cfg *serialport.Config) (serial.Port, error) {
+		port := newFakeSerialPort()
+		ports[cfg.PortName] = port
+		return port, nil
+	})
+
+	if _, err := svc.Start(model.DetectionSessionRequest{
+		RxPortName: "/dev/rx",
+		TxPortName: "/dev/tx",
+		DataBits:   8,
+		StopBits:   1,
+		Parity:     "none",
+	}, "zh-CN"); err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+	defer svc.Stop("zh-CN")
+
+	if err := svc.SendCommands(
+		"start -imag 192.168.8.10:49600\r\n",
+		"start -band 1310,1410\r\n",
+	); err != nil {
+		t.Fatalf("SendCommands() error = %v", err)
+	}
+
+	assertPortWrites(
+		t,
+		ports["/dev/tx"],
+		startDetectionCommand+"\n",
+		"start -imag 192.168.8.10:49600\r\n",
+		"start -band 1310,1410\r\n",
+	)
+	if got := ports["/dev/rx"].writes; len(got) != 0 {
+		t.Fatalf("rx writes = %v, want none", got)
+	}
+}
+
+func TestSendCommandsRequiresConnectedSession(t *testing.T) {
+	tr, err := i18n.New("zh-CN")
+	if err != nil {
+		t.Fatalf("i18n.New() error = %v", err)
+	}
+	svc := NewService(store.NewMemoryStore(10, 10), tr, nil, Options{})
+
+	err = svc.SendCommands("start -imag 0\r\n")
+	if !errors.Is(err, ErrCommandSerialOffline) {
+		t.Fatalf("SendCommands() error = %v, want ErrCommandSerialOffline", err)
+	}
+}
+
+func TestStartSessionSupportsSeparateReceiveAndSendBaudRates(t *testing.T) {
+	tr, err := i18n.New("zh-CN")
+	if err != nil {
+		t.Fatalf("i18n.New() error = %v", err)
+	}
+	st := store.NewMemoryStore(10, 10)
+	svc := NewService(st, tr, settings.NewStore(filepath.Join(t.TempDir(), "settings.json")), Options{})
+
+	opened := map[string]serialport.Config{}
+	ports := map[string]*fakeSerialPort{}
+	svc.SetSerialOpener(func(cfg *serialport.Config) (serial.Port, error) {
+		opened[cfg.PortName] = *cfg
+		port := newFakeSerialPort()
+		ports[cfg.PortName] = port
+		return port, nil
+	})
+
+	resp, err := svc.Start(model.DetectionSessionRequest{
+		RxPortName: "/dev/rx",
+		TxPortName: "/dev/tx",
+		RxBaudRate: 460800,
+		TxBaudRate: 115200,
+		DataBits:   8,
+		StopBits:   1,
+		Parity:     "none",
+	}, "zh-CN")
+	if err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+
+	if opened["/dev/rx"].BaudRate != 460800 {
+		t.Fatalf("rx baud rate = %d, want 460800", opened["/dev/rx"].BaudRate)
+	}
+	if opened["/dev/tx"].BaudRate != 115200 {
+		t.Fatalf("tx baud rate = %d, want 115200", opened["/dev/tx"].BaudRate)
+	}
+	if resp.BaudRate != 460800 || resp.RxBaudRate != 460800 || resp.TxBaudRate != 115200 {
+		t.Fatalf("unexpected response baud rates: %+v", resp)
+	}
+	assertPortWrites(t, ports["/dev/tx"], startDetectionCommand+"\n")
+
+	_ = svc.Stop("zh-CN")
+}
+
 func TestStartSessionFallsBackToLegacyPortName(t *testing.T) {
 	tr, err := i18n.New("zh-CN")
 	if err != nil {
@@ -486,6 +589,44 @@ func TestStartSessionUsesDetectionDefaultBaudRate(t *testing.T) {
 	}
 	if resp.BaudRate != defaultBaudRate {
 		t.Fatalf("response baud rate = %d, want %d", resp.BaudRate, defaultBaudRate)
+	}
+
+	_ = svc.Stop("zh-CN")
+}
+
+func TestStartSessionUsesSeparateDefaultBaudRates(t *testing.T) {
+	tr, err := i18n.New("zh-CN")
+	if err != nil {
+		t.Fatalf("i18n.New() error = %v", err)
+	}
+	st := store.NewMemoryStore(10, 10)
+	svc := NewService(st, tr, settings.NewStore(filepath.Join(t.TempDir(), "settings.json")), Options{})
+
+	opened := map[string]serialport.Config{}
+	svc.SetSerialOpener(func(cfg *serialport.Config) (serial.Port, error) {
+		opened[cfg.PortName] = *cfg
+		return newFakeSerialPort(), nil
+	})
+
+	resp, err := svc.Start(model.DetectionSessionRequest{
+		RxPortName: "/dev/rx",
+		TxPortName: "/dev/tx",
+		DataBits:   8,
+		StopBits:   1,
+		Parity:     "none",
+	}, "zh-CN")
+	if err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+
+	if opened["/dev/rx"].BaudRate != defaultRxBaudRate {
+		t.Fatalf("rx baud rate = %d, want %d", opened["/dev/rx"].BaudRate, defaultRxBaudRate)
+	}
+	if opened["/dev/tx"].BaudRate != defaultTxBaudRate {
+		t.Fatalf("tx baud rate = %d, want %d", opened["/dev/tx"].BaudRate, defaultTxBaudRate)
+	}
+	if resp.RxBaudRate != defaultRxBaudRate || resp.TxBaudRate != defaultTxBaudRate {
+		t.Fatalf("unexpected response baud rates: %+v", resp)
 	}
 
 	_ = svc.Stop("zh-CN")

@@ -49,8 +49,13 @@ export interface ScreenAlert {
 
 export const REFERENCE_MAP_CENTER: [number, number] = [39.909181, 116.397472];
 export const REFERENCE_MAP_ZOOM = 13;
-export const REFERENCE_MAP_LAYER_STORAGE_KEY = "mapLayer";
-export const REFERENCE_DEFAULT_MAP_LAYER: ReferenceMapLayer = "leaflet.map.googleMap";
+export const REFERENCE_MAP_LAYER_STORAGE_KEY = "dr600ab.mapLayer";
+export const REFERENCE_LEGACY_MAP_LAYER_STORAGE_KEY = "mapLayer";
+export const REFERENCE_DEFAULT_MAP_LAYER: ReferenceMapLayer = "leaflet.map.gaodeSatellite";
+
+export function referenceDefaultMapLayerForLocale(locale?: string): ReferenceMapLayer {
+  return locale?.startsWith("en") ? "leaflet.map.googleSatellite" : "leaflet.map.gaodeSatellite";
+}
 
 export const referenceMapLayers: ReferenceMapLayer[] = [
   "leaflet.map.googleMap",

@@ -13,6 +13,7 @@ import (
 	"dr600ab-api/internal/deceptionreport"
 	"dr600ab-api/internal/detection"
 	"dr600ab-api/internal/developer"
+	"dr600ab-api/internal/fpv"
 	"dr600ab-api/internal/gps"
 	"dr600ab-api/internal/i18n"
 	"dr600ab-api/internal/interference"
@@ -75,6 +76,7 @@ type Server struct {
 	network             *network.Service
 	deception           *deception.Service
 	compass             *compass.Service
+	fpv                 *fpv.Service
 	userSettings        UserSettingsStore
 	intrusions          IntrusionStore
 	reports             DeceptionReportStore
@@ -99,6 +101,7 @@ func New(
 	intrusionStore IntrusionStore,
 	reportStore DeceptionReportStore,
 	interferenceReportStore InterferenceReportStore,
+	fpvSvc *fpv.Service,
 ) *Server {
 	s := &Server{
 		cfg:                 cfg,
@@ -110,6 +113,7 @@ func New(
 		network:             networkSvc,
 		deception:           deceptionSvc,
 		compass:             compassSvc,
+		fpv:                 fpvSvc,
 		userSettings:        userSettingsStore,
 		intrusions:          intrusionStore,
 		reports:             reportStore,

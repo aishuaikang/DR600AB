@@ -4,6 +4,7 @@ package detection
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"strings"
@@ -24,6 +25,8 @@ import (
 // Options 配置串口默认值和重连时间参数。
 type Options struct {
 	DefaultBaudRate       int
+	DefaultRxBaudRate     int
+	DefaultTxBaudRate     int
 	DefaultDataBits       int
 	DefaultStopBits       int
 	DefaultParity         string
@@ -54,8 +57,12 @@ type O3PlusO4Decoder interface {
 
 const (
 	startDetectionCommand = "start -freq 1"
-	defaultBaudRate       = 460800
+	defaultRxBaudRate     = 115200
+	defaultTxBaudRate     = 460800
+	defaultBaudRate       = defaultRxBaudRate
 )
+
+var ErrCommandSerialOffline = errors.New("detection command serial offline")
 
 // SettingsStore 持久化最近一次侦测会话请求和公开用户设置。
 type SettingsStore interface {
@@ -66,7 +73,8 @@ type SettingsStore interface {
 
 // Service 管理侦测串口会话并存储解析记录。
 type Service struct {
-	mu sync.RWMutex
+	mu        sync.RWMutex
+	commandMu sync.Mutex
 
 	store      *store.MemoryStore
 	translator *i18n.Translator
@@ -84,6 +92,7 @@ type session struct {
 	request       model.DetectionSessionRequest
 	config        serialport.Config
 	txPortName    string
+	txBaudRate    int
 	client        *client.SerialClient
 	startedAt     time.Time
 	locale        string
@@ -203,6 +212,7 @@ func (s *Service) Start(req model.DetectionSessionRequest, locale string) (model
 	req.PortName = rxPortName
 	req.RxPortName = rxPortName
 	req.TxPortName = txPortName
+	req.BaudRate = req.RxBaudRate
 	req.AutoConnect = true
 
 	if err := s.saveSettings(req); err != nil {
@@ -215,7 +225,7 @@ func (s *Service) Start(req model.DetectionSessionRequest, locale string) (model
 	if current := s.current; current != nil && sameRequest(current.request, req) {
 		current.locale = locale
 		current.autoReconnect = req.AutoConnect
-		response := s.responseForSession(current, locale, s.messageForState(current.state, locale))
+		response := s.responseForSessionLocked(current, locale, s.messageForState(current.state, locale))
 		s.mu.Unlock()
 		return response, nil
 	}
@@ -230,6 +240,7 @@ func (s *Service) Start(req model.DetectionSessionRequest, locale string) (model
 		request:       req,
 		config:        cfg,
 		txPortName:    txPortName,
+		txBaudRate:    req.TxBaudRate,
 		startedAt:     now,
 		locale:        locale,
 		state:         "connecting",
@@ -242,12 +253,10 @@ func (s *Service) Start(req model.DetectionSessionRequest, locale string) (model
 
 	if prev != nil {
 		prev.cancel()
-		if prev.client != nil {
-			prev.client.Close()
-		}
+		s.closeSessionClient(prev)
 	}
 
-	client, err := s.connectOnce(&sess.config, sess.txPortName, locale)
+	client, err := s.connectOnce(&sess.config, sess.txPortName, sess.txBaudRate, locale)
 	if err == nil {
 		if !s.assignConnectedClient(seq, sess, client) {
 			client.Close()
@@ -286,9 +295,7 @@ func (s *Service) Stop(locale string) model.DetectionSessionResponse {
 	}
 
 	prev.cancel()
-	if prev.client != nil {
-		prev.client.Close()
-	}
+	s.closeSessionClient(prev)
 
 	response := s.responseForSession(prev, locale, s.translator.T(locale, "common", "session.stopped"))
 	response.Active = false
@@ -301,8 +308,8 @@ func (s *Service) Stop(locale string) model.DetectionSessionResponse {
 // Current 返回当前侦测会话状态，并按语言本地化提示文本。
 func (s *Service) Current(locale string) model.DetectionSessionResponse {
 	s.mu.RLock()
+	defer s.mu.RUnlock()
 	current := s.current
-	s.mu.RUnlock()
 
 	if current == nil {
 		return model.DetectionSessionResponse{
@@ -311,7 +318,7 @@ func (s *Service) Current(locale string) model.DetectionSessionResponse {
 			Message: s.translator.T(locale, "common", "session.inactive"),
 		}
 	}
-	return s.responseForSession(current, locale, s.messageForState(current.state, locale))
+	return s.responseForSessionLocked(current, locale, s.messageForState(current.state, locale))
 }
 
 // Records 返回最新的标准化侦测记录。
@@ -332,6 +339,51 @@ func (s *Service) ScreenPositions(limit int) []model.ScreenPositionTarget {
 // ScreenPositionsWithDeviceLocation 返回大屏定位目标，并按指定设备位置计算距离关系。
 func (s *Service) ScreenPositionsWithDeviceLocation(limit int, deviceLocation *model.ScreenDeviceLocationResponse) []model.ScreenPositionTarget {
 	return s.store.ListScreenPositionsWithDeviceLocation(limit, deviceLocation)
+}
+
+// SendCommands writes text commands to the active detection TX serial port in order.
+func (s *Service) SendCommands(commands ...string) error {
+	s.commandMu.Lock()
+	defer s.commandMu.Unlock()
+
+	s.mu.RLock()
+	current := s.current
+	var serialClient *client.SerialClient
+	if current != nil && current.state == "connected" {
+		serialClient = current.client
+	}
+	s.mu.RUnlock()
+
+	if serialClient == nil {
+		return ErrCommandSerialOffline
+	}
+
+	for _, command := range commands {
+		if err := serialClient.Send(command); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *Service) sessionClient(sess *session) *client.SerialClient {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return sess.client
+}
+
+func (s *Service) closeSessionClient(sess *session) {
+	s.commandMu.Lock()
+	defer s.commandMu.Unlock()
+
+	s.mu.Lock()
+	serialClient := sess.client
+	sess.client = nil
+	s.mu.Unlock()
+
+	if serialClient != nil {
+		serialClient.Close()
+	}
 }
 
 // Parsed 返回最新解析结果，包含无法识别的原始行。
@@ -412,7 +464,7 @@ func (s *Service) manageSession(seq uint64, sess *session, connected bool) {
 		}
 
 		if !connected {
-			client, err := s.connectOnce(&sess.config, sess.txPortName, sess.locale)
+			client, err := s.connectOnce(&sess.config, sess.txPortName, sess.txBaudRate, sess.locale)
 			if err != nil {
 				state := sess.state
 				if state == "" {
@@ -449,11 +501,14 @@ func (s *Service) manageSession(seq uint64, sess *session, connected bool) {
 			s.store.Publish(model.Event{Type: "session.started", Time: time.Now(), Payload: response})
 		}
 
-		sess.client.ReadLoop(func(line string) {
+		serialClient := s.sessionClient(sess)
+		if serialClient == nil {
+			return
+		}
+		serialClient.ReadLoop(func(line string) {
 			s.IngestLine(sess.id, sess.config.PortName, line)
 		})
-		sess.client.Close()
-		sess.client = nil
+		s.closeSessionClient(sess)
 
 		if !s.isCurrentSession(seq, sess) {
 			return
@@ -513,6 +568,12 @@ func (s *Service) messageForState(state, locale string) string {
 
 // responseForSession 将内部会话状态转换为 API 响应结构。
 func (s *Service) responseForSession(sess *session, locale, message string) model.DetectionSessionResponse {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.responseForSessionLocked(sess, locale, message)
+}
+
+func (s *Service) responseForSessionLocked(sess *session, locale, message string) model.DetectionSessionResponse {
 	if sess == nil {
 		return model.DetectionSessionResponse{
 			Active:  false,
@@ -529,6 +590,8 @@ func (s *Service) responseForSession(sess *session, locale, message string) mode
 		RxPortName:    sess.config.PortName,
 		TxPortName:    sess.txPortName,
 		BaudRate:      sess.config.BaudRate,
+		RxBaudRate:    sess.config.BaudRate,
+		TxBaudRate:    firstNonZero(sess.txBaudRate, sess.config.BaudRate),
 		DataBits:      sess.config.DataBits,
 		StopBits:      sess.config.StopBits,
 		Parity:        sess.config.Parity,
@@ -542,7 +605,7 @@ func (s *Service) responseForSession(sess *session, locale, message string) mode
 }
 
 // connectOnce 打开接收和发送串口，并发送侦测启动命令。
-func (s *Service) connectOnce(cfg *serialport.Config, txPortName string, locale string) (*client.SerialClient, error) {
+func (s *Service) connectOnce(cfg *serialport.Config, txPortName string, txBaudRate int, locale string) (*client.SerialClient, error) {
 	s.mu.RLock()
 	openPort := s.openPort
 	s.mu.RUnlock()
@@ -558,6 +621,7 @@ func (s *Service) connectOnce(cfg *serialport.Config, txPortName string, locale 
 	} else {
 		txCfg := *cfg
 		txCfg.PortName = txPortName
+		txCfg.BaudRate = firstNonZero(txBaudRate, cfg.BaudRate)
 		writePort, err := openPort(&txCfg)
 		if err != nil {
 			_ = readPort.Close()
@@ -616,9 +680,10 @@ func (s *Service) saveSettings(req model.DetectionSessionRequest) error {
 
 // buildConfig 将 API 请求转换为串口配置。
 func (s *Service) buildConfig(req model.DetectionSessionRequest, rxPortName string) serialport.Config {
+	baudRate := firstNonZero(req.BaudRate, s.options.DefaultRxBaudRate)
 	cfg := serialport.Config{
 		PortName:    rxPortName,
-		BaudRate:    firstNonZero(req.BaudRate, s.options.DefaultBaudRate),
+		BaudRate:    firstNonZero(req.RxBaudRate, baudRate),
 		DataBits:    firstNonZero(req.DataBits, s.options.DefaultDataBits),
 		StopBits:    firstNonZero(req.StopBits, s.options.DefaultStopBits),
 		Parity:      strings.TrimSpace(req.Parity),
@@ -636,9 +701,15 @@ func (s *Service) buildConfig(req model.DetectionSessionRequest, rxPortName stri
 // normalizeRequest 使用服务默认值补齐缺省串口参数。
 func (s *Service) normalizeRequest(req model.DetectionSessionRequest) model.DetectionSessionRequest {
 	req.AutoConnect = true
-	if req.BaudRate == 0 {
-		req.BaudRate = s.options.DefaultBaudRate
+	rxDefaultBaudRate := s.options.DefaultRxBaudRate
+	txDefaultBaudRate := s.options.DefaultTxBaudRate
+	if req.BaudRate != 0 {
+		rxDefaultBaudRate = req.BaudRate
+		txDefaultBaudRate = req.BaudRate
 	}
+	req.RxBaudRate = firstNonZero(req.RxBaudRate, rxDefaultBaudRate)
+	req.TxBaudRate = firstNonZero(req.TxBaudRate, txDefaultBaudRate)
+	req.BaudRate = req.RxBaudRate
 	if req.DataBits == 0 {
 		req.DataBits = s.options.DefaultDataBits
 	}
@@ -706,6 +777,8 @@ func sameRequest(a, b model.DetectionSessionRequest) bool {
 		a.RxPortName == b.RxPortName &&
 		a.TxPortName == b.TxPortName &&
 		a.BaudRate == b.BaudRate &&
+		a.RxBaudRate == b.RxBaudRate &&
+		a.TxBaudRate == b.TxBaudRate &&
 		a.DataBits == b.DataBits &&
 		a.StopBits == b.StopBits &&
 		strings.TrimSpace(a.Parity) == strings.TrimSpace(b.Parity) &&
@@ -966,7 +1039,13 @@ func toParsedMessage(msg *parser.Message) model.ParsedMessage {
 // normalizeOptions 使用生产默认值补齐未设置的服务参数。
 func normalizeOptions(options Options) Options {
 	if options.DefaultBaudRate == 0 {
-		options.DefaultBaudRate = defaultBaudRate
+		options.DefaultBaudRate = defaultRxBaudRate
+	}
+	if options.DefaultRxBaudRate == 0 {
+		options.DefaultRxBaudRate = options.DefaultBaudRate
+	}
+	if options.DefaultTxBaudRate == 0 {
+		options.DefaultTxBaudRate = defaultTxBaudRate
 	}
 	if options.DefaultDataBits == 0 {
 		options.DefaultDataBits = 8

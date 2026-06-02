@@ -127,6 +127,13 @@ if ! command -v tar >/dev/null 2>&1; then
   echo "设备未安装 tar" >&2
   exit 1
 fi
+extract_firmware_package() {
+  if tar --version 2>/dev/null | grep -qi 'gnu tar'; then
+    tar --warning=no-unknown-keyword -xzf "$REMOTE_PACKAGE" -C "$EXTRACT_DIR"
+  else
+    tar -xzf "$REMOTE_PACKAGE" -C "$EXTRACT_DIR"
+  fi
+}
 if [ -z "$CHROMIUM_CMD" ]; then
   CHROMIUM_CMD="$(command -v chromium || command -v chromium-browser || command -v google-chrome || true)"
 fi
@@ -183,8 +190,9 @@ if [ -z "$KIOSK_HOME" ]; then
   KIOSK_HOME="/home/$KIOSK_USER"
 fi
 KIOSK_UID="$(id -u "$KIOSK_USER")"
+CHROMIUM_STATE_DIR="$KIOSK_HOME/.local/share/dr600ab-kiosk"
 CHROMIUM_RUNTIME_DIR="/run/dr600ab-kiosk"
-CHROMIUM_USER_DATA_DIR="$CHROMIUM_RUNTIME_DIR/profile"
+CHROMIUM_USER_DATA_DIR="$CHROMIUM_STATE_DIR/profile"
 CHROMIUM_CACHE_DIR="$CHROMIUM_RUNTIME_DIR/cache"
 LEGACY_CHROMIUM_USER_DATA_DIR="$KIOSK_HOME/.chromium-kiosk"
 KIOSK_LAUNCHER="/usr/local/bin/dr600ab-kiosk-start"
@@ -273,6 +281,105 @@ install_user_autostart() {
   $SUDO chown "$target_user:" "$target_file" || true
 }
 
+wait_for_backend() {
+  health_url="http://127.0.0.1:$API_PORT/healthz"
+  for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do
+    if command -v curl >/dev/null 2>&1; then
+      curl -fsS "$health_url" >/dev/null 2>&1 && return 0
+    elif command -v wget >/dev/null 2>&1; then
+      wget -q -O /dev/null "$health_url" >/dev/null 2>&1 && return 0
+    else
+      sleep 1
+      return 0
+    fi
+    sleep 1
+  done
+  echo "后端健康检查未就绪，仍尝试启动 Chromium" >&2
+}
+
+is_current_shell_or_ancestor() {
+  candidate="$1"
+  current="$$"
+  while [ -n "$current" ] && [ "$current" != "0" ]; do
+    if [ "$candidate" = "$current" ]; then
+      return 0
+    fi
+    if [ ! -r "/proc/$current/status" ]; then
+      break
+    fi
+    current="$(awk '/^PPid:/ { print $2; exit }' "/proc/$current/status" 2>/dev/null || true)"
+  done
+  return 1
+}
+
+stop_existing_kiosk_processes() {
+  if ! command -v pgrep >/dev/null 2>&1; then
+    return 0
+  fi
+  pids="$(pgrep -u "$KIOSK_USER" -f '[d]r600ab-kiosk-start|[c]hromium.*127[.]0[.]0[.]1:18080' 2>/dev/null || true)"
+  if [ -z "$pids" ]; then
+    return 0
+  fi
+  for pid in $pids; do
+    case "$pid" in
+      ''|*[!0-9]*) continue ;;
+    esac
+    if is_current_shell_or_ancestor "$pid"; then
+      continue
+    fi
+    $SUDO kill -TERM "$pid" >/dev/null 2>&1 || true
+  done
+}
+
+start_kiosk_now() {
+  display_number="${DISPLAY_VALUE#:}"
+  display_number="${display_number%%.*}"
+  if [ ! -S "/tmp/.X11-unix/X$display_number" ]; then
+    echo "未检测到 X11 socket /tmp/.X11-unix/X$display_number，已安装桌面自启动，跳过立即启动 Chromium" >&2
+    return 0
+  fi
+
+  stop_existing_kiosk_processes
+
+  launcher_prefix=
+  if command -v nohup >/dev/null 2>&1; then
+    launcher_prefix=nohup
+  fi
+
+  if [ "$(id -u)" = "$KIOSK_UID" ]; then
+    $launcher_prefix env \
+      DISPLAY="$DISPLAY_VALUE" \
+      APP_URL="$APP_URL" \
+      HOME="$KIOSK_HOME" \
+      KIOSK_HOME="$KIOSK_HOME" \
+      KIOSK_UID="$KIOSK_UID" \
+      DR600AB_KIOSK_LOG=/tmp/dr600ab-kiosk.log \
+      "$KIOSK_LAUNCHER" >/dev/null 2>&1 &
+  elif command -v runuser >/dev/null 2>&1; then
+    $SUDO runuser -u "$KIOSK_USER" -- $launcher_prefix env \
+      DISPLAY="$DISPLAY_VALUE" \
+      APP_URL="$APP_URL" \
+      HOME="$KIOSK_HOME" \
+      KIOSK_HOME="$KIOSK_HOME" \
+      KIOSK_UID="$KIOSK_UID" \
+      DR600AB_KIOSK_LOG=/tmp/dr600ab-kiosk.log \
+      "$KIOSK_LAUNCHER" >/dev/null 2>&1 &
+  elif command -v sudo >/dev/null 2>&1; then
+    sudo -H -u "$KIOSK_USER" $launcher_prefix env \
+      DISPLAY="$DISPLAY_VALUE" \
+      APP_URL="$APP_URL" \
+      HOME="$KIOSK_HOME" \
+      KIOSK_HOME="$KIOSK_HOME" \
+      KIOSK_UID="$KIOSK_UID" \
+      DR600AB_KIOSK_LOG=/tmp/dr600ab-kiosk.log \
+      "$KIOSK_LAUNCHER" >/dev/null 2>&1 &
+  else
+    echo "无法切换到 $KIOSK_USER 立即启动 Chromium，已安装桌面自启动" >&2
+    return 0
+  fi
+  echo "Kiosk immediate launch: attempted"
+}
+
 migrate_legacy_database() {
   name="$1"
   legacy="$INSTALL_DIR/backend/data/$name"
@@ -292,7 +399,7 @@ migrate_legacy_database() {
 EXTRACT_DIR="$TASK_DIR/extract"
 rm -rf "$EXTRACT_DIR"
 mkdir -p "$EXTRACT_DIR"
-tar -xzf "$REMOTE_PACKAGE" -C "$EXTRACT_DIR"
+extract_firmware_package
 BINARY="$(find "$EXTRACT_DIR" -type f -name dr600ab | head -n 1)"
 if [ -z "$BINARY" ]; then
   echo "固件包中未找到 dr600ab 可执行文件" >&2
@@ -332,6 +439,7 @@ fi
 DISPLAY_VALUE="${DISPLAY_VALUE:-${DISPLAY:-:0}}"
 KIOSK_HOME="${KIOSK_HOME:-$HOME}"
 KIOSK_UID="${KIOSK_UID:-$(id -u)}"
+CHROMIUM_STATE_DIR="${CHROMIUM_STATE_DIR:-$KIOSK_HOME/.local/share/dr600ab-kiosk}"
 if [ -z "${CHROMIUM_RUNTIME_DIR:-}" ]; then
   if [ -n "${XDG_RUNTIME_DIR:-}" ] && [ -d "$XDG_RUNTIME_DIR" ]; then
     CHROMIUM_RUNTIME_DIR="$XDG_RUNTIME_DIR/dr600ab-kiosk"
@@ -341,7 +449,7 @@ if [ -z "${CHROMIUM_RUNTIME_DIR:-}" ]; then
     CHROMIUM_RUNTIME_DIR="/tmp/dr600ab-kiosk-$KIOSK_UID"
   fi
 fi
-CHROMIUM_USER_DATA_DIR="${CHROMIUM_USER_DATA_DIR:-$CHROMIUM_RUNTIME_DIR/profile}"
+CHROMIUM_USER_DATA_DIR="${CHROMIUM_USER_DATA_DIR:-$CHROMIUM_STATE_DIR/profile}"
 CHROMIUM_CACHE_DIR="${CHROMIUM_CACHE_DIR:-$CHROMIUM_RUNTIME_DIR/cache}"
 APP_URL="${APP_URL:-http://127.0.0.1:18080/#/screen}"
 
@@ -468,6 +576,8 @@ $SUDO rm -f /etc/systemd/system/dr600ab-kiosk.service
 $SUDO systemctl daemon-reload
 $SUDO systemctl enable dr600ab.service >/dev/null
 $SUDO systemctl restart dr600ab.service
+wait_for_backend
+start_kiosk_now
 rm -rf "$TASK_DIR"
 echo "Installed backend: $INSTALL_DIR/dr600ab"
 echo "Backend service user: $SERVICE_USER"
@@ -476,7 +586,7 @@ echo "Screen URL: $APP_URL"
 echo "Kiosk autostart: $AUTOSTART_FILE"
 echo "Kiosk system autostart: $SYSTEM_AUTOSTART_FILE"
 echo "Backend status: $(systemctl is-active dr600ab.service)"
-echo "Kiosk startup: desktop autostart"
+echo "Kiosk startup: desktop autostart + immediate launch"
 `, shellQuote(remotePackage),
 		shellQuote(req.InstallDir),
 		shellQuote(taskDir),

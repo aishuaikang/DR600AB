@@ -22,21 +22,42 @@ func main() {
 	portName := flag.String("port", "", "兼容参数：接收和发送使用同一个串口")
 	rxPortName := flag.String("rx-port", "", "接收数据串口名称，例如 macOS: /dev/tty.usbserial-XXXX")
 	txPortName := flag.String("tx-port", "", "发送命令串口名称，例如 macOS: /dev/tty.usbserial-YYYY")
-	baudRate := flag.Int("baud", 460800, "波特率")
+	baudRate := flag.Int("baud", 0, "兼容参数：接收和发送使用同一个波特率")
+	rxBaudRate := flag.Int("rx-baud", 115200, "接收数据串口波特率")
+	txBaudRate := flag.Int("tx-baud", 460800, "发送命令串口波特率")
 	dataBits := flag.Int("data", 8, "数据位")
 	stopBits := flag.Int("stop", 1, "停止位(1 或 2)")
 	parity := flag.String("parity", "none", "校验位: none/even/odd")
 	verbose := flag.Bool("verbose", false, "打印收发数据")
 	flag.Parse()
+	baudFlagSet := false
+	rxBaudFlagSet := false
+	txBaudFlagSet := false
+	flag.Visit(func(f *flag.Flag) {
+		switch f.Name {
+		case "baud":
+			baudFlagSet = true
+		case "rx-baud":
+			rxBaudFlagSet = true
+		case "tx-baud":
+			txBaudFlagSet = true
+		}
+	})
 
+	if baudFlagSet && !rxBaudFlagSet {
+		*rxBaudRate = *baudRate
+	}
+	if baudFlagSet && !txBaudFlagSet {
+		*txBaudRate = *baudRate
+	}
 	baseCfg := serialport.Config{
-		BaudRate: *baudRate,
+		BaudRate: *rxBaudRate,
 		DataBits: *dataBits,
 		StopBits: *stopBits,
 		Parity:   *parity,
 	}
 
-	readPort, readPortName, writePort, writePortName, err := openDetectorPorts(baseCfg, *portName, *rxPortName, *txPortName)
+	readPort, readPortName, writePort, writePortName, err := openDetectorPorts(baseCfg, *portName, *rxPortName, *txPortName, *rxBaudRate, *txBaudRate)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -44,11 +65,11 @@ func main() {
 	c := client.NewDuplexSerialClient(readPort, readPortName, writePort, writePortName, *verbose)
 	defer c.Close()
 
-	app := ui.NewDuplexApp(c, readPortName, writePortName, baseCfg.BaudRate)
+	app := ui.NewDuplexApp(c, readPortName, writePortName, *rxBaudRate)
 	app.Run()
 }
 
-func openDetectorPorts(baseCfg serialport.Config, legacyPortName, rxPortName, txPortName string) (serial.Port, string, serial.Port, string, error) {
+func openDetectorPorts(baseCfg serialport.Config, legacyPortName, rxPortName, txPortName string, rxBaudRate, txBaudRate int) (serial.Port, string, serial.Port, string, error) {
 	if rxPortName == "" {
 		rxPortName = legacyPortName
 	}
@@ -73,6 +94,7 @@ func openDetectorPorts(baseCfg serialport.Config, legacyPortName, rxPortName, tx
 
 	rxCfg := baseCfg
 	rxCfg.PortName = rxPortName
+	rxCfg.BaudRate = rxBaudRate
 	readPort, err := serialport.Open(&rxCfg)
 	if err != nil {
 		return nil, "", nil, "", err
@@ -84,6 +106,7 @@ func openDetectorPorts(baseCfg serialport.Config, legacyPortName, rxPortName, tx
 
 	txCfg := baseCfg
 	txCfg.PortName = txPortName
+	txCfg.BaudRate = txBaudRate
 	writePort, err := serialport.Open(&txCfg)
 	if err != nil {
 		readPort.Close()

@@ -5114,10 +5114,11 @@ body.virtual-keyboard-open .app-loading-overlay {
 .screen-fpv-table__head,
 .screen-fpv-row {
   display: grid;
-  grid-template-columns: minmax(5.1em, 1.2fr) minmax(3.6em, 0.72fr) minmax(
-      4.8em,
-      0.98fr
-    );
+  grid-template-columns:
+    minmax(5.1em, 1.18fr)
+    minmax(3.6em, 0.68fr)
+    minmax(4.8em, 0.9fr)
+    minmax(4.4em, 0.72fr);
   align-items: stretch;
 }
 
@@ -5169,7 +5170,8 @@ body.virtual-keyboard-open .app-loading-overlay {
 }
 
 .screen-fpv-row:hover,
-.screen-fpv-row--selected {
+.screen-fpv-row--selected,
+.screen-fpv-row--playing {
   background: rgba(244, 201, 93, 0.075);
   box-shadow:
     inset 3px 0 0 rgba(244, 201, 93, 0.74),
@@ -5250,6 +5252,202 @@ body.virtual-keyboard-open .app-loading-overlay {
   height: 100%;
   border-radius: inherit;
   background: linear-gradient(90deg, #ef6f7f, #d6b957 45%, #26c9ff);
+}
+
+.screen-fpv-row__action {
+  gap: 0.2em;
+}
+
+.screen-fpv-row__view-button {
+  display: inline-flex;
+  min-width: 0;
+  max-width: 100%;
+  min-height: 2.1em;
+  align-items: center;
+  justify-content: center;
+  gap: 0.24em;
+  border: 1px solid rgba(38, 201, 255, 0.32);
+  border-radius: 999px;
+  padding: 0.26em 0.58em;
+  color: #dff8ff;
+  font: inherit;
+  font-size: 0.86em;
+  font-weight: 800;
+  line-height: 1;
+  background: rgba(38, 201, 255, 0.11);
+  cursor: pointer;
+  transition:
+    border-color 0.16s ease,
+    background-color 0.16s ease,
+    color 0.16s ease;
+}
+
+.screen-fpv-row__view-button:hover,
+.screen-fpv-row__view-button--active {
+  border-color: rgba(244, 201, 93, 0.72);
+  color: #fff8df;
+  background: rgba(244, 201, 93, 0.16);
+}
+
+.screen-fpv-row__view-button:disabled {
+  border-color: rgba(148, 163, 184, 0.18);
+  color: rgba(194, 214, 220, 0.36);
+  background: rgba(148, 163, 184, 0.06);
+  cursor: not-allowed;
+}
+
+.screen-fpv-row__view-button:disabled:hover {
+  border-color: rgba(148, 163, 184, 0.18);
+  color: rgba(194, 214, 220, 0.36);
+  background: rgba(148, 163, 184, 0.06);
+}
+
+.screen-fpv-row__view-button span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.screen-fpv-video-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: block;
+  padding: 0;
+  background: #02060a;
+  overflow: hidden;
+}
+
+.screen-fpv-video-modal__card {
+  position: relative;
+  display: grid;
+  width: 100vw;
+  height: 100vh;
+  max-height: none;
+  min-height: 0;
+  grid-template-rows: auto minmax(0, 1fr) auto auto;
+  gap: 0.68em;
+  border: 0;
+  border-radius: 0;
+  padding: 0.78em 0.9em 0.9em;
+  color: #f5fbff;
+  background:
+    linear-gradient(180deg, rgba(10, 28, 43, 0.98), rgba(2, 7, 12, 1));
+  box-shadow: none;
+}
+
+.screen-fpv-video-modal .screen-navigation-modal__close {
+  top: 0.78em;
+  right: 0.9em;
+}
+
+.screen-fpv-video-modal__header {
+  display: grid;
+  min-height: 0;
+  gap: 0.12em;
+  padding-right: 3em;
+}
+
+.screen-fpv-video-modal__header h2 {
+  margin: 0;
+  color: #ffffff;
+  font-size: 1.16em;
+  line-height: 1.12;
+}
+
+.screen-fpv-video-modal__header p {
+  margin: 0;
+  color: rgba(194, 214, 220, 0.74);
+  font-family: var(--font-mono);
+  font-size: 0.72em;
+  font-weight: 700;
+}
+
+.screen-fpv-video-modal__viewer {
+  position: relative;
+  display: grid;
+  width: auto;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  max-width: 100%;
+  max-height: 100%;
+  aspect-ratio: var(--fpv-display-aspect, var(--fpv-frame-aspect, 4 / 3));
+  align-self: center;
+  justify-self: center;
+  place-items: center;
+  border: 1px solid rgba(79, 209, 255, 0.18);
+  border-radius: 0.72em;
+  background:
+    linear-gradient(90deg, rgba(255, 255, 255, 0.04) 1px, transparent 1px),
+    linear-gradient(0deg, rgba(255, 255, 255, 0.04) 1px, transparent 1px),
+    #03070b;
+  background-size: 1.1em 1.1em;
+  overflow: hidden;
+}
+
+.screen-fpv-video-modal__viewer img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border-radius: inherit;
+  image-rendering: pixelated;
+  object-fit: contain;
+}
+
+.screen-fpv-video-modal__empty {
+  display: inline-grid;
+  place-items: center;
+  gap: 0.5em;
+  color: rgba(194, 214, 220, 0.78);
+  font-size: 0.82em;
+  font-weight: 700;
+}
+
+.screen-fpv-video-modal__status {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.42em;
+}
+
+.screen-fpv-video-modal__status span {
+  display: grid;
+  min-width: 0;
+  gap: 0.12em;
+  border: 1px solid rgba(79, 209, 255, 0.14);
+  border-radius: 0.62em;
+  padding: 0.38em 0.46em;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.screen-fpv-video-modal__status em {
+  color: rgba(194, 214, 220, 0.62);
+  font-size: 0.58em;
+  font-style: normal;
+  font-weight: 800;
+}
+
+.screen-fpv-video-modal__status strong {
+  min-width: 0;
+  overflow: hidden;
+  color: #ffffff;
+  font-family: var(--font-mono);
+  font-size: 0.74em;
+  font-weight: 800;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.screen-fpv-video-modal__error {
+  margin: 0;
+  border: 1px solid rgba(239, 111, 127, 0.34);
+  border-radius: 0.42em;
+  padding: 0.48em 0.58em;
+  color: #ffd9df;
+  background: rgba(239, 111, 127, 0.12);
+  font-size: 0.68em;
+  font-weight: 700;
 }
 
 .screen-empty {
@@ -5771,10 +5969,11 @@ body.virtual-keyboard-open .app-loading-overlay {
 
   .screen-fpv-table__head,
   .screen-fpv-row {
-    grid-template-columns: minmax(5em, 1.24fr) minmax(3.8em, 0.86fr) minmax(
-        4.6em,
-        0.98fr
-      );
+    grid-template-columns:
+      minmax(5em, 1.12fr)
+      minmax(3.8em, 0.76fr)
+      minmax(4.6em, 0.92fr)
+      minmax(4.2em, 0.78fr);
   }
 
   .screen-fpv-table__head span {
@@ -5790,6 +5989,29 @@ body.virtual-keyboard-open .app-loading-overlay {
   .screen-fpv-row > span {
     padding: 0.26em 0.22em;
     font-size: 0.64em;
+  }
+
+  .screen-fpv-video-modal {
+    padding: 0;
+  }
+
+  .screen-fpv-video-modal__card {
+    width: 100vw;
+    height: 100vh;
+    max-height: none;
+    gap: 0.46em;
+    border-radius: 0;
+    padding: 0.54em;
+  }
+
+  .screen-fpv-video-modal__viewer {
+    width: auto;
+    height: 100%;
+    min-height: 0;
+  }
+
+  .screen-fpv-video-modal__status {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .screen-device-status-modal-shell {

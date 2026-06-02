@@ -1,14 +1,25 @@
 package httpapi
 
 import (
+	"bufio"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"math"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gofiber/fiber/v2"
 
 	"dr600ab-api/internal/deception"
+	"dr600ab-api/internal/detection"
+	"dr600ab-api/internal/fpv"
 	"dr600ab-api/internal/interference"
 	"dr600ab-api/internal/model"
 )
+
+const fpvVideoHeartbeatInterval = time.Second
 
 // registerScreenRoutes 挂载大屏公开接口。
 func (s *Server) registerScreenRoutes(api fiber.Router) {
@@ -22,6 +33,7 @@ func (s *Server) registerScreenRoutes(api fiber.Router) {
 	api.Post("/screen/deception", s.handleSetScreenDeception)
 	api.Get("/screen/deception/status", s.handleScreenDeceptionStatus)
 	api.Get("/screen/stream", s.handleScreenStream)
+	api.Get("/screen/fpv/video", s.handleScreenFPVVideo)
 }
 
 // handleScreenStatus 返回大屏依赖的串口能力配置和运行状态。
@@ -57,6 +69,120 @@ func (s *Server) handleScreenDetections(c *fiber.Ctx) error {
 		Items: items,
 		Count: len(items),
 	})
+}
+
+// handleScreenFPVVideo starts a single FPV playback session and streams frames.
+func (s *Server) handleScreenFPVVideo(c *fiber.Ctx) error {
+	locale := s.resolveLocale(c)
+	frequency, err := parseFPVFrequency(c)
+	if err != nil {
+		return s.respondError(c, fiber.StatusBadRequest, "invalid_request", "频点参数无效", err.Error())
+	}
+	if s.fpv == nil {
+		return s.respondError(c, fiber.StatusInternalServerError, "internal", s.translator.T(locale, "errors", "internal"), nil)
+	}
+
+	playback, err := s.fpv.BeginPlayback(frequency)
+	if err != nil {
+		if errors.Is(err, fpv.ErrPlaybackBusy) {
+			return s.respondError(c, fiber.StatusConflict, "fpv_video_busy", "FPV 图传正在播放", nil)
+		}
+		return s.respondError(c, fiber.StatusBadRequest, "invalid_request", "频点参数无效", err.Error())
+	}
+
+	if err := s.startFPVPlayback(playback); err != nil {
+		s.fpv.EndPlayback(playback)
+		if errors.Is(err, detection.ErrCommandSerialOffline) {
+			return s.respondError(c, fiber.StatusServiceUnavailable, "detection_serial_offline", "侦测串口未连接", nil)
+		}
+		return s.respondError(c, fiber.StatusInternalServerError, "fpv_control_failed", "图传控制命令发送失败", err.Error())
+	}
+
+	serverDone := c.Context().Done()
+	c.Set(fiber.HeaderContentType, "text/event-stream")
+	c.Set(fiber.HeaderCacheControl, "no-cache")
+	c.Set(fiber.HeaderConnection, "keep-alive")
+	c.Context().SetBodyStreamWriter(func(w *bufio.Writer) {
+		defer func() {
+			if err := s.stopFPVPlayback(); err != nil {
+				fmt.Printf("停止 FPV 图传命令失败: %v\n", err)
+			}
+			s.fpv.EndPlayback(playback)
+		}()
+
+		events, unsubscribe := s.fpv.Subscribe(s.cfg.EventBufferSize)
+		defer unsubscribe()
+
+		_ = writeComment(w, "connected")
+		_ = writeJSONSSE(w, "status", s.fpv.Snapshot())
+		if frame := s.fpv.LastFrame(); frame != nil {
+			_ = writeJSONSSE(w, "frame", frame)
+		}
+
+		ticker := time.NewTicker(fpvVideoHeartbeatInterval)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case message, ok := <-events:
+				if !ok {
+					return
+				}
+				if err := writeSSEPayload(w, message.Name, message.Data); err != nil {
+					return
+				}
+			case <-ticker.C:
+				if err := writeComment(w, "ping"); err != nil {
+					return
+				}
+			// fasthttp RequestCtx.Done is a server shutdown signal; client
+			// disconnects are detected by Flush errors from frame/ping writes.
+			case <-serverDone:
+				return
+			}
+		}
+	})
+	return nil
+}
+
+func (s *Server) startFPVPlayback(playback fpv.Playback) error {
+	if err := s.detection.SendCommands(fmt.Sprintf("start -imag %s\r\n", s.fpv.Address())); err != nil {
+		return err
+	}
+	if err := s.detection.SendCommands(fmt.Sprintf("start -band %d,%d\r\n", playback.BandStart, playback.BandEnd)); err != nil {
+		if stopErr := s.stopFPVPlayback(); stopErr != nil {
+			return errors.Join(err, stopErr)
+		}
+		return err
+	}
+	return nil
+}
+
+func (s *Server) stopFPVPlayback() error {
+	return s.detection.SendCommands(
+		"start -imag 0\r\n",
+		"start -freq 1\r\n",
+	)
+}
+
+func parseFPVFrequency(c *fiber.Ctx) (float64, error) {
+	raw := strings.TrimSpace(c.Query("frequency"))
+	if raw == "" {
+		return 0, fmt.Errorf("frequency is required")
+	}
+	frequency, err := strconv.ParseFloat(raw, 64)
+	if err != nil || math.IsNaN(frequency) || math.IsInf(frequency, 0) || frequency <= 0 {
+		return 0, fmt.Errorf("invalid frequency: %q", raw)
+	}
+	return frequency, nil
+}
+
+func writeJSONSSE(w *bufio.Writer, event string, value any) error {
+	payload, err := json.Marshal(value)
+	if err != nil {
+		return err
+	}
+	return writeSSEPayload(w, event, payload)
 }
 
 // handleScreenPositions 返回大屏使用的合并定位目标列表。

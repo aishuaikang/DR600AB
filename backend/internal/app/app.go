@@ -11,6 +11,7 @@ import (
 	"dr600ab-api/internal/deceptionreport"
 	"dr600ab-api/internal/detection"
 	"dr600ab-api/internal/developer"
+	"dr600ab-api/internal/fpv"
 	"dr600ab-api/internal/gps"
 	"dr600ab-api/internal/httpapi"
 	"dr600ab-api/internal/i18n"
@@ -24,7 +25,9 @@ import (
 
 // App 聚合后端 HTTP 服务及其运行依赖。
 type App struct {
-	server *httpapi.Server
+	server    *httpapi.Server
+	fpvCancel context.CancelFunc
+	fpvDone   chan struct{}
 }
 
 // New 根据配置创建应用，并恢复已保存的串口设置。
@@ -66,6 +69,8 @@ func New(cfg config.Config) (*App, error) {
 	state.SetIntrusionArchiver(intrusionStore)
 	detectionSvc := detection.NewService(state, translator, settingsStore, detection.Options{
 		DefaultBaudRate:       cfg.DetectionDefaultBaud,
+		DefaultRxBaudRate:     cfg.DetectionDefaultRxBaud,
+		DefaultTxBaudRate:     cfg.DetectionDefaultTxBaud,
 		DefaultDataBits:       cfg.DefaultDataBits,
 		DefaultStopBits:       cfg.DefaultStopBits,
 		DefaultParity:         cfg.DefaultParity,
@@ -121,6 +126,20 @@ func New(cfg config.Config) (*App, error) {
 		ReconnectInitialDelay: cfg.ReconnectInitialDelay,
 		ReconnectMaxDelay:     cfg.ReconnectMaxDelay,
 	})
+	fpvSvc := fpv.NewService(fpv.Options{
+		Host:              cfg.FPVTCPHost,
+		Port:              cfg.FPVTCPPort,
+		BindRetryInterval: cfg.FPVBindRetryInterval,
+		MaxFrameBytes:     cfg.FPVMaxFrameBytes,
+		FirstFrameTimeout: cfg.FPVFirstFrameTimeout,
+		ReadIdleTimeout:   cfg.FPVReadIdleTimeout,
+	})
+	fpvCtx, fpvCancel := context.WithCancel(context.Background())
+	fpvDone := make(chan struct{})
+	go func() {
+		defer close(fpvDone)
+		fpvSvc.Run(fpvCtx)
+	}()
 
 	detectionSvc.RestoreSavedSettings(cfg.DefaultLocale)
 	gpsSvc.RestoreSavedSettings(cfg.DefaultLocale)
@@ -143,7 +162,10 @@ func New(cfg config.Config) (*App, error) {
 			intrusionStore,
 			reportStore,
 			interferenceReportStore,
+			fpvSvc,
 		),
+		fpvCancel: fpvCancel,
+		fpvDone:   fpvDone,
 	}, nil
 }
 
@@ -154,5 +176,11 @@ func (a *App) Listen(addr string) error {
 
 // Shutdown 停止 HTTP API 并释放服务资源。
 func (a *App) Shutdown() error {
+	if a.fpvCancel != nil {
+		a.fpvCancel()
+	}
+	if a.fpvDone != nil {
+		<-a.fpvDone
+	}
 	return a.server.Shutdown()
 }

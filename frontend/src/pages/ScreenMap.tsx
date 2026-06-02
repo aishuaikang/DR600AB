@@ -20,9 +20,11 @@ import { installLeafletCoordConverter } from "../utils/leafletCoordConverter";
 import { isSerialWhitelisted } from "../utils/whitelist";
 import {
   REFERENCE_DEFAULT_MAP_LAYER,
+  REFERENCE_LEGACY_MAP_LAYER_STORAGE_KEY,
   REFERENCE_MAP_CENTER,
   REFERENCE_MAP_LAYER_STORAGE_KEY,
   REFERENCE_MAP_ZOOM,
+  referenceDefaultMapLayerForLocale,
   referenceMapLayers,
   referenceMarkerIcons,
   type ReferenceMapLayer,
@@ -74,32 +76,59 @@ function getOfflineTileBase() {
   return "";
 }
 
-function getStoredMapLayer(): ReferenceMapLayer {
-  if (typeof window === "undefined") {
-    return REFERENCE_DEFAULT_MAP_LAYER;
+function parseStoredMapLayer(raw: string | null): ReferenceMapLayer | null {
+  if (!raw) {
+    return null;
+  }
+  if (referenceMapLayers.includes(raw as ReferenceMapLayer)) {
+    return raw as ReferenceMapLayer;
   }
 
   try {
-    const stored = window.localStorage.getItem(REFERENCE_MAP_LAYER_STORAGE_KEY);
-    if (stored && referenceMapLayers.includes(stored as ReferenceMapLayer)) {
-      return stored as ReferenceMapLayer;
+    const parsed = JSON.parse(raw) as unknown;
+    if (typeof parsed === "string" && referenceMapLayers.includes(parsed as ReferenceMapLayer)) {
+      return parsed as ReferenceMapLayer;
     }
-    if (stored) {
-      const parsed = JSON.parse(stored) as { mapLayer?: string };
-      if (parsed.mapLayer && referenceMapLayers.includes(parsed.mapLayer as ReferenceMapLayer)) {
-        return parsed.mapLayer as ReferenceMapLayer;
+    if (parsed && typeof parsed === "object" && "mapLayer" in parsed) {
+      const layer = (parsed as { mapLayer?: unknown }).mapLayer;
+      if (typeof layer === "string" && referenceMapLayers.includes(layer as ReferenceMapLayer)) {
+        return layer as ReferenceMapLayer;
       }
     }
   } catch {
-    // Ignore storage errors and use the reference default.
+    // Ignore malformed storage values.
   }
 
-  return REFERENCE_DEFAULT_MAP_LAYER;
+  return null;
+}
+
+function getStoredMapLayer(): ReferenceMapLayer | null {
+  if (typeof window === "undefined") {
+    return null;
+  }
+
+  for (const key of [REFERENCE_MAP_LAYER_STORAGE_KEY, REFERENCE_LEGACY_MAP_LAYER_STORAGE_KEY]) {
+    try {
+      const layer = parseStoredMapLayer(window.localStorage.getItem(key));
+      if (layer) {
+        return layer;
+      }
+    } catch {
+      // Ignore storage errors and continue to the next key.
+    }
+  }
+
+  return null;
 }
 
 function persistMapLayer(layer: ReferenceMapLayer) {
+  if (typeof window === "undefined") {
+    return;
+  }
+
   try {
     window.localStorage.setItem(REFERENCE_MAP_LAYER_STORAGE_KEY, JSON.stringify({ mapLayer: layer }));
+    window.localStorage.removeItem(REFERENCE_LEGACY_MAP_LAYER_STORAGE_KEY);
   } catch {
     // Ignore storage errors.
   }
@@ -109,6 +138,20 @@ function getAvailableMapLayers(visibleMapLayers: ReferenceMapLayer[]) {
   const visibleSet = new Set(visibleMapLayers);
   const layers = referenceMapLayers.filter((key) => visibleSet.has(key));
   return layers.length ? layers : referenceMapLayers;
+}
+
+function resolveActiveMapLayer(
+  storedLayer: ReferenceMapLayer | null,
+  availableMapLayers: ReferenceMapLayer[],
+  defaultMapLayer: ReferenceMapLayer,
+) {
+  if (storedLayer && availableMapLayers.includes(storedLayer)) {
+    return storedLayer;
+  }
+  if (availableMapLayers.includes(defaultMapLayer)) {
+    return defaultMapLayer;
+  }
+  return availableMapLayers[0] ?? REFERENCE_DEFAULT_MAP_LAYER;
 }
 
 function buildBaseLayers(): Record<ReferenceMapLayer, L.TileLayer> {
@@ -618,7 +661,7 @@ export function PositionMap({
   onMapReady = noopMapReady,
   className,
 }: PositionMapProps) {
-  const { t } = useTranslation();
+  const { t, i18n: i18nInstance } = useTranslation();
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<L.Map | null>(null);
   const deviceLayerRef = useRef<L.LayerGroup | null>(null);
@@ -628,6 +671,7 @@ export function PositionMap({
   const realDataRef = useRef<RealMapData>({ deviceLocation, deviceHeadingDeg, positions, whitelist });
   const hasFitRealBoundsRef = useRef(false);
   const visibleMapLayersKey = visibleMapLayers.join("|");
+  const defaultMapLayer = referenceDefaultMapLayerForLocale(i18nInstance.language);
 
   useEffect(() => {
     onSelectPositionRef.current = onSelectPosition;
@@ -682,7 +726,7 @@ export function PositionMap({
     const availableMapLayers = getAvailableMapLayers(visibleMapLayers);
     const baseLayers = buildBaseLayers();
     const storedLayer = getStoredMapLayer();
-    const activeLayer = availableMapLayers.includes(storedLayer) ? storedLayer : availableMapLayers[0] ?? REFERENCE_DEFAULT_MAP_LAYER;
+    const activeLayer = resolveActiveMapLayer(storedLayer, availableMapLayers, defaultMapLayer);
     baseLayers[activeLayer].addTo(map);
 
     const customButtons = createDrawControlButtonGroup([
@@ -757,7 +801,7 @@ export function PositionMap({
       hasFitRealBoundsRef.current = false;
       onMapReady(null);
     };
-  }, [onMapReady, t, visibleMapLayersKey]);
+  }, [defaultMapLayer, onMapReady, t, visibleMapLayersKey]);
 
   useEffect(() => {
     const map = mapRef.current;

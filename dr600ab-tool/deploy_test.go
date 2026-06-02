@@ -15,7 +15,10 @@ func TestBuildDeployScript(t *testing.T) {
 		"FULL_UPDATE='1'",
 		"INSTALL_DIR='/opt/dr600ab prod'",
 		"KIOSK_USER='ask'",
+		"extract_firmware_package()",
+		"tar --warning=no-unknown-keyword -xzf \"$REMOTE_PACKAGE\" -C \"$EXTRACT_DIR\"",
 		"tar -xzf \"$REMOTE_PACKAGE\" -C \"$EXTRACT_DIR\"",
+		"extract_firmware_package",
 		"$SUDO install -m 0755 \"$BINARY\" \"$INSTALL_DIR/dr600ab\"",
 		"/etc/systemd/system/dr600ab.service",
 		"API_INTRUSION_DB_PATH=$INSTALL_DIR/data/intrusions.db",
@@ -29,10 +32,21 @@ func TestBuildDeployScript(t *testing.T) {
 		"install_user_autostart \"$KIOSK_USER\"",
 		"DR600AB_KIOSK_LOG=/tmp/dr600ab-kiosk.log",
 		"Exec=env DR600AB_KIOSK_LOG=/tmp/dr600ab-kiosk.log $KIOSK_LAUNCHER",
+		`CHROMIUM_STATE_DIR="$KIOSK_HOME/.local/share/dr600ab-kiosk"`,
+		`CHROMIUM_USER_DATA_DIR="$CHROMIUM_STATE_DIR/profile"`,
+		`CHROMIUM_STATE_DIR="${CHROMIUM_STATE_DIR:-$KIOSK_HOME/.local/share/dr600ab-kiosk}"`,
+		`CHROMIUM_USER_DATA_DIR="${CHROMIUM_USER_DATA_DIR:-$CHROMIUM_STATE_DIR/profile}"`,
+		"wait_for_backend",
+		"is_current_shell_or_ancestor",
+		"stop_existing_kiosk_processes",
+		"$SUDO kill -TERM \"$pid\"",
+		"start_kiosk_now",
+		"Kiosk immediate launch: attempted",
 		"--disable-gpu",
 		`--disk-cache-dir="$CHROMIUM_CACHE_DIR"`,
 		"$SUDO rm -f /etc/systemd/system/dr600ab-kiosk.service",
 		"$SUDO systemctl restart dr600ab.service",
+		"Kiosk startup: desktop autostart + immediate launch",
 	} {
 		if !strings.Contains(script, want) {
 			t.Fatalf("script missing %q\n%s", want, script)
@@ -41,6 +55,7 @@ func TestBuildDeployScript(t *testing.T) {
 	for _, forbidden := range []string{
 		"API_DB_KEY_FILE",
 		"db.key",
+		"pkill -u \"$KIOSK_USER\"",
 	} {
 		if strings.Contains(script, forbidden) {
 			t.Fatalf("script contains %q\n%s", forbidden, script)

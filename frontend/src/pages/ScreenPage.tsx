@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { ReactNode } from "react";
+import type { CSSProperties, ReactNode } from "react";
 import type { TFunction } from "i18next";
 import type L from "leaflet";
-import { Activity, BellRing, ChevronDown, ChevronLeft, ChevronRight, Cpu, Globe2, Inbox, Loader2, MapPin, Orbit, QrCode, Radar, Radio, RadioTower, RefreshCw, Route, SatelliteDish, ScanSearch, Settings2, Shield, ShieldCheck, ShieldMinus, ShieldPlus, Square, Thermometer, TimerReset, Volume2, X, Zap } from "lucide-react";
+import { Activity, BellRing, ChevronDown, ChevronLeft, ChevronRight, Cpu, Eye, Globe2, Inbox, Loader2, MapPin, Orbit, QrCode, Radar, Radio, RadioTower, RefreshCw, Route, SatelliteDish, ScanSearch, Settings2, Shield, ShieldCheck, ShieldMinus, ShieldPlus, Square, Thermometer, TimerReset, Volume2, X, Zap } from "lucide-react";
 import * as QRCode from "qrcode";
 
 import {
@@ -13,6 +13,7 @@ import {
   getScreenPositions,
   getScreenStatus,
   getScreenStrike,
+  openScreenFpvVideo,
   openScreenStream,
   updateScreenDeception,
   updateScreenStrike,
@@ -26,6 +27,8 @@ import type {
   ScreenDeceptionState,
   ScreenDeviceLocationResponse,
   ScreenAlarmSettings,
+  ScreenFpvFrame,
+  ScreenFpvStatus,
   ScreenPositionPoint,
   ScreenPositionTarget,
   ScreenRuntimeStatus,
@@ -160,6 +163,27 @@ function formatFrequency(value: number) {
     return "-";
   }
   return `${Math.round(value)}MHz`;
+}
+
+function formatFpvBand(status: ScreenFpvStatus | null) {
+  if (
+    !status ||
+    typeof status.bandStart !== "number" ||
+    typeof status.bandEnd !== "number" ||
+    !Number.isFinite(status.bandStart) ||
+    !Number.isFinite(status.bandEnd)
+  ) {
+    return "-";
+  }
+  return `${status.bandStart}-${status.bandEnd}MHz`;
+}
+
+function formatFpvRate(frame: ScreenFpvFrame | null) {
+  if (!frame || !Number.isFinite(frame.rateKB)) {
+    return "-";
+  }
+  const rateMB = frame.rateKB / 1024;
+  return `${rateMB.toFixed(2)}MB/s`;
 }
 
 function formatRSSI(value: number) {
@@ -937,13 +961,17 @@ function DetectionTargetCard({
 function FpvTargetTable({
   targets,
   selectedId,
+  activeVideoTargetId,
   t,
   onSelect,
+  onOpenVideo,
 }: {
   targets: ScreenDetectionTarget[];
   selectedId: string;
+  activeVideoTargetId: string;
   t: TFunction;
   onSelect: (target: ScreenDetectionTarget) => void;
+  onOpenVideo: (target: ScreenDetectionTarget) => void;
 }) {
   return (
     <div className="screen-fpv-table">
@@ -951,18 +979,35 @@ function FpvTargetTable({
         <span>{t("signal", { ns: "screen" })}</span>
         <span>{t("frequency", { ns: "screen" })}</span>
         <span>{t("signalStrength", { ns: "screen" })}</span>
+        <span>{t("operation", { ns: "screen" })}</span>
       </div>
 
       <div className="screen-fpv-table__body">
         {targets.map((target) => {
           const signalPercent = getRSSIPercent(target.rssi);
+          const activeVideo = activeVideoTargetId === target.id;
+          const videoDisabled = Boolean(activeVideoTargetId) && !activeVideo;
 
           return (
-            <button
+            <div
               key={target.id}
-              className={cx("screen-fpv-row", selectedId === target.id && "screen-fpv-row--selected")}
-              type="button"
+              className={cx(
+                "screen-fpv-row",
+                selectedId === target.id && "screen-fpv-row--selected",
+                activeVideo && "screen-fpv-row--playing",
+              )}
+              role="button"
+              tabIndex={0}
               onClick={() => onSelect(target)}
+              onKeyDown={(event) => {
+                if (event.target !== event.currentTarget) {
+                  return;
+                }
+                if (event.key === "Enter" || event.key === " ") {
+                  event.preventDefault();
+                  onSelect(target);
+                }
+              }}
             >
               <span className="screen-fpv-row__signal">
                 <span>
@@ -979,10 +1024,127 @@ function FpvTargetTable({
                   <span style={{ width: `${signalPercent}%` }} />
                 </span>
               </span>
-            </button>
+
+              <span className="screen-fpv-row__action">
+                <button
+                  className={cx("screen-fpv-row__view-button", activeVideo && "screen-fpv-row__view-button--active")}
+                  type="button"
+                  disabled={videoDisabled}
+                  aria-disabled={activeVideo || videoDisabled}
+                  aria-label={`${t("viewVideo", { ns: "screen" })} ${formatFrequency(target.frequency)}`}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    if (videoDisabled || activeVideo) {
+                      return;
+                    }
+                    onOpenVideo(target);
+                  }}
+                >
+                  <Eye size={12} aria-hidden="true" />
+                  <span>{activeVideo ? t("viewingVideo", { ns: "screen" }) : t("viewVideo", { ns: "screen" })}</span>
+                </button>
+              </span>
+            </div>
           );
         })}
       </div>
+    </div>
+  );
+}
+
+function FpvVideoModal({
+  target,
+  status,
+  frame,
+  error,
+  t,
+  onClose,
+}: {
+  target: ScreenDetectionTarget;
+  status: ScreenFpvStatus | null;
+  frame: ScreenFpvFrame | null;
+  error: string;
+  t: TFunction;
+  onClose: () => void;
+}) {
+  const title = resolveDisplayModel(target) || t("fpvSignalTransmission", { ns: "screen" });
+  const frameAspectStyle = frame && frame.cols > 0 && frame.rows > 0
+    ? ({
+        "--fpv-frame-aspect": `${frame.cols} / ${frame.rows}`,
+        "--fpv-display-aspect": String(Math.min(frame.cols / frame.rows, 16 / 9)),
+      } as CSSProperties)
+    : undefined;
+  const sourceStatus = status?.sourceConnected
+    ? t("online", { ns: "screen" })
+    : status?.listening
+      ? t("fpvVideoWaitingSource", { ns: "screen" })
+      : t("fpvVideoBinding", { ns: "screen" });
+
+  return (
+    <div className="screen-fpv-video-modal app-modal-backdrop" role="presentation" onClick={onClose}>
+      <section
+        className="screen-fpv-video-modal__card app-modal-card"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="screen-fpv-video-title"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <button
+          className="screen-navigation-modal__close"
+          type="button"
+          aria-label={t("close", { ns: "common" })}
+          onClick={onClose}
+        >
+          <X size={16} aria-hidden="true" />
+        </button>
+
+        <div className="screen-fpv-video-modal__header">
+          <span className="screen-navigation-modal__eyebrow">{t("fpv", { ns: "screen" })}</span>
+          <h2 id="screen-fpv-video-title">{title}</h2>
+          <p>
+            {formatFrequency(target.frequency)}
+            <span aria-hidden="true"> / </span>
+            {formatFpvBand(status)}
+          </p>
+        </div>
+
+        <div
+          className={cx("screen-fpv-video-modal__viewer", frame && "screen-fpv-video-modal__viewer--active")}
+          style={frameAspectStyle}
+        >
+          {frame ? (
+            <img src={frame.image} alt={title} />
+          ) : (
+            <div className="screen-fpv-video-modal__empty">
+              {error ? <RadioTower size={22} aria-hidden="true" /> : <Loader2 className="app-spinner" size={22} aria-hidden="true" />}
+              <span>{error || t("fpvVideoWaitingFrame", { ns: "screen" })}</span>
+            </div>
+          )}
+        </div>
+
+        <div className="screen-fpv-video-modal__status">
+          <span>
+            <em>{t("fpvVideoSource", { ns: "screen" })}</em>
+            <strong>{sourceStatus}</strong>
+          </span>
+          <span>
+            <em>{t("fpvVideoFrame", { ns: "screen" })}</em>
+            <strong>{frame ? `#${String(frame.num).padStart(6, "0")}` : "-"}</strong>
+          </span>
+          <span>
+            <em>{t("fpvVideoRate", { ns: "screen" })}</em>
+            <strong>{formatFpvRate(frame)}</strong>
+          </span>
+          <span>
+            <em>{t("lastSeen", { ns: "screen" })}</em>
+            <strong>{formatStatusTime(frame?.receivedAt || status?.updatedAt)}</strong>
+          </span>
+        </div>
+
+        {error || status?.listenError ? (
+          <p className="screen-fpv-video-modal__error">{error || status?.listenError}</p>
+        ) : null}
+      </section>
     </div>
   );
 }
@@ -2503,8 +2665,10 @@ function RightList({
   soundBlocked,
   now,
   collapsed,
+  activeVideoTargetId,
   onSelectTarget,
   onSelectPosition,
+  onOpenFpvVideo,
   onToggleWhitelist,
   onToggleAlarmSetting,
   onEnableSound,
@@ -2525,8 +2689,10 @@ function RightList({
   soundBlocked: boolean;
   now: Date;
   collapsed: boolean;
+  activeVideoTargetId: string;
   onSelectTarget: (target: ScreenDetectionTarget) => void;
   onSelectPosition: (target: ScreenPositionTarget) => void;
+  onOpenFpvVideo: (target: ScreenDetectionTarget) => void;
   onToggleWhitelist: (target: ScreenPositionTarget) => void;
   onToggleAlarmSetting: (key: ScreenAlarmSettingKey, value: boolean) => void;
   onEnableSound: () => void;
@@ -2635,8 +2801,10 @@ function RightList({
             <FpvTargetTable
               targets={visibleTargets}
               selectedId={selectedId}
+              activeVideoTargetId={activeVideoTargetId}
               t={t}
               onSelect={onSelectTarget}
+              onOpenVideo={onOpenFpvVideo}
             />
           ) : tab === "position" && positions.length ? (
             positions.map((target) => (
@@ -2804,6 +2972,10 @@ export function ScreenPage({
   const [navigationQRCodeLoading, setNavigationQRCodeLoading] = useState(false);
   const [navigationQRCodeError, setNavigationQRCodeError] = useState("");
   const navigationQRCodeRequestRef = useRef(0);
+  const [fpvVideoTarget, setFpvVideoTarget] = useState<ScreenDetectionTarget | null>(null);
+  const [fpvVideoStatus, setFpvVideoStatus] = useState<ScreenFpvStatus | null>(null);
+  const [fpvVideoFrame, setFpvVideoFrame] = useState<ScreenFpvFrame | null>(null);
+  const [fpvVideoError, setFpvVideoError] = useState("");
   const [deceptionDeviceStatus, setDeceptionDeviceStatus] = useState<ScreenDeceptionDeviceStatus | null>(null);
   const [deceptionPanelActive, setDeceptionPanelActive] = useState(false);
   const [deceptionStatusOpen, setDeceptionStatusOpen] = useState(false);
@@ -2958,6 +3130,14 @@ export function ScreenPage({
     setNavigationQRCode(null);
     setNavigationQRCodeLoading(false);
     setNavigationQRCodeError("");
+  }, []);
+
+  const handleOpenFpvVideo = useCallback((target: ScreenDetectionTarget) => {
+    setFpvVideoTarget(target);
+  }, []);
+
+  const handleCloseFpvVideo = useCallback(() => {
+    setFpvVideoTarget(null);
   }, []);
 
   const syncDeceptionDeviceStatus = useCallback(async () => {
@@ -3250,6 +3430,24 @@ export function ScreenPage({
   }, [deceptionPanelActive, deceptionStatusOpen, syncDeceptionDeviceStatus]);
 
   useEffect(() => {
+    if (!fpvVideoTarget) {
+      setFpvVideoStatus(null);
+      setFpvVideoFrame(null);
+      setFpvVideoError("");
+      return;
+    }
+
+    setFpvVideoStatus(null);
+    setFpvVideoFrame(null);
+    setFpvVideoError("");
+    return openScreenFpvVideo(fpvVideoTarget.frequency, {
+      onStatus: setFpvVideoStatus,
+      onFrame: setFpvVideoFrame,
+      onError: (error) => setFpvVideoError(error.message),
+    });
+  }, [fpvVideoTarget]);
+
+  useEffect(() => {
     if (screenStatus?.detection.configured === false) {
       setTargets([]);
       setPositions([]);
@@ -3273,6 +3471,19 @@ export function ScreenPage({
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [handleCloseNavigationQRCode, navigationQRCode]);
+
+  useEffect(() => {
+    if (!fpvVideoTarget) {
+      return;
+    }
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        handleCloseFpvVideo();
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [fpvVideoTarget, handleCloseFpvVideo]);
 
   useEffect(() => {
     if (!deceptionStatusOpen) {
@@ -3346,8 +3557,10 @@ export function ScreenPage({
         soundBlocked={alarmSound.blocked}
         now={now}
         collapsed={rightCollapsed}
+        activeVideoTargetId={fpvVideoTarget?.id || ""}
         onSelectTarget={handleSelectTarget}
         onSelectPosition={handleSelectPosition}
+        onOpenFpvVideo={handleOpenFpvVideo}
         onToggleWhitelist={handleToggleWhitelist}
         onToggleAlarmSetting={(key, value) => void handleToggleAlarmSetting(key, value)}
         onEnableSound={() => void alarmSound.enable()}
@@ -3364,6 +3577,16 @@ export function ScreenPage({
         t={t}
         onClose={handleCloseNavigationQRCode}
       />
+      {fpvVideoTarget ? (
+        <FpvVideoModal
+          target={fpvVideoTarget}
+          status={fpvVideoStatus}
+          frame={fpvVideoFrame}
+          error={fpvVideoError}
+          t={t}
+          onClose={handleCloseFpvVideo}
+        />
+      ) : null}
       {deceptionStatusOpen ? (
         <DeceptionDeviceStatusModal
           status={deceptionDeviceStatus}

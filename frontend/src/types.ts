@@ -23,6 +23,8 @@ export interface DetectionSessionRequest {
   rxPortName?: string;
   txPortName?: string;
   baudRate: number;
+  rxBaudRate?: number;
+  txBaudRate?: number;
   dataBits: number;
   stopBits: number;
   parity: string;
@@ -39,6 +41,8 @@ export interface DetectionSessionResponse {
   rxPortName?: string;
   txPortName?: string;
   baudRate?: number;
+  rxBaudRate?: number;
+  txBaudRate?: number;
   dataBits?: number;
   stopBits?: number;
   parity?: string;
@@ -220,6 +224,31 @@ export interface ScreenRuntimeStatus {
   detection: ScreenSerialCapabilityStatus;
   deception: ScreenSerialCapabilityStatus;
   compass: ScreenSerialCapabilityStatus;
+}
+
+export interface ScreenFpvFrame {
+  num: number;
+  rows: number;
+  cols: number;
+  pixelCount: number;
+  frameBytes: number;
+  rateKB: number;
+  receivedAt: string;
+  image: string;
+}
+
+export interface ScreenFpvStatus {
+  active: boolean;
+  frequency?: number;
+  bandStart?: number;
+  bandEnd?: number;
+  tcpAddress: string;
+  listening: boolean;
+  listenError?: string;
+  sourceConnected: boolean;
+  clientAddress?: string;
+  frameCount: number;
+  updatedAt?: string;
 }
 
 export interface ScreenStrikeChannel {
@@ -885,5 +914,11 @@ export interface ScreenStreamHandlers {
   onStrikeUpdated?: (event: EventMessage<ScreenStrikeState>) => void;
   onDeceptionUpdated?: (event: EventMessage<ScreenDeceptionState>) => void;
   onCompassRecord?: (event: EventMessage<CompassRecord>) => void;
+  onError?: (error: Error) => void;
+}
+
+export interface ScreenFpvVideoHandlers {
+  onStatus?: (status: ScreenFpvStatus) => void;
+  onFrame?: (frame: ScreenFpvFrame) => void;
   onError?: (error: Error) => void;
 }
