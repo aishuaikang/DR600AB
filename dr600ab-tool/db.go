@@ -15,7 +15,7 @@ import (
 	"sqlitecrypto"
 )
 
-var gpioErrorPrefixPattern = regexp.MustCompile(`^(?:导出 GPIO\d+\s*(?:后等待就绪)?失败|取消导出 GPIO\d+ 失败|设置 GPIO\d+ 为输出模式失败|(?:读取|写入|检查|解析) GPIO\d+/\S+ 失败):\s*`)
+var gpioErrorPrefixPattern = regexp.MustCompile(`^(?:导出 GPIO\d+\s*(?:后等待就绪)?失败|取消导出 GPIO\d+ 失败|设置 GPIO\d+ 为输出模式失败|(?:读取|写入|检查|解析) GPIO\d+/\S+ 失败|外部 IO\d+ (?:电平|方向)文件不可用|解析 IO\d+ (?:电平|方向)失败|(?:读取|写入|检查|解析) IO\d+/\S+ 失败):\s*`)
 
 var (
 	defaultInterferenceBandLabelsByID = map[string]string{
@@ -24,9 +24,15 @@ var (
 		"io3": "2.4G/5.2G/5.8G",
 	}
 	defaultInterferenceBandLabelsByGPIO = map[string]string{
-		"IOC4": "433M/800M/900M/1.4G",
-		"IOC2": "1.2G/1.5G",
-		"IOC3": "2.4G/5.2G/5.8G",
+		"IO2":    "433M/800M/900M/1.4G",
+		"IO3":    "1.2G/1.5G",
+		"IO1":    "2.4G/5.2G/5.8G",
+		"IOC4":   "433M/800M/900M/1.4G",
+		"IOC2":   "1.2G/1.5G",
+		"IOC3":   "2.4G/5.2G/5.8G",
+		"GPIO20": "433M/800M/900M/1.4G",
+		"GPIO18": "1.2G/1.5G",
+		"GPIO19": "2.4G/5.2G/5.8G",
 	}
 )
 

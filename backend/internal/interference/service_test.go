@@ -9,6 +9,7 @@ import (
 	"dr600ab-api/internal/i18n"
 	"dr600ab-api/internal/model"
 	"dr600ab-api/internal/store"
+	"gpio-controller/board"
 )
 
 type fakePin struct {
@@ -50,6 +51,33 @@ func (f *fakePin) GetValue() (int, error) {
 
 func (f *fakePin) Cleanup() {
 	f.cleanup++
+}
+
+type directionalFakePin struct {
+	fakePin
+	direction string
+}
+
+func (f *directionalFakePin) Setup() error {
+	f.direction = "out"
+	return f.fakePin.Setup()
+}
+
+func (f *directionalFakePin) SetHigh() error {
+	f.direction = "out"
+	return f.fakePin.SetHigh()
+}
+
+func (f *directionalFakePin) SetLow() error {
+	return f.fakePin.SetLow()
+}
+
+func (f *directionalFakePin) Cleanup() {
+	f.fakePin.Cleanup()
+}
+
+func (f *directionalFakePin) GetDirection() (string, error) {
+	return f.direction, nil
 }
 
 func TestSetStateControlsPinLifecycle(t *testing.T) {
@@ -96,11 +124,67 @@ func TestSetStateControlsPinLifecycle(t *testing.T) {
 	}
 }
 
-func TestDefaultChannelsUseBoardMapping(t *testing.T) {
-	channels := DefaultChannels()
-	if len(channels) != 8 {
-		t.Fatalf("DefaultChannels() len = %d, want 8", len(channels))
+func TestSetStateDoesNotWriteLowForInputHighUnownedPin(t *testing.T) {
+	tr, err := i18n.New("zh-CN")
+	if err != nil {
+		t.Fatalf("i18n.New() error = %v", err)
 	}
+
+	fake := &directionalFakePin{
+		fakePin: fakePin{
+			value:  1,
+			lowErr: errors.New("invalid argument"),
+		},
+		direction: "in",
+	}
+	svc := NewService(store.NewMemoryStore(10, 10), tr, []ChannelDefinition{
+		{ID: "io1", Label: "IO1", Pin: 1, Bands: []string{"2.4"}},
+	}, func(number int) GPIOPin {
+		return fake
+	})
+
+	channel, err := svc.SetState("io1", false, "zh-CN")
+	if err != nil {
+		t.Fatalf("SetState(false) error = %v", err)
+	}
+	if channel.Enabled || channel.Status != "idle" {
+		t.Fatalf("channel = %+v, want idle input-high channel", channel)
+	}
+	if fake.low != 0 || fake.cleanup != 0 {
+		t.Fatalf("pin low/cleanup calls = %d/%d, want untouched", fake.low, fake.cleanup)
+	}
+}
+
+func TestSetStateTurnsOffOutputHighUnownedPin(t *testing.T) {
+	tr, err := i18n.New("zh-CN")
+	if err != nil {
+		t.Fatalf("i18n.New() error = %v", err)
+	}
+
+	fake := &directionalFakePin{
+		fakePin:   fakePin{value: 1},
+		direction: "out",
+	}
+	svc := NewService(store.NewMemoryStore(10, 10), tr, []ChannelDefinition{
+		{ID: "io1", Label: "IO1", Pin: 1, Bands: []string{"2.4"}},
+	}, func(number int) GPIOPin {
+		return fake
+	})
+
+	channel, err := svc.SetState("io1", false, "zh-CN")
+	if err != nil {
+		t.Fatalf("SetState(false) error = %v", err)
+	}
+	if channel.Enabled || channel.Status != "idle" {
+		t.Fatalf("channel = %+v, want idle output-low channel", channel)
+	}
+	if fake.low != 1 || fake.cleanup != 1 {
+		t.Fatalf("pin low/cleanup calls = %d/%d, want 1/1", fake.low, fake.cleanup)
+	}
+}
+
+func TestChannelsFromBoardPinsMapsDiscoveredPins(t *testing.T) {
+	channels := channelsFromBoardPins(board.PinsFromNumbers([]int{0, 1, 2, 3, 4, 5}))
 
 	tests := []struct {
 		index    int
@@ -110,24 +194,40 @@ func TestDefaultChannelsUseBoardMapping(t *testing.T) {
 		bands    []string
 		reserved bool
 	}{
-		{index: 0, id: "io1", label: "IOC4", pin: 20, bands: []string{"433", "800", "900", "1.4"}},
-		{index: 1, id: "io2", label: "IOC2", pin: 18, bands: []string{"1.2", "1.5"}},
-		{index: 2, id: "io3", label: "IOC3", pin: 19, bands: []string{"2.4", "5.2", "5.8"}},
-		{index: 3, id: "io4", label: "IOC5", pin: 21, bands: []string{}, reserved: true},
-		{index: 4, id: "io5", label: "I3B4", pin: 108, bands: []string{}, reserved: true},
-		{index: 5, id: "io6", label: "I3B5", pin: 109, bands: []string{}, reserved: true},
-		{index: 6, id: "io7", label: "I3C0", pin: 112, bands: []string{}, reserved: true},
-		{index: 7, id: "io8", label: "I3C1", pin: 113, bands: []string{}, reserved: true},
+		{index: 0, id: "io1", label: "IO2", pin: 2, bands: []string{"433", "800", "900", "1.4"}},
+		{index: 1, id: "io2", label: "IO3", pin: 3, bands: []string{"1.2", "1.5"}},
+		{index: 2, id: "io3", label: "IO1", pin: 1, bands: []string{"2.4", "5.2", "5.8"}},
+		{index: 3, id: "io4", label: "IO4", pin: 4, bands: []string{}, reserved: true},
+		{index: 4, id: "io5", label: "IO0", pin: 0, bands: []string{}, reserved: true},
+		{index: 5, id: "io6", label: "IO5", pin: 5, bands: []string{}, reserved: true},
 	}
 
+	if len(channels) != len(tests) {
+		t.Fatalf("channels len = %d, want %d", len(channels), len(tests))
+	}
 	for _, tt := range tests {
 		channel := channels[tt.index]
 		if channel.ID != tt.id || channel.Label != tt.label || channel.Pin != tt.pin || channel.Reserved != tt.reserved {
-			t.Fatalf("DefaultChannels()[%d] = %+v, want id=%s label=%s pin=%d reserved=%v", tt.index, channel, tt.id, tt.label, tt.pin, tt.reserved)
+			t.Fatalf("channels[%d] = %+v, want id=%s label=%s pin=%d reserved=%v", tt.index, channel, tt.id, tt.label, tt.pin, tt.reserved)
 		}
 		if !reflect.DeepEqual(channel.Bands, tt.bands) {
-			t.Fatalf("DefaultChannels()[%d].Bands = %+v, want %+v", tt.index, channel.Bands, tt.bands)
+			t.Fatalf("channels[%d].Bands = %+v, want %+v", tt.index, channel.Bands, tt.bands)
 		}
+	}
+}
+
+func TestChannelsFromBoardPinsAllowsFewerThanThreePins(t *testing.T) {
+	channels := channelsFromBoardPins(board.PinsFromNumbers([]int{3, 1}))
+	if len(channels) != 2 {
+		t.Fatalf("channels len = %d, want 2", len(channels))
+	}
+	if channels[0].ID != "io2" || channels[0].Pin != 3 || channels[0].Reserved ||
+		!reflect.DeepEqual(channels[0].Bands, []string{"1.2", "1.5"}) {
+		t.Fatalf("channels[0] = %+v, want active IO3", channels[0])
+	}
+	if channels[1].ID != "io3" || channels[1].Pin != 1 || channels[1].Reserved ||
+		!reflect.DeepEqual(channels[1].Bands, []string{"2.4", "5.2", "5.8"}) {
+		t.Fatalf("channels[1] = %+v, want active IO1", channels[1])
 	}
 }
 

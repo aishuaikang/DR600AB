@@ -186,6 +186,76 @@ func TestStoreNormalizesLegacyGPIOChannelLabels(t *testing.T) {
 	}
 }
 
+func TestStoreNormalizesLegacySysfsGPIOChannelLabels(t *testing.T) {
+	store, err := NewStore(filepath.Join(t.TempDir(), "reports.db"))
+	if err != nil {
+		t.Fatalf("NewStore() error = %v", err)
+	}
+	t.Cleanup(func() {
+		if err := store.Close(); err != nil {
+			t.Fatalf("Close() error = %v", err)
+		}
+	})
+
+	startedAt := time.Date(2026, 5, 21, 10, 0, 0, 0, time.UTC)
+	report, err := store.Create(model.InterferenceReport{
+		InterferenceReportSummary: model.InterferenceReportSummary{
+			Status:        model.InterferenceReportStatusCompleted,
+			StartedAt:     startedAt,
+			ChannelIDs:    []string{"io1", "io2", "io3"},
+			ChannelLabels: []string{"GPIO20", "GPIO18", "GPIO19"},
+		},
+		Request: model.ScreenStrikeRequest{Enabled: true, ChannelIDs: []string{"io1", "io2", "io3"}, DurationSeconds: 30},
+	})
+	if err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+
+	detail, err := store.Get(report.ID)
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	want := []string{"433M/800M/900M/1.4G", "1.2G/1.5G", "2.4G/5.2G/5.8G"}
+	if !equalStrings(detail.ChannelLabels, want) {
+		t.Fatalf("detail.ChannelLabels = %#v, want %#v", detail.ChannelLabels, want)
+	}
+}
+
+func TestStoreNormalizesExternalIOChannelLabels(t *testing.T) {
+	store, err := NewStore(filepath.Join(t.TempDir(), "reports.db"))
+	if err != nil {
+		t.Fatalf("NewStore() error = %v", err)
+	}
+	t.Cleanup(func() {
+		if err := store.Close(); err != nil {
+			t.Fatalf("Close() error = %v", err)
+		}
+	})
+
+	startedAt := time.Date(2026, 5, 21, 10, 0, 0, 0, time.UTC)
+	report, err := store.Create(model.InterferenceReport{
+		InterferenceReportSummary: model.InterferenceReportSummary{
+			Status:        model.InterferenceReportStatusCompleted,
+			StartedAt:     startedAt,
+			ChannelIDs:    []string{"io1", "io2", "io3"},
+			ChannelLabels: []string{"IO2", "IO3", "IO1"},
+		},
+		Request: model.ScreenStrikeRequest{Enabled: true, ChannelIDs: []string{"io1", "io2", "io3"}, DurationSeconds: 30},
+	})
+	if err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+
+	detail, err := store.Get(report.ID)
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	want := []string{"433M/800M/900M/1.4G", "1.2G/1.5G", "2.4G/5.2G/5.8G"}
+	if !equalStrings(detail.ChannelLabels, want) {
+		t.Fatalf("detail.ChannelLabels = %#v, want %#v", detail.ChannelLabels, want)
+	}
+}
+
 func TestStoreNormalizesLegacyGPIOErrorPrefixes(t *testing.T) {
 	store, err := NewStore(filepath.Join(t.TempDir(), "reports.db"))
 	if err != nil {
@@ -258,6 +328,11 @@ func TestNormalizeReportErrorRemovesGPIOWrappers(t *testing.T) {
 			name: "direction wrapper",
 			raw:  "设置 GPIO20 为输出模式失败: permission denied",
 			want: "permission denied",
+		},
+		{
+			name: "external io missing value file",
+			raw:  "更新 GPIO 状态失败: 外部 IO0 电平文件不可用: no such file or directory",
+			want: "no such file or directory",
 		},
 	}
 	for _, tt := range tests {

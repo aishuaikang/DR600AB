@@ -13,7 +13,7 @@ var menuItems = []menuItem{
 	{Label: "输出低电平", Desc: "将当前 GPIO 的输出值设置为 0。"},
 	{Label: "读取当前状态", Desc: "查看当前引脚的方向和电平状态。"},
 	{Label: "切换当前电平", Desc: "在高电平和低电平之间快速切换。"},
-	{Label: "切换控制引脚", Desc: "释放当前 GPIO，并切换到新的 GPIO 编号。"},
+	{Label: "切换控制引脚", Desc: "释放当前外部 IO，并切换到新的外部 IO 序号。"},
 	{Label: "退出程序", Desc: "清理当前 GPIO 后退出程序。"},
 }
 
@@ -67,7 +67,7 @@ func (a *App) handleSetHigh() {
 		printError("设置高电平失败: %v", err)
 		return
 	}
-	printSuccess("GPIO%d -> 高电平", pinNumber)
+	printSuccess("IO%d -> 高电平", pinNumber)
 }
 
 func (a *App) handleSetLow() {
@@ -79,16 +79,16 @@ func (a *App) handleSetLow() {
 		printError("设置低电平失败: %v", err)
 		return
 	}
-	printSuccess("GPIO%d -> 低电平", pinNumber)
+	printSuccess("IO%d -> 低电平", pinNumber)
 }
 
 func (a *App) handleReadValue() {
 	status := a.readPinStatus()
 	if status.ReadErr != nil {
-		printError("读取 GPIO%d 状态失败: %v", status.Number, status.ReadErr)
+		printError("读取 IO%d 状态失败: %v", status.Number, status.ReadErr)
 		return
 	}
-	printInfo("GPIO%d 当前状态", status.Number)
+	printInfo("IO%d 当前状态", status.Number)
 	fmt.Printf("方向 : %s\n", status.Direction)
 	fmt.Printf("电平 : %s\n", status.Level)
 }
@@ -111,7 +111,7 @@ func (a *App) handleToggle() {
 		printError("切换电平失败: %v", err)
 		return
 	}
-	printSuccess("GPIO%d -> %s", pinNumber, formatLevel(newVal))
+	printSuccess("IO%d -> %s", pinNumber, formatLevel(newVal))
 }
 
 func (a *App) handleSwitchPin() {
@@ -128,19 +128,19 @@ func (a *App) handleSwitchPin() {
 	}
 
 	if pinNum == currentPinNumber {
-		printInfo("当前已经在控制 GPIO%d", pinNum)
+		printInfo("当前已经在控制 IO%d", pinNum)
 		return
 	}
 
 	// 先初始化新引脚，成功后再清理旧引脚
 	newPin := gpio.NewPin(pinNum)
 	if err := newPin.Setup(); err != nil {
-		printError("初始化 GPIO%d 失败: %v", pinNum, err)
+		printError("初始化 IO%d 失败: %v", pinNum, err)
 		return
 	}
 
 	a.swapPin(newPin)
-	printSuccess("已切换到 GPIO%d", pinNum)
+	printSuccess("已切换到 IO%d", pinNum)
 }
 
 type pinStatus struct {
@@ -155,7 +155,7 @@ func (a *App) renderStatusPanel() {
 
 	fmt.Println()
 	fmt.Println("──────────────── GPIO 控制台 ────────────────")
-	fmt.Printf("当前引脚 : GPIO%d\n", status.Number)
+	fmt.Printf("当前 IO  : IO%d\n", status.Number)
 	fmt.Printf("方向     : %s\n", status.Direction)
 	fmt.Printf("电平     : %s\n", status.Level)
 	if status.ReadErr != nil {
@@ -181,7 +181,7 @@ func (a *App) withCurrentPinStatus() (pinStatus, error) {
 	defer a.mu.RUnlock()
 
 	if a.pin == nil {
-		return pinStatus{}, fmt.Errorf("当前没有可用的 GPIO 引脚")
+		return pinStatus{}, fmt.Errorf("当前没有可用的外部 IO")
 	}
 
 	status := pinStatus{
@@ -256,7 +256,7 @@ func (a *App) currentPinNumber() (int, error) {
 	a.mu.RLock()
 	defer a.mu.RUnlock()
 	if a.pin == nil {
-		return 0, fmt.Errorf("当前没有可用的 GPIO 引脚")
+		return 0, fmt.Errorf("当前没有可用的外部 IO")
 	}
 	return a.pin.Number, nil
 }
@@ -266,7 +266,7 @@ func (a *App) withCurrentPin(fn func(*gpio.Pin) error) error {
 	defer a.mu.RUnlock()
 
 	if a.pin == nil {
-		return fmt.Errorf("当前没有可用的 GPIO 引脚")
+		return fmt.Errorf("当前没有可用的外部 IO")
 	}
 	return fn(a.pin)
 }

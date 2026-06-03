@@ -1,6 +1,6 @@
 {
   "title": "GPIO 控制",
-  "description": "控制 IO1 到 IO8 的 GPIO 输出；IO4 到 IO8 为预留调试通道。",
+  "description": "控制系统实际发现的外部 IO 输出；前三路用于干扰，其余为预留调试通道。",
   "desired": "目标电平",
   "actual": "当前电平",
   "reservedChannel": "预留通道",

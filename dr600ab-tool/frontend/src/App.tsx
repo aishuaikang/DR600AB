@@ -96,7 +96,7 @@ function formatDistance(value?: number) {
 function formatChannelLabels(report: InterferenceReportSummary) {
   if (report.channelLabels?.length) return report.channelLabels.join("，");
   if (report.channelIds?.length) return report.channelIds.join("，");
-  if (report.channelPins?.length) return report.channelPins.map((pin) => `GPIO${pin}`).join("，");
+  if (report.channelPins?.length) return report.channelPins.map((pin) => `IO${pin}`).join("，");
   return "-";
 }
 

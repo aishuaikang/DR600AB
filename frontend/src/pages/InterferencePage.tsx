@@ -40,7 +40,7 @@ function ChannelCard({
         <div className="flex min-w-0 items-center gap-2">
           <h3 className="shrink-0 text-sm font-bold leading-5 text-base-content">{channel.label}</h3>
           <span className="truncate font-mono text-xs font-semibold text-base-content/60">
-            GPIO{channel.pin}
+            IO{channel.pin}
           </span>
           {channel.reserved ? <Badge tone="warning">{t("reserved", { ns: "common" })}</Badge> : null}
         </div>
@@ -123,7 +123,7 @@ export function InterferencePage({
           />
           <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
             {channels.length === 0
-              ? Array.from({ length: 8 }, (_, index) => (
+              ? Array.from({ length: 3 }, (_, index) => (
                   <div key={index} className="rounded-2xl border border-base-300 bg-base-100/45 p-2.5">
                     <SkeletonBlock className="h-5 w-28" />
                     <SkeletonBlock className="mt-3 h-6 w-full" />

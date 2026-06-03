@@ -1,9 +1,23 @@
-// Package board 定义当前板卡的 GPIO 引脚映射。
+// Package board 定义当前板卡的外部 IO 通道映射。
 package board
 
-import "fmt"
+import (
+	"fmt"
+	"sort"
 
-// PinDefinition 描述板卡对外暴露的一路 GPIO。
+	"gpio-controller/gpio"
+)
+
+var interferenceBands = [][]string{
+	{"433", "800", "900", "1.4"},
+	{"1.2", "1.5"},
+	{"2.4", "5.2", "5.8"},
+}
+
+var interferencePinOrder = []int{2, 3, 1}
+var reservedPinOrder = []int{4, 0, 5}
+
+// PinDefinition 描述板卡对外暴露的一路外部 IO。
 type PinDefinition struct {
 	ID       string
 	Label    string
@@ -12,26 +26,81 @@ type PinDefinition struct {
 	Reserved bool
 }
 
-// DefaultPins 返回板卡的 8 路 GPIO 映射。前三路用于干扰控制，后五路预留。
+// DefaultPins 返回当前系统 /sys/external_gpio 中实际可控制的外部 IO 映射。
 func DefaultPins() []PinDefinition {
-	return []PinDefinition{
-		{ID: "io1", Label: "IOC4", Number: 20, Bands: []string{"433", "800", "900", "1.4"}},
-		{ID: "io2", Label: "IOC2", Number: 18, Bands: []string{"1.2", "1.5"}},
-		{ID: "io3", Label: "IOC3", Number: 19, Bands: []string{"2.4", "5.2", "5.8"}},
-		{ID: "io4", Label: "IOC5", Number: 21, Reserved: true},
-		{ID: "io5", Label: "I3B4", Number: 108, Reserved: true},
-		{ID: "io6", Label: "I3B5", Number: 109, Reserved: true},
-		{ID: "io7", Label: "I3C0", Number: 112, Reserved: true},
-		{ID: "io8", Label: "I3C1", Number: 113, Reserved: true},
-	}
+	return PinsFromNumbers(gpio.ListExternalPins())
 }
 
-// FormatPinUsage 返回适合 CLI 展示的一行 GPIO 映射说明。
+// PinsFromNumbers 根据外部 IO 序号生成稳定的通道定义。IO2、IO3、IO1 为干扰通道，IO4、IO0、IO5 为预留通道。
+func PinsFromNumbers(numbers []int) []PinDefinition {
+	if len(numbers) == 0 {
+		return nil
+	}
+
+	available := make(map[int]bool, len(numbers))
+	for _, number := range numbers {
+		if number >= 0 {
+			available[number] = true
+		}
+	}
+
+	definitions := make([]PinDefinition, 0, len(available))
+	used := make(map[int]bool, len(available))
+	for bandIndex, number := range interferencePinOrder {
+		if !available[number] {
+			continue
+		}
+		definitions = append(definitions, PinDefinition{
+			ID:       fmt.Sprintf("io%d", bandIndex+1),
+			Label:    fmt.Sprintf("IO%d", number),
+			Number:   number,
+			Bands:    append([]string(nil), interferenceBands[bandIndex]...),
+			Reserved: false,
+		})
+		used[number] = true
+	}
+
+	for reservedIndex, number := range reservedPinOrder {
+		if !available[number] || used[number] {
+			continue
+		}
+		definitions = append(definitions, PinDefinition{
+			ID:       fmt.Sprintf("io%d", len(interferencePinOrder)+reservedIndex+1),
+			Label:    fmt.Sprintf("IO%d", number),
+			Number:   number,
+			Bands:    []string{},
+			Reserved: true,
+		})
+		used[number] = true
+	}
+
+	extraReserved := make([]int, 0, len(available)-len(used))
+	for number := range available {
+		if !used[number] {
+			extraReserved = append(extraReserved, number)
+		}
+	}
+	sort.Ints(extraReserved)
+	nextExtraID := len(interferencePinOrder) + len(reservedPinOrder) + 1
+	for _, number := range extraReserved {
+		definitions = append(definitions, PinDefinition{
+			ID:       fmt.Sprintf("io%d", nextExtraID),
+			Label:    fmt.Sprintf("IO%d", number),
+			Number:   number,
+			Bands:    []string{},
+			Reserved: true,
+		})
+		nextExtraID++
+	}
+	return definitions
+}
+
+// FormatPinUsage 返回适合 CLI 展示的一行外部 IO 映射说明。
 func FormatPinUsage(def PinDefinition) string {
 	if def.Reserved {
-		return fmt.Sprintf("%s: GPIO%d 预留", def.Label, def.Number)
+		return fmt.Sprintf("%s: 预留", def.Label)
 	}
-	return fmt.Sprintf("%s: GPIO%d (%s)", def.Label, def.Number, joinBands(def.Bands))
+	return fmt.Sprintf("%s: %s", def.Label, joinBands(def.Bands))
 }
 
 func joinBands(bands []string) string {

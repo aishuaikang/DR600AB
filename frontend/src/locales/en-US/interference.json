@@ -1,6 +1,6 @@
 {
   "title": "GPIO Control",
-  "description": "Control GPIO output for IO1 through IO8. IO4 through IO8 are reserved debug channels.",
+  "description": "Control discovered external IO outputs. The first three channels are used for interference and the rest are reserved debug channels.",
   "desired": "Target level",
   "actual": "Current level",
   "reservedChannel": "Reserved channel",

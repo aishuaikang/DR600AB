@@ -3,229 +3,151 @@ package gpio
 import (
 	"os"
 	"path/filepath"
+	"reflect"
+	"strconv"
 	"strings"
-	"syscall"
 	"testing"
 	"time"
 )
 
-func TestSetupExportsPinAndSetsDirection(t *testing.T) {
-	root := configureTestSysfs(t)
-	pin := NewPin(23)
+func TestSetupSetsExternalPinToOutput(t *testing.T) {
+	root := configureTestExternalGPIO(t)
+	createExternalPin(t, root, 0, "0", "0")
 
-	go func() {
-		time.Sleep(2 * time.Millisecond)
-		pinDir := filepath.Join(root, "gpio23")
-		_ = os.MkdirAll(pinDir, 0o755)
-		_ = os.WriteFile(filepath.Join(pinDir, "direction"), []byte("in"), 0o644)
-		_ = os.WriteFile(filepath.Join(pinDir, "value"), []byte("0"), 0o644)
-	}()
-
+	pin := NewPin(0)
 	if err := pin.Setup(); err != nil {
 		t.Fatalf("Setup() error = %v", err)
 	}
 
-	exportPath := filepath.Join(root, "export")
-	if err := os.Chmod(exportPath, 0o644); err != nil {
-		t.Fatalf("chmod export file: %v", err)
-	}
-	exportData, err := os.ReadFile(exportPath)
-	if err != nil {
-		t.Fatalf("reading export file: %v", err)
-	}
-	if got := strings.TrimSpace(string(exportData)); got != "23" {
-		t.Fatalf("export file = %q, want %q", got, "23")
-	}
-
-	directionData, err := os.ReadFile(filepath.Join(root, "gpio23", "direction"))
+	directionData, err := os.ReadFile(filepath.Join(root, "jwsioc_inout_gpio0"))
 	if err != nil {
 		t.Fatalf("reading direction file: %v", err)
 	}
-	if got := strings.TrimSpace(string(directionData)); got != directionOut {
-		t.Fatalf("direction = %q, want %q", got, directionOut)
+	if got := strings.TrimSpace(string(directionData)); got != "1" {
+		t.Fatalf("direction = %q, want %q", got, "1")
 	}
 }
 
-func TestExportReturnsTimeoutWhenValueNeverAppears(t *testing.T) {
-	_ = configureTestSysfs(t)
-	exportReadyRetries = 2
-	exportReadyDelay = time.Millisecond
+func TestSetValueAndGetValueUseExternalValueFile(t *testing.T) {
+	root := configureTestExternalGPIO(t)
+	createExternalPin(t, root, 1, "1", "0")
 
-	pin := NewPin(24)
-	err := pin.Export()
-	if err == nil {
-		t.Fatal("Export() error = nil, want timeout")
+	pin := NewPin(1)
+	if err := pin.SetHigh(); err != nil {
+		t.Fatalf("SetHigh() error = %v", err)
 	}
-	if !strings.Contains(err.Error(), "等待 GPIO24/value 就绪超时") {
-		t.Fatalf("Export() error = %q, want timeout message", err)
+	value, err := pin.GetValue()
+	if err != nil {
+		t.Fatalf("GetValue() error = %v", err)
+	}
+	if value != 1 {
+		t.Fatalf("GetValue() = %d, want 1", value)
+	}
+
+	valueData, err := os.ReadFile(filepath.Join(root, "jwsioc_gpio1"))
+	if err != nil {
+		t.Fatalf("reading value file: %v", err)
+	}
+	if got := strings.TrimSpace(string(valueData)); got != "1" {
+		t.Fatalf("value file = %q, want %q", got, "1")
 	}
 }
 
-func TestSetupReusesPinDirectoryWhenAlreadyExported(t *testing.T) {
-	root := configureTestSysfs(t)
-	pin := NewPin(25)
+func TestCleanupSetsLowAndKeepsOutput(t *testing.T) {
+	root := configureTestExternalGPIO(t)
+	createExternalPin(t, root, 2, "1", "1")
 
-	pinDir := filepath.Join(root, "gpio25")
-	if err := os.MkdirAll(pinDir, 0o755); err != nil {
-		t.Fatalf("creating gpio25 dir: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(pinDir, "direction"), []byte("in"), 0o644); err != nil {
-		t.Fatalf("writing direction: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(pinDir, "value"), []byte("0"), 0o644); err != nil {
-		t.Fatalf("writing value: %v", err)
-	}
+	pin := NewPin(2)
+	pin.Cleanup()
 
-	oldWriteFile := writeFile
-	writeFile = func(path string, data []byte, perm os.FileMode) error {
-		if filepath.Base(path) == "export" {
-			t.Fatalf("Export should not write export when gpio directory already exists")
-		}
-		return oldWriteFile(path, data, perm)
+	valueData, err := os.ReadFile(filepath.Join(root, "jwsioc_gpio2"))
+	if err != nil {
+		t.Fatalf("reading value file: %v", err)
 	}
-	t.Cleanup(func() {
-		writeFile = oldWriteFile
-	})
-
-	if err := pin.Setup(); err != nil {
-		t.Fatalf("Setup() error = %v", err)
+	if got := strings.TrimSpace(string(valueData)); got != "0" {
+		t.Fatalf("value file = %q, want low", got)
 	}
 
-	directionData, err := os.ReadFile(filepath.Join(pinDir, "direction"))
+	directionData, err := os.ReadFile(filepath.Join(root, "jwsioc_inout_gpio2"))
 	if err != nil {
 		t.Fatalf("reading direction file: %v", err)
 	}
-	if got := strings.TrimSpace(string(directionData)); got != directionOut {
-		t.Fatalf("direction = %q, want %q", got, directionOut)
+	if got := strings.TrimSpace(string(directionData)); got != "1" {
+		t.Fatalf("direction file = %q, want output", got)
 	}
 }
 
-func TestExportReusesPinDirectoryCreatedByConcurrentExport(t *testing.T) {
-	root := configureTestSysfs(t)
-	pin := NewPin(26)
+func TestListExternalPinsFiltersPairsAndSorts(t *testing.T) {
+	root := configureTestExternalGPIO(t)
+	createExternalPin(t, root, 4, "1", "0")
+	createExternalPin(t, root, 0, "1", "0")
+	createExternalPin(t, root, 2, "1", "0")
 
-	oldWriteFile := writeFile
-	writeFile = func(path string, data []byte, perm os.FileMode) error {
-		if filepath.Base(path) == "export" {
-			pinDir := filepath.Join(root, "gpio26")
-			if err := os.MkdirAll(pinDir, 0o755); err != nil {
-				t.Fatalf("creating gpio26 dir: %v", err)
-			}
-			if err := os.WriteFile(filepath.Join(pinDir, "direction"), []byte("in"), 0o644); err != nil {
-				t.Fatalf("writing direction: %v", err)
-			}
-			if err := os.WriteFile(filepath.Join(pinDir, "value"), []byte("0"), 0o644); err != nil {
-				t.Fatalf("writing value: %v", err)
-			}
-			return syscall.EBUSY
-		}
-		return oldWriteFile(path, data, perm)
+	if err := os.WriteFile(filepath.Join(root, "jwsioc_gpio5"), []byte("0"), 0o644); err != nil {
+		t.Fatalf("writing orphan value file: %v", err)
 	}
-	t.Cleanup(func() {
-		writeFile = oldWriteFile
-	})
+	if err := os.WriteFile(filepath.Join(root, "jwsioc_inout_gpio6"), []byte("1"), 0o644); err != nil {
+		t.Fatalf("writing orphan direction file: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "jwsioc_gpiox"), []byte("0"), 0o644); err != nil {
+		t.Fatalf("writing invalid file: %v", err)
+	}
 
-	if err := pin.Export(); err != nil {
-		t.Fatalf("Export() error = %v", err)
+	got := ListExternalPins()
+	want := []int{0, 2, 4}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("ListExternalPins() = %v, want %v", got, want)
+	}
+	if alias := ListExportedPins(); !reflect.DeepEqual(alias, want) {
+		t.Fatalf("ListExportedPins() = %v, want %v", alias, want)
 	}
 }
 
-func TestExportReturnsBusyErrorWhenKernelDoesNotExposePinDirectory(t *testing.T) {
-	_ = configureTestSysfs(t)
-	pin := NewPin(27)
-
-	oldWriteFile := writeFile
-	writeFile = func(path string, data []byte, perm os.FileMode) error {
-		if filepath.Base(path) == "export" {
-			return syscall.EBUSY
-		}
-		return oldWriteFile(path, data, perm)
+func TestSetupReturnsErrorWhenExternalFileMissing(t *testing.T) {
+	root := configureTestExternalGPIO(t)
+	if err := os.WriteFile(filepath.Join(root, "jwsioc_gpio0"), []byte("0"), 0o644); err != nil {
+		t.Fatalf("writing value file: %v", err)
 	}
-	t.Cleanup(func() {
-		writeFile = oldWriteFile
-	})
 
-	err := pin.Export()
+	err := NewPin(0).Setup()
 	if err == nil {
-		t.Fatal("Export() error = nil, want busy error")
+		t.Fatal("Setup() error = nil, want missing direction file error")
 	}
-	if !strings.Contains(err.Error(), "已被其他进程导出或被内核占用") {
-		t.Fatalf("Export() error = %q, want busy message", err)
-	}
-}
-
-func TestListExportedPinsFiltersAndSorts(t *testing.T) {
-	root := configureTestSysfs(t)
-
-	for _, name := range []string{"gpio9", "gpio2", "gpiochip0", "gpiox", "export"} {
-		path := filepath.Join(root, name)
-		if strings.HasPrefix(name, "gpio") {
-			if err := os.MkdirAll(path, 0o755); err != nil {
-				t.Fatalf("creating %s: %v", name, err)
-			}
-			continue
-		}
-		if err := os.WriteFile(path, nil, 0o644); err != nil {
-			t.Fatalf("creating %s: %v", name, err)
-		}
-	}
-
-	got := ListExportedPins()
-	want := []int{2, 9}
-	if len(got) != len(want) {
-		t.Fatalf("ListExportedPins() len = %d, want %d (%v)", len(got), len(want), got)
-	}
-	for i := range want {
-		if got[i] != want[i] {
-			t.Fatalf("ListExportedPins()[%d] = %d, want %d (all=%v)", i, got[i], want[i], got)
-		}
+	if !strings.Contains(err.Error(), "方向文件不可用") {
+		t.Fatalf("Setup() error = %q, want direction file message", err)
 	}
 }
 
-func TestListGPIOChipsReadsMetadataAndSortsByBase(t *testing.T) {
-	root := configureTestSysfs(t)
+func TestDirectionRoundTrip(t *testing.T) {
+	root := configureTestExternalGPIO(t)
+	createExternalPin(t, root, 3, "0", "0")
 
-	createChip := func(name, label, base, ngpio string) {
-		chipDir := filepath.Join(root, name)
-		if err := os.MkdirAll(chipDir, 0o755); err != nil {
-			t.Fatalf("creating %s: %v", name, err)
-		}
-		if err := os.WriteFile(filepath.Join(chipDir, "label"), []byte(label), 0o644); err != nil {
-			t.Fatalf("writing label for %s: %v", name, err)
-		}
-		if err := os.WriteFile(filepath.Join(chipDir, "base"), []byte(base), 0o644); err != nil {
-			t.Fatalf("writing base for %s: %v", name, err)
-		}
-		if err := os.WriteFile(filepath.Join(chipDir, "ngpio"), []byte(ngpio), 0o644); err != nil {
-			t.Fatalf("writing ngpio for %s: %v", name, err)
-		}
+	pin := NewPin(3)
+	if got, err := pin.GetDirection(); err != nil || got != directionIn {
+		t.Fatalf("GetDirection() = %q, %v; want %q, nil", got, err, directionIn)
 	}
-
-	createChip("gpiochip32", "bank-b", "32", "16")
-	createChip("gpiochip0", "bank-a", "0", "32")
-	if err := os.MkdirAll(filepath.Join(root, "gpio17"), 0o755); err != nil {
-		t.Fatalf("creating gpio17: %v", err)
+	if err := pin.SetDirection(directionOut); err != nil {
+		t.Fatalf("SetDirection(out) error = %v", err)
 	}
-
-	got := ListGPIOChips()
-	if len(got) != 2 {
-		t.Fatalf("ListGPIOChips() len = %d, want 2 (%v)", len(got), got)
-	}
-
-	if got[0].Name != "gpiochip0" || got[0].Label != "bank-a" || got[0].Base != 0 || got[0].Ngpio != 32 {
-		t.Fatalf("ListGPIOChips()[0] = %+v, want gpiochip0/bank-a/base0/ngpio32", got[0])
-	}
-	if got[1].Name != "gpiochip32" || got[1].Label != "bank-b" || got[1].Base != 32 || got[1].Ngpio != 16 {
-		t.Fatalf("ListGPIOChips()[1] = %+v, want gpiochip32/bank-b/base32/ngpio16", got[1])
+	if got, err := pin.GetDirection(); err != nil || got != directionOut {
+		t.Fatalf("GetDirection() = %q, %v; want %q, nil", got, err, directionOut)
 	}
 }
 
-func configureTestSysfs(t *testing.T) string {
+func createExternalPin(t *testing.T, root string, number int, direction string, value string) {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(root, "jwsioc_gpio"+strconv.Itoa(number)), []byte(value), 0o644); err != nil {
+		t.Fatalf("writing value file: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "jwsioc_inout_gpio"+strconv.Itoa(number)), []byte(direction), 0o644); err != nil {
+		t.Fatalf("writing direction file: %v", err)
+	}
+}
+
+func configureTestExternalGPIO(t *testing.T) string {
 	t.Helper()
 
 	oldRoot := sysfsRoot
-	oldExportRetries := exportReadyRetries
-	oldExportDelay := exportReadyDelay
 	oldWriteRetries := writeRetryCount
 	oldWriteDelay := writeRetryDelay
 	oldStatFile := statFile
@@ -236,8 +158,6 @@ func configureTestSysfs(t *testing.T) string {
 
 	root := t.TempDir()
 	sysfsRoot = root
-	exportReadyRetries = 5
-	exportReadyDelay = time.Millisecond
 	writeRetryCount = 3
 	writeRetryDelay = time.Millisecond
 	statFile = os.Stat
@@ -248,8 +168,6 @@ func configureTestSysfs(t *testing.T) string {
 
 	t.Cleanup(func() {
 		sysfsRoot = oldRoot
-		exportReadyRetries = oldExportRetries
-		exportReadyDelay = oldExportDelay
 		writeRetryCount = oldWriteRetries
 		writeRetryDelay = oldWriteDelay
 		statFile = oldStatFile

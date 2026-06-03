@@ -17,13 +17,12 @@ import (
 	"time"
 
 	"dr600ab-api/internal/model"
-	"gpio-controller/board"
 	"sqlitecrypto"
 )
 
 const defaultQueryLimit = 200
 
-var gpioErrorPrefixPattern = regexp.MustCompile(`^(?:导出 GPIO\d+\s*(?:后等待就绪)?失败|取消导出 GPIO\d+ 失败|设置 GPIO\d+ 为输出模式失败|(?:读取|写入|检查|解析) GPIO\d+/\S+ 失败):\s*`)
+var gpioErrorPrefixPattern = regexp.MustCompile(`^(?:导出 GPIO\d+\s*(?:后等待就绪)?失败|取消导出 GPIO\d+ 失败|设置 GPIO\d+ 为输出模式失败|(?:读取|写入|检查|解析) GPIO\d+/\S+ 失败|外部 IO\d+ (?:电平|方向)文件不可用|解析 IO\d+ (?:电平|方向)失败|(?:读取|写入|检查|解析) IO\d+/\S+ 失败):\s*`)
 
 var (
 	defaultInterferenceBandLabelsByID, defaultInterferenceBandLabelsByGPIO = defaultInterferenceBandMaps()
@@ -598,19 +597,21 @@ func defaultInterferenceBandLabel(id string, label string) string {
 }
 
 func defaultInterferenceBandMaps() (map[string]string, map[string]string) {
-	pins := board.DefaultPins()
-	byID := make(map[string]string, len(pins))
-	byGPIO := make(map[string]string, len(pins))
-	for _, pin := range pins {
-		if pin.Reserved {
-			continue
-		}
-		if label := formatStrikeBands(pin.Bands); label != "" {
-			byID[pin.ID] = label
-			if pin.Label != "" {
-				byGPIO[pin.Label] = label
-			}
-		}
+	byID := map[string]string{
+		"io1": "433M/800M/900M/1.4G",
+		"io2": "1.2G/1.5G",
+		"io3": "2.4G/5.2G/5.8G",
+	}
+	byGPIO := map[string]string{
+		"IO2":    byID["io1"],
+		"IO3":    byID["io2"],
+		"IO1":    byID["io3"],
+		"IOC4":   byID["io1"],
+		"IOC2":   byID["io2"],
+		"IOC3":   byID["io3"],
+		"GPIO20": byID["io1"],
+		"GPIO18": byID["io2"],
+		"GPIO19": byID["io3"],
 	}
 	return byID, byGPIO
 }

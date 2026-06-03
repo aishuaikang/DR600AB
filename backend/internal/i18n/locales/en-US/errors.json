@@ -8,7 +8,7 @@
   "channel_not_found": "Interference channel was not found",
   "gpio_update_failed": "Failed to update GPIO state",
   "strike_channels_required": "Select at least one interference channel",
-  "strike_invalid_channels": "Interference channels can only use the first three GPIO channels",
+  "strike_invalid_channels": "Interference channels can only use the first three external IO channels",
   "strike_invalid_duration": "Interference duration must be between 10 and 60 seconds",
   "strike_already_active": "Strike is already active. Stop the current strike first",
   "developer_not_configured": "Developer TOTP secret is not configured",

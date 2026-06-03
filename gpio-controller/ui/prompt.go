@@ -44,10 +44,10 @@ func SelectMenuItem(label string, items []menuItem) (int, menuItem, error) {
 	return idx, items[idx], nil
 }
 
-// PromptGPIOPin 输入 GPIO 引脚编号
+// PromptGPIOPin 输入外部 IO 序号。
 func PromptGPIOPin(defaultPin string) (int, error) {
 	prompt := promptui.Prompt{
-		Label:     "输入 GPIO 引脚编号",
+		Label:     "输入外部 IO 序号",
 		Default:   defaultPin,
 		Templates: gpioPinPromptTemplates,
 		Validate: func(input string) error {
@@ -56,7 +56,7 @@ func PromptGPIOPin(defaultPin string) (int, error) {
 				return fmt.Errorf("请输入数字")
 			}
 			if v < 0 || v > 1023 {
-				return fmt.Errorf("引脚编号范围 0-1023")
+				return fmt.Errorf("外部 IO 序号范围 0-1023")
 			}
 			return nil
 		},

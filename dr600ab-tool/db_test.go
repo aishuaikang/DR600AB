@@ -308,6 +308,26 @@ func TestQueryReportsUseLocalDateBoundaries(t *testing.T) {
 	}
 }
 
+func TestNormalizeInterferenceReportExternalIOFields(t *testing.T) {
+	if got := defaultInterferenceBandLabel("io1", "IO2"); got != "433M/800M/900M/1.4G" {
+		t.Fatalf("defaultInterferenceBandLabel(IO2) = %q", got)
+	}
+	if got := defaultInterferenceBandLabel("io1", "GPIO20"); got != "433M/800M/900M/1.4G" {
+		t.Fatalf("defaultInterferenceBandLabel(GPIO20) = %q", got)
+	}
+	if got := defaultInterferenceBandLabel("io2", "GPIO18"); got != "1.2G/1.5G" {
+		t.Fatalf("defaultInterferenceBandLabel(GPIO18) = %q", got)
+	}
+	if got := defaultInterferenceBandLabel("io3", "GPIO19"); got != "2.4G/5.2G/5.8G" {
+		t.Fatalf("defaultInterferenceBandLabel(GPIO19) = %q", got)
+	}
+
+	raw := "更新 GPIO 状态失败: 外部 IO0 电平文件不可用: no such file or directory"
+	if got := normalizeInterferenceReportError(raw); got != "no such file or directory" {
+		t.Fatalf("normalizeInterferenceReportError() = %q", got)
+	}
+}
+
 func readCSVRows(t *testing.T, data []byte) [][]string {
 	t.Helper()
 	reader := csv.NewReader(bytes.NewReader(bytes.TrimPrefix(data, []byte{0xEF, 0xBB, 0xBF})))

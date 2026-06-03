@@ -8,7 +8,7 @@
   "channel_not_found": "未找到指定干扰通道",
   "gpio_update_failed": "更新 GPIO 状态失败",
   "strike_channels_required": "请选择至少一个干扰通道",
-  "strike_invalid_channels": "干扰通道只能选择前三个 GPIO",
+  "strike_invalid_channels": "干扰通道只能选择前三个外部 IO",
   "strike_invalid_duration": "干扰持续时间必须在 10 到 60 秒之间",
   "strike_already_active": "打击已开启，请先停止当前打击",
   "developer_not_configured": "开发者 TOTP 密钥未配置",

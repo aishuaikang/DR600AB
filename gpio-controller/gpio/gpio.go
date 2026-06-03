@@ -1,37 +1,38 @@
 package gpio
 
 import (
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
 )
 
 const (
-	sysfsPath = "/sys/class/gpio"
+	externalGPIOPath = "/sys/external_gpio"
 
-	controlFilePerm   = 0o200
+	valueFilePrefix     = "jwsioc_gpio"
+	directionFilePrefix = "jwsioc_inout_gpio"
+
 	attributeFilePerm = 0o644
 
 	directionIn  = "in"
 	directionOut = "out"
+
+	directionValueIn  = 0
+	directionValueOut = 1
 
 	valueLow  = 0
 	valueHigh = 1
 )
 
 var (
-	sysfsRoot = sysfsPath
+	sysfsRoot = externalGPIOPath
 
-	exportReadyRetries = 50
-	exportReadyDelay   = 10 * time.Millisecond
-	writeRetryCount    = 5
-	writeRetryDelay    = 20 * time.Millisecond
+	writeRetryCount = 5
+	writeRetryDelay = 20 * time.Millisecond
 
 	statFile  = os.Stat
 	readFile  = os.ReadFile
@@ -40,82 +41,78 @@ var (
 	sleep     = time.Sleep
 )
 
-// Pin 代表一个 GPIO 引脚
+// Pin 代表新板 /sys/external_gpio 暴露的一路外部 IO。
 type Pin struct {
-	Number int
-	path   string // /sys/class/gpio/gpio<N>
+	Number        int
+	valuePath     string // /sys/external_gpio/jwsioc_gpio<N>
+	directionPath string // /sys/external_gpio/jwsioc_inout_gpio<N>
 }
 
-// NewPin 创建 GPIO 引脚实例
+// NewPin 创建外部 IO 引脚实例。number 是 jwsioc_gpio<N> 中的 N。
 func NewPin(number int) *Pin {
 	return &Pin{
-		Number: number,
-		path:   filepath.Join(sysfsRoot, fmt.Sprintf("gpio%d", number)),
+		Number:        number,
+		valuePath:     filepath.Join(sysfsRoot, fmt.Sprintf("%s%d", valueFilePrefix, number)),
+		directionPath: filepath.Join(sysfsRoot, fmt.Sprintf("%s%d", directionFilePrefix, number)),
 	}
 }
 
-// Export 导出引脚，使其可通过 sysfs 访问
+// Export 检查外部 IO 文件是否已由内核暴露。
 func (p *Pin) Export() error {
-	if p.IsExported() {
-		return p.waitForAttribute("value", exportReadyRetries, exportReadyDelay)
-	}
-	if err := writeControlFile("export", p.Number); err != nil {
-		if isBusyError(err) {
-			if p.IsExported() {
-				return p.waitForAttribute("value", exportReadyRetries, exportReadyDelay)
-			}
-			return p.busyError()
-		}
-		return err
-	}
-
-	if err := p.waitForAttribute("value", exportReadyRetries, exportReadyDelay); err != nil {
-		return err
-	}
-	return nil
+	return p.ensureAvailable()
 }
 
-// Unexport 取消导出引脚
+// Unexport 将外部 IO 切回输入模式。
 func (p *Pin) Unexport() error {
 	if !p.IsExported() {
 		return nil
 	}
-	if err := writeControlFile("unexport", p.Number); err != nil {
+	return p.SetDirection(directionIn)
+}
+
+// IsExported 检查外部 IO 的电平文件和方向文件是否都存在。
+func (p *Pin) IsExported() bool {
+	return statOK(p.valuePath) && statOK(p.directionPath)
+}
+
+// SetDirection 设置引脚方向: "in" 或 "out"。
+func (p *Pin) SetDirection(dir string) error {
+	value, err := directionFileValue(dir)
+	if err != nil {
 		return err
 	}
-	return nil
+	return p.writeAttributeWithRetry("direction", strconv.Itoa(value), writeRetryCount, writeRetryDelay)
 }
 
-// IsExported 检查引脚是否已导出
-func (p *Pin) IsExported() bool {
-	_, err := statFile(p.path)
-	return err == nil
-}
-
-// SetDirection 设置引脚方向: "in" 或 "out"
-func (p *Pin) SetDirection(dir string) error {
-	if dir != directionIn && dir != directionOut {
-		return fmt.Errorf("无效方向: %s，仅支持 in/out", dir)
-	}
-	return p.writeAttributeWithRetry("direction", dir, writeRetryCount, writeRetryDelay)
-}
-
-// GetDirection 获取当前引脚方向
+// GetDirection 获取当前引脚方向。
 func (p *Pin) GetDirection() (string, error) {
-	return p.readAttribute("direction")
+	data, err := p.readAttribute("direction")
+	if err != nil {
+		return "", err
+	}
+	switch data {
+	case strconv.Itoa(directionValueIn):
+		return directionIn, nil
+	case strconv.Itoa(directionValueOut):
+		return directionOut, nil
+	case directionIn, directionOut:
+		return data, nil
+	default:
+		return "", fmt.Errorf("解析 IO%d 方向失败: %q", p.Number, data)
+	}
 }
 
-// SetHigh 设置高电平
+// SetHigh 设置高电平。
 func (p *Pin) SetHigh() error {
 	return p.SetValue(valueHigh)
 }
 
-// SetLow 设置低电平
+// SetLow 设置低电平。
 func (p *Pin) SetLow() error {
 	return p.SetValue(valueLow)
 }
 
-// SetValue 设置引脚值: 0（低电平）或 1（高电平）
+// SetValue 设置引脚值: 0（低电平）或 1（高电平）。
 func (p *Pin) SetValue(value int) error {
 	if value != valueLow && value != valueHigh {
 		return fmt.Errorf("无效电平值: %d，仅支持 0/1", value)
@@ -123,7 +120,7 @@ func (p *Pin) SetValue(value int) error {
 	return p.writeAttribute("value", strconv.Itoa(value))
 }
 
-// GetValue 读取引脚当前电平值
+// GetValue 读取引脚当前电平值。
 func (p *Pin) GetValue() (int, error) {
 	data, err := p.readAttribute("value")
 	if err != nil {
@@ -131,12 +128,12 @@ func (p *Pin) GetValue() (int, error) {
 	}
 	value, convErr := strconv.Atoi(data)
 	if convErr != nil {
-		return 0, convErr
+		return 0, fmt.Errorf("解析 IO%d 电平失败: %w", p.Number, convErr)
 	}
 	return value, nil
 }
 
-// Setup 导出引脚并设置为输出模式
+// Setup 检查引脚并设置为输出模式。
 func (p *Pin) Setup() error {
 	if err := p.Export(); err != nil {
 		return err
@@ -147,66 +144,54 @@ func (p *Pin) Setup() error {
 	return nil
 }
 
-// Cleanup 将引脚设为低电平并取消导出
+// Cleanup 将引脚设为低电平，并保持输出模式以避免输入上拉让外设再次变为高电平。
 func (p *Pin) Cleanup() {
 	if !p.IsExported() {
 		return
 	}
 	_ = p.SetLow()
-	_ = p.Unexport()
 }
 
-// ListExportedPins 列出当前已导出的 GPIO 引脚编号
-func ListExportedPins() []int {
+// ListExternalPins 列出当前可控制的外部 IO 序号。
+func ListExternalPins() []int {
 	entries, err := readDir(sysfsRoot)
 	if err != nil {
 		return nil
 	}
-	pins := make([]int, 0, len(entries))
+
+	values := make(map[int]bool, len(entries))
+	directions := make(map[int]bool, len(entries))
 	for _, e := range entries {
-		num, ok := parseExportedPinNumber(e.Name())
+		number, kind, ok := parseExternalGPIOName(e.Name())
 		if !ok {
 			continue
 		}
-		pins = append(pins, num)
+		switch kind {
+		case "value":
+			values[number] = true
+		case "direction":
+			directions[number] = true
+		}
+	}
+
+	pins := make([]int, 0, len(values))
+	for number := range values {
+		if directions[number] {
+			pins = append(pins, number)
+		}
 	}
 	sort.Ints(pins)
 	return pins
 }
 
-// GPIOChipInfo GPIO 控制器芯片信息
-type GPIOChipInfo struct {
-	Name  string // 芯片名称，如 gpiochip0
-	Label string // 芯片标签
-	Base  int    // 起始引脚编号
-	Ngpio int    // 引脚数量
+// ListExportedPins 列出当前可控制的外部 IO 序号。
+//
+// Deprecated: use ListExternalPins.
+func ListExportedPins() []int {
+	return ListExternalPins()
 }
 
-// ListGPIOChips 列出系统中的 GPIO 控制器芯片及其引脚范围
-func ListGPIOChips() []GPIOChipInfo {
-	entries, err := readDir(sysfsRoot)
-	if err != nil {
-		return nil
-	}
-	chips := make([]GPIOChipInfo, 0, len(entries))
-	for _, e := range entries {
-		name := e.Name()
-		if !strings.HasPrefix(name, "gpiochip") {
-			continue
-		}
-		chipPath := filepath.Join(sysfsRoot, name)
-		chips = append(chips, GPIOChipInfo{
-			Name:  name,
-			Label: readOptionalTrimmedFile(filepath.Join(chipPath, "label")),
-			Base:  readOptionalIntFile(filepath.Join(chipPath, "base")),
-			Ngpio: readOptionalIntFile(filepath.Join(chipPath, "ngpio")),
-		})
-	}
-	sort.Slice(chips, func(i, j int) bool { return chips[i].Base < chips[j].Base })
-	return chips
-}
-
-// String 返回引脚描述
+// String 返回引脚描述。
 func (p *Pin) String() string {
 	dir := "未知"
 	if currentDir, err := p.GetDirection(); err == nil && currentDir != "" {
@@ -224,19 +209,36 @@ func (p *Pin) String() string {
 			level = strconv.Itoa(val)
 		}
 	}
-	return fmt.Sprintf("GPIO%d (方向=%s, 电平=%s)", p.Number, dir, level)
+	return fmt.Sprintf("IO%d (方向=%s, 电平=%s)", p.Number, dir, level)
 }
 
-func (p *Pin) attributePath(name string) string {
-	return filepath.Join(p.path, name)
+func (p *Pin) ensureAvailable() error {
+	if _, err := statFile(p.valuePath); err != nil {
+		return fmt.Errorf("外部 IO%d 电平文件不可用: %w", p.Number, err)
+	}
+	if _, err := statFile(p.directionPath); err != nil {
+		return fmt.Errorf("外部 IO%d 方向文件不可用: %w", p.Number, err)
+	}
+	return nil
 }
 
-func (p *Pin) busyError() error {
-	return fmt.Errorf("GPIO%d 引脚已被其他进程导出或被内核占用", p.Number)
+func (p *Pin) attributePath(name string) (string, error) {
+	switch name {
+	case "value":
+		return p.valuePath, nil
+	case "direction":
+		return p.directionPath, nil
+	default:
+		return "", fmt.Errorf("未知 IO%d 属性: %s", p.Number, name)
+	}
 }
 
 func (p *Pin) readAttribute(name string) (string, error) {
-	data, err := readFile(p.attributePath(name))
+	path, err := p.attributePath(name)
+	if err != nil {
+		return "", err
+	}
+	data, err := readFile(path)
 	if err != nil {
 		return "", err
 	}
@@ -244,15 +246,23 @@ func (p *Pin) readAttribute(name string) (string, error) {
 }
 
 func (p *Pin) writeAttribute(name, value string) error {
-	if err := writeFile(p.attributePath(name), []byte(value), attributeFilePerm); err != nil {
+	path, err := p.attributePath(name)
+	if err != nil {
+		return err
+	}
+	if err := writeFile(path, []byte(value), attributeFilePerm); err != nil {
 		return err
 	}
 	return nil
 }
 
 func (p *Pin) writeAttributeWithRetry(name, value string, retries int, delay time.Duration) error {
+	path, err := p.attributePath(name)
+	if err != nil {
+		return err
+	}
+
 	var lastErr error
-	path := p.attributePath(name)
 	for i := 0; i < retries; i++ {
 		lastErr = writeFile(path, []byte(value), attributeFilePerm)
 		if lastErr == nil {
@@ -265,64 +275,41 @@ func (p *Pin) writeAttributeWithRetry(name, value string, retries int, delay tim
 	return lastErr
 }
 
-func (p *Pin) waitForAttribute(name string, retries int, delay time.Duration) error {
-	path := p.attributePath(name)
-	for i := 0; i < retries; i++ {
-		if _, err := statFile(path); err == nil {
-			return nil
-		} else if !errors.Is(err, os.ErrNotExist) {
-			return err
-		}
-
-		if i < retries-1 {
-			sleep(delay)
-		}
+func directionFileValue(dir string) (int, error) {
+	switch dir {
+	case directionIn:
+		return directionValueIn, nil
+	case directionOut:
+		return directionValueOut, nil
+	default:
+		return 0, fmt.Errorf("无效方向: %s，仅支持 in/out", dir)
 	}
-	return fmt.Errorf("等待 GPIO%d/%s 就绪超时", p.Number, name)
 }
 
-func writeControlFile(name string, number int) error {
-	return writeFile(
-		filepath.Join(sysfsRoot, name),
-		[]byte(strconv.Itoa(number)),
-		controlFilePerm,
-	)
+func statOK(path string) bool {
+	_, err := statFile(path)
+	return err == nil
 }
 
-func isBusyError(err error) bool {
-	if err == nil {
-		return false
+func parseExternalGPIOName(name string) (int, string, bool) {
+	if strings.HasPrefix(name, directionFilePrefix) {
+		number, ok := parseExternalNumber(strings.TrimPrefix(name, directionFilePrefix))
+		return number, "direction", ok
 	}
-	return errors.Is(err, syscall.EBUSY) || strings.Contains(strings.ToLower(err.Error()), "busy")
+	if strings.HasPrefix(name, valueFilePrefix) {
+		number, ok := parseExternalNumber(strings.TrimPrefix(name, valueFilePrefix))
+		return number, "value", ok
+	}
+	return 0, "", false
 }
 
-func parseExportedPinNumber(name string) (int, bool) {
-	if !strings.HasPrefix(name, "gpio") || strings.HasPrefix(name, "gpiochip") {
+func parseExternalNumber(raw string) (int, bool) {
+	if raw == "" {
 		return 0, false
 	}
-	number, err := strconv.Atoi(strings.TrimPrefix(name, "gpio"))
-	if err != nil {
+	number, err := strconv.Atoi(raw)
+	if err != nil || number < 0 {
 		return 0, false
 	}
 	return number, true
-}
-
-func readOptionalTrimmedFile(path string) string {
-	data, err := readFile(path)
-	if err != nil {
-		return ""
-	}
-	return strings.TrimSpace(string(data))
-}
-
-func readOptionalIntFile(path string) int {
-	data := readOptionalTrimmedFile(path)
-	if data == "" {
-		return 0
-	}
-	value, err := strconv.Atoi(data)
-	if err != nil {
-		return 0
-	}
-	return value
 }

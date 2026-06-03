@@ -26,9 +26,15 @@ const defaultInterferenceBandsById: Record<string, string> = {
   io3: "2.4G/5.2G/5.8G",
 };
 const defaultInterferenceBandsByGPIO: Record<string, string> = {
+  IO2: defaultInterferenceBandsById.io1,
+  IO3: defaultInterferenceBandsById.io2,
+  IO1: defaultInterferenceBandsById.io3,
   IOC4: defaultInterferenceBandsById.io1,
   IOC2: defaultInterferenceBandsById.io2,
   IOC3: defaultInterferenceBandsById.io3,
+  GPIO20: defaultInterferenceBandsById.io1,
+  GPIO18: defaultInterferenceBandsById.io2,
+  GPIO19: defaultInterferenceBandsById.io3,
 };
 const strikeChannelIdOrder = ["io1", "io2", "io3"];
 

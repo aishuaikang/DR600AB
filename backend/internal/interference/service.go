@@ -4,7 +4,6 @@ package interference
 import (
 	"errors"
 	"fmt"
-	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -50,7 +49,11 @@ type GPIOPin interface {
 	Cleanup()
 }
 
-// PinFactory 根据 Linux GPIO 编号创建引脚。
+type gpioDirectionReader interface {
+	GetDirection() (string, error)
+}
+
+// PinFactory 根据外部 IO 序号创建引脚。
 type PinFactory func(number int) GPIOPin
 
 // ReportStore 持久化大屏干扰操作证据报告。
@@ -130,8 +133,6 @@ func NewService(store *store.MemoryStore, translator *i18n.Translator, definitio
 		}
 		order = append(order, def.ID)
 	}
-	sort.Strings(order)
-
 	return &Service{
 		channels:   channels,
 		order:      order,
@@ -157,7 +158,10 @@ func (s *Service) SetUserSettingsStore(settings UserSettingsStore) {
 
 // DefaultChannels 返回设备使用的 GPIO 通道映射。
 func DefaultChannels() []ChannelDefinition {
-	pins := board.DefaultPins()
+	return channelsFromBoardPins(board.DefaultPins())
+}
+
+func channelsFromBoardPins(pins []board.PinDefinition) []ChannelDefinition {
 	definitions := make([]ChannelDefinition, 0, len(pins))
 	for _, pin := range pins {
 		bands := make([]string, len(pin.Bands))
@@ -214,7 +218,7 @@ func (s *Service) ScreenStrikeState() model.ScreenStrikeState {
 	return s.screenStrikeStateLocked(time.Now())
 }
 
-// SetScreenStrike 更新大屏干扰控制状态。启用时只允许控制前三个非预留 GPIO 通道。
+// SetScreenStrike 更新大屏干扰控制状态。启用时只允许控制前三个非预留外部 IO 通道。
 func (s *Service) SetScreenStrike(req model.ScreenStrikeRequest, locale string) (model.ScreenStrikeState, error) {
 	durationSeconds := req.DurationSeconds
 	duration := time.Duration(durationSeconds) * time.Second
@@ -343,7 +347,7 @@ func (s *Service) setStateLocked(id string, enabled bool, locale string) (model.
 	} else {
 		if state.pin == nil {
 			pin := s.pinFactory(state.def.Pin)
-			if value, err := pin.GetValue(); err == nil && value != 0 {
+			if pinOutputHigh(pin) {
 				state.pin = pin
 			}
 		}
@@ -367,7 +371,7 @@ func (s *Service) setStateLocked(id string, enabled bool, locale string) (model.
 	return channel, nil
 }
 
-// Shutdown 将所有已初始化 GPIO 引脚置为低电平并释放资源。
+// Shutdown 将所有已初始化外部 IO 置为低电平并释放资源。
 func (s *Service) Shutdown() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -833,18 +837,54 @@ func (s *Service) dtoWithActual(state *channelState) model.GpioChannel {
 		return channel
 	}
 
+	output := true
+	if direction, ok := pinDirection(pin); ok {
+		output = direction == "out"
+	}
+	channel = applyActualLevel(channel, value, output)
+	return channel
+}
+
+func pinOutputHigh(pin GPIOPin) bool {
+	value, err := pin.GetValue()
+	if err != nil || value == 0 {
+		return false
+	}
+	if direction, ok := pinDirection(pin); ok {
+		return direction == "out"
+	}
+	return true
+}
+
+func pinDirection(pin GPIOPin) (string, bool) {
+	reader, ok := pin.(gpioDirectionReader)
+	if !ok {
+		return "", false
+	}
+	direction, err := reader.GetDirection()
+	if err != nil {
+		return "", false
+	}
+	return strings.TrimSpace(direction), true
+}
+
+func applyActualLevel(channel model.GpioChannel, value int, output bool) model.GpioChannel {
 	switch value {
 	case 0:
 		channel.Enabled = false
 		channel.ActualLevel = "low"
 		channel.Status = "idle"
 	case 1:
-		channel.Enabled = true
 		channel.ActualLevel = "high"
-		channel.Status = "active"
+		channel.Enabled = output
+		if output {
+			channel.Status = "active"
+		} else {
+			channel.Status = "idle"
+		}
 	default:
-		channel.Enabled = value != 0
 		channel.ActualLevel = strconv.Itoa(value)
+		channel.Enabled = output && value != 0
 		if channel.Enabled {
 			channel.Status = "active"
 		} else {
