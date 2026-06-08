@@ -436,30 +436,59 @@ func (s *Service) connectOnce(cfg *serialport.Config, controlPortName string, lo
 	openPort := s.openPort
 	s.mu.RUnlock()
 
+	if controlPortName == "" || controlPortName == cfg.PortName {
+		readPort, err := openPort(cfg)
+		if err != nil {
+			return nil, err
+		}
+		gpsClient := client.NewSerialClient(readPort, cfg.PortName, false)
+		if err := sendGPSStartCommand(readPort); err != nil {
+			gpsClient.Close()
+			return nil, fmt.Errorf("%s: %w", s.translator.T(locale, "errors", "gps_start_command_failed"), err)
+		}
+		return gpsClient, nil
+	}
+
+	controlCfg := *cfg
+	controlCfg.PortName = controlPortName
+	if err := s.sendGPSStartCommand(openPort, &controlCfg); err != nil {
+		return nil, fmt.Errorf("%s: %w", s.translator.T(locale, "errors", "gps_start_command_failed"), err)
+	}
+
 	readPort, err := openPort(cfg)
 	if err != nil {
 		return nil, err
 	}
+	return client.NewSerialClient(readPort, cfg.PortName, false), nil
+}
 
-	var gpsClient *client.SerialClient
-	if controlPortName == "" || controlPortName == cfg.PortName {
-		gpsClient = client.NewSerialClient(readPort, cfg.PortName, false)
-	} else {
-		controlCfg := *cfg
-		controlCfg.PortName = controlPortName
-		writePort, err := openPort(&controlCfg)
-		if err != nil {
-			_ = readPort.Close()
-			return nil, err
-		}
-		gpsClient = client.NewDuplexSerialClient(readPort, cfg.PortName, writePort, controlPortName, false)
+func (s *Service) sendGPSStartCommand(openPort SerialOpener, cfg *serialport.Config) error {
+	port, err := openPort(cfg)
+	if err != nil {
+		return err
 	}
+	defer port.Close()
+	return sendGPSStartCommand(port)
+}
 
-	if err := gpsClient.Send(startGPSCommand); err != nil {
-		gpsClient.Close()
-		return nil, fmt.Errorf("%s: %w", s.translator.T(locale, "errors", "gps_start_command_failed"), err)
+func sendGPSStartCommand(port serial.Port) error {
+	if err := port.ResetInputBuffer(); err != nil {
+		return fmt.Errorf("清空输入缓冲失败: %w", err)
 	}
-	return gpsClient, nil
+	if err := port.ResetOutputBuffer(); err != nil {
+		return fmt.Errorf("清空输出缓冲失败: %w", err)
+	}
+	n, err := port.Write([]byte(startGPSCommand))
+	if err != nil {
+		return fmt.Errorf("发送失败: %w", err)
+	}
+	if n != len(startGPSCommand) {
+		return fmt.Errorf("发送不完整: 期望%d字节, 实际%d字节", len(startGPSCommand), n)
+	}
+	if err := port.Drain(); err != nil {
+		return fmt.Errorf("等待发送完成失败: %w", err)
+	}
+	return nil
 }
 
 func (s *Service) assignConnectedClient(seq uint64, sess *session, c *client.SerialClient) bool {

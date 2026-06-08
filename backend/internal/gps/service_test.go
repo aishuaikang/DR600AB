@@ -3,6 +3,7 @@ package gps
 import (
 	"io"
 	"path/filepath"
+	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -80,9 +81,11 @@ func TestStartSendsQGPSCommandToControlPort(t *testing.T) {
 	svc := NewService(st, tr, settings.NewStore(filepath.Join(t.TempDir(), "settings.json")), Options{})
 
 	opened := map[string]*fakeSerialPort{}
+	var openOrder []string
 	svc.SetSerialOpener(func(cfg *serialport.Config) (serial.Port, error) {
 		port := newFakeSerialPort()
 		opened[cfg.PortName] = port
+		openOrder = append(openOrder, cfg.PortName)
 		return port, nil
 	})
 
@@ -104,10 +107,58 @@ func TestStartSendsQGPSCommandToControlPort(t *testing.T) {
 	if resp.DataPortName != "/dev/ttyUSB1" || resp.ControlPortName != "/dev/ttyUSB2" {
 		t.Fatalf("unexpected ports: %+v", resp)
 	}
+	if want := []string{"/dev/ttyUSB2", "/dev/ttyUSB1"}; !slices.Equal(openOrder, want) {
+		t.Fatalf("open order = %v, want %v", openOrder, want)
+	}
 	assertPortWrites(t, opened["/dev/ttyUSB1"])
 	assertPortWrites(t, opened["/dev/ttyUSB2"], startGPSCommand)
+	assertCloseCount(t, opened["/dev/ttyUSB2"], 1)
+	assertCloseCount(t, opened["/dev/ttyUSB1"], 0)
 
 	_ = svc.Stop("zh-CN")
+	assertCloseCount(t, opened["/dev/ttyUSB1"], 1)
+}
+
+func TestStartSendsQGPSCommandOnSharedGPSPort(t *testing.T) {
+	tr, err := i18n.New("zh-CN")
+	if err != nil {
+		t.Fatalf("i18n.New() error = %v", err)
+	}
+	st := store.NewMemoryStore(10, 10)
+	svc := NewService(st, tr, settings.NewStore(filepath.Join(t.TempDir(), "settings.json")), Options{})
+
+	opened := map[string]*fakeSerialPort{}
+	var openOrder []string
+	svc.SetSerialOpener(func(cfg *serialport.Config) (serial.Port, error) {
+		port := newFakeSerialPort()
+		opened[cfg.PortName] = port
+		openOrder = append(openOrder, cfg.PortName)
+		return port, nil
+	})
+
+	resp, err := svc.Start(model.GPSSessionRequest{
+		DataPortName:    "/dev/ttyUSB0",
+		ControlPortName: "/dev/ttyUSB0",
+		BaudRate:        115200,
+		DataBits:        8,
+		StopBits:        1,
+		Parity:          "none",
+	}, "zh-CN")
+	if err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+
+	if !resp.Active {
+		t.Fatal("expected GPS session to be active")
+	}
+	if want := []string{"/dev/ttyUSB0"}; !slices.Equal(openOrder, want) {
+		t.Fatalf("open order = %v, want %v", openOrder, want)
+	}
+	assertPortWrites(t, opened["/dev/ttyUSB0"], startGPSCommand)
+	assertCloseCount(t, opened["/dev/ttyUSB0"], 0)
+
+	_ = svc.Stop("zh-CN")
+	assertCloseCount(t, opened["/dev/ttyUSB0"], 1)
 }
 
 func TestIngestLineParsesGGAAndRMC(t *testing.T) {
@@ -221,6 +272,18 @@ func assertPortWrites(t *testing.T, port *fakeSerialPort, want ...string) {
 		if got != want[i] {
 			t.Fatalf("write[%d] = %q, want %q", i, got, want[i])
 		}
+	}
+}
+
+func assertCloseCount(t *testing.T, port *fakeSerialPort, want int) {
+	t.Helper()
+	if port == nil {
+		t.Fatal("port is nil")
+	}
+	port.mu.Lock()
+	defer port.mu.Unlock()
+	if port.closeCount != want {
+		t.Fatalf("close count = %d, want %d", port.closeCount, want)
 	}
 }
 
