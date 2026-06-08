@@ -303,6 +303,61 @@ func TestListChannelsReturnsEmptyBandsForReservedChannel(t *testing.T) {
 	}
 }
 
+func TestScreenStrikeStateLazyDiscoversDefaultChannels(t *testing.T) {
+	tr, err := i18n.New("zh-CN")
+	if err != nil {
+		t.Fatalf("i18n.New() error = %v", err)
+	}
+
+	restore := stubDiscoverDefaultChannels(t, []ChannelDefinition{
+		{ID: "io1", Label: "IO2", Pin: 2, Bands: []string{"433"}},
+		{ID: "io2", Label: "IO3", Pin: 3, Bands: []string{"1.2"}},
+		{ID: "io3", Label: "IO1", Pin: 1, Bands: []string{"2.4"}},
+	})
+	defer restore()
+
+	pins := map[int]*fakePin{
+		1: {},
+		2: {},
+		3: {},
+	}
+	svc := NewService(store.NewMemoryStore(10, 10), tr, nil, func(number int) GPIOPin {
+		return pins[number]
+	})
+
+	state := svc.ScreenStrikeState()
+	if len(state.Channels) != 3 {
+		t.Fatalf("screen strike channels len = %d, want 3", len(state.Channels))
+	}
+	if state.Channels[0].ID != "io1" || state.Channels[0].Label != "IO2" || !reflect.DeepEqual(state.Channels[0].Bands, []string{"433"}) {
+		t.Fatalf("first screen strike channel = %+v, want discovered io1", state.Channels[0])
+	}
+}
+
+func TestListChannelsLazyDiscoversDefaultChannels(t *testing.T) {
+	tr, err := i18n.New("zh-CN")
+	if err != nil {
+		t.Fatalf("i18n.New() error = %v", err)
+	}
+
+	restore := stubDiscoverDefaultChannels(t, []ChannelDefinition{
+		{ID: "io1", Label: "IO2", Pin: 2, Bands: []string{"433"}},
+	})
+	defer restore()
+
+	svc := NewService(store.NewMemoryStore(10, 10), tr, nil, func(number int) GPIOPin {
+		return &fakePin{}
+	})
+
+	channels := svc.ListChannels()
+	if len(channels) != 1 {
+		t.Fatalf("channels len = %d, want 1", len(channels))
+	}
+	if channels[0].ID != "io1" || channels[0].Pin != 2 {
+		t.Fatalf("channel = %+v, want lazily discovered io1 pin 2", channels[0])
+	}
+}
+
 func TestSetScreenStrikeStartsOnlySelectedChannels(t *testing.T) {
 	svc, pins := newStrikeTestService(t)
 	defer svc.Shutdown()
@@ -782,6 +837,33 @@ func newStrikeTestService(t *testing.T) (*Service, map[string]*fakePin) {
 		return pinsByNumber[number]
 	})
 	return svc, pins
+}
+
+func stubDiscoverDefaultChannels(t *testing.T, definitions []ChannelDefinition) func() {
+	t.Helper()
+
+	original := discoverDefaultChannels
+	calls := 0
+	discoverDefaultChannels = func() []ChannelDefinition {
+		calls++
+		if calls == 1 {
+			return nil
+		}
+		return cloneChannelDefinitions(definitions)
+	}
+
+	return func() {
+		discoverDefaultChannels = original
+	}
+}
+
+func cloneChannelDefinitions(definitions []ChannelDefinition) []ChannelDefinition {
+	cloned := make([]ChannelDefinition, len(definitions))
+	for index, def := range definitions {
+		cloned[index] = def
+		cloned[index].Bands = append([]string(nil), def.Bands...)
+	}
+	return cloned
 }
 
 type fakeInterferenceReportStore struct {

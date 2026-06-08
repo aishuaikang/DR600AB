@@ -158,6 +158,12 @@ func TestHandleUserSettingsReturnsDefaultIntrusionRetention(t *testing.T) {
 		!body.ScreenAlarmSettings.Sound {
 		t.Fatalf("screen alarm settings = %#v, want all enabled by default", body.ScreenAlarmSettings)
 	}
+	if body.WarningZoneEnabled == nil || *body.WarningZoneEnabled {
+		t.Fatalf("warning zone enabled = %#v, want default false", body.WarningZoneEnabled)
+	}
+	if body.WarningZoneRadiusMeters == nil || *body.WarningZoneRadiusMeters != model.DefaultWarningZoneRadiusMeters {
+		t.Fatalf("warning zone radius = %#v, want default %v", body.WarningZoneRadiusMeters, model.DefaultWarningZoneRadiusMeters)
+	}
 }
 
 func TestHandleUpdateUserSettingsNormalizesWhitelistAndAlarmSettings(t *testing.T) {
@@ -268,6 +274,78 @@ func TestHandleUpdateUserSettingsPrunesIntrusions(t *testing.T) {
 	}
 	if len(intrusions.items) != 1 || intrusions.items[0].ID != "recent" {
 		t.Fatalf("intrusions = %#v, want only recent", intrusions.items)
+	}
+}
+
+func TestHandleUpdateUserSettingsPreservesWarningZoneSettings(t *testing.T) {
+	enabled := true
+	radius := 1500.0
+	store := &memoryUserSettingsStore{
+		settings: model.UserSettings{DeviceSN: "10125", DeviceHardwareID: "10125"},
+		ok:       true,
+	}
+	server := &Server{
+		translator:   mustTranslator(t),
+		userSettings: store,
+	}
+	server.app = fiber.New()
+	api := server.app.Group("/api/v1")
+	server.registerUserRoutes(api)
+
+	body, err := json.Marshal(model.UserSettings{
+		WarningZoneEnabled:      &enabled,
+		WarningZoneRadiusMeters: &radius,
+	})
+	if err != nil {
+		t.Fatalf("Marshal() error = %v", err)
+	}
+	req, err := http.NewRequest(http.MethodPut, "/api/v1/user/settings", bytes.NewReader(body))
+	if err != nil {
+		t.Fatalf("NewRequest() error = %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := server.app.Test(req)
+	if err != nil {
+		t.Fatalf("app.Test() error = %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusOK)
+	}
+	if store.settings.WarningZoneEnabled == nil || !*store.settings.WarningZoneEnabled {
+		t.Fatalf("warning zone enabled = %#v, want true", store.settings.WarningZoneEnabled)
+	}
+	if store.settings.WarningZoneRadiusMeters == nil || *store.settings.WarningZoneRadiusMeters != radius {
+		t.Fatalf("warning zone radius = %#v, want %v", store.settings.WarningZoneRadiusMeters, radius)
+	}
+}
+
+func TestHandleUpdateUserSettingsRejectsInvalidWarningZoneRadius(t *testing.T) {
+	radius := model.MinWarningZoneRadiusMeters - 1
+	server := &Server{
+		translator:   mustTranslator(t),
+		userSettings: &memoryUserSettingsStore{},
+	}
+	server.app = fiber.New()
+	api := server.app.Group("/api/v1")
+	server.registerUserRoutes(api)
+
+	body, err := json.Marshal(model.UserSettings{WarningZoneRadiusMeters: &radius})
+	if err != nil {
+		t.Fatalf("Marshal() error = %v", err)
+	}
+	req, err := http.NewRequest(http.MethodPut, "/api/v1/user/settings", bytes.NewReader(body))
+	if err != nil {
+		t.Fatalf("NewRequest() error = %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := server.app.Test(req)
+	if err != nil {
+		t.Fatalf("app.Test() error = %v", err)
+	}
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusBadRequest)
 	}
 }
 

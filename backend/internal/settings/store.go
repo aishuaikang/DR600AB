@@ -469,6 +469,8 @@ func isEmptyUserSettings(req model.UserSettings) bool {
 		req.ManualDeviceLocation == nil &&
 		len(req.ScreenStrikeChannelLabels) == 0 &&
 		req.IntrusionRetentionDays == nil &&
+		req.WarningZoneEnabled == nil &&
+		req.WarningZoneRadiusMeters == nil &&
 		len(req.Whitelist) == 0 &&
 		req.ScreenAlarmSettings == nil
 }

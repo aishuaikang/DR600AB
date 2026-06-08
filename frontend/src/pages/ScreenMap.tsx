@@ -12,12 +12,13 @@ import type {
   ScreenPositionPoint,
   ScreenPositionTarget,
   ScreenPositionTrackPoint,
+  WarningZone,
   WhitelistItem,
 } from "../types";
 import { cx } from "../utils/classnames";
 import { createDrawControlButtonGroup } from "../utils/leafletControls";
 import { installLeafletCoordConverter } from "../utils/leafletCoordConverter";
-import { isSerialWhitelisted } from "../utils/whitelist";
+import { targetTriggersAlarm } from "../utils/whitelist";
 import {
   REFERENCE_DEFAULT_MAP_LAYER,
   REFERENCE_LEGACY_MAP_LAYER_STORAGE_KEY,
@@ -45,12 +46,16 @@ type RealMapData = {
   deviceHeadingDeg?: number;
   positions: ScreenPositionTarget[];
   whitelist?: WhitelistItem[];
+  warningZone?: WarningZone | null;
+  warningZoneEnabled?: boolean;
 };
 
 type PositionMapProps = {
   selectedId: string;
   positions: ScreenPositionTarget[];
   whitelist?: WhitelistItem[];
+  warningZone?: WarningZone | null;
+  warningZoneEnabled?: boolean;
   deviceLocation: ScreenDeviceLocationResponse | null;
   deviceHeadingDeg?: number;
   visibleMapLayers: ReferenceMapLayer[];
@@ -250,7 +255,7 @@ function formatDeviceHeading(value?: number) {
 type MapLegendItem = {
   id: string;
   label: string;
-  kind: "marker" | "line";
+  kind: "marker" | "line" | "circle";
   iconUrl?: string;
   iconClassName?: string;
   color?: string;
@@ -263,6 +268,12 @@ function buildMapLegendItems(t: TFunction) {
       label: t("deviceLocation", { ns: "screen" }),
       kind: "marker" as const,
       iconUrl: referenceMarkerIcons.detectionOnline,
+    },
+    {
+      id: "warning-zone",
+      label: t("warningZone", { ns: "screen" }),
+      kind: "circle" as const,
+      color: "#f97316",
     },
     {
       id: "drone-whitelist",
@@ -320,9 +331,18 @@ export function ScreenMapLegend({ t }: { t: TFunction }) {
         <strong className="screen-legend-panel__title">{t("mapLegend", { ns: "screen" })}</strong>
         <div className="screen-legend-panel__items">
           {items.map((item) => (
-            <div key={item.id} className={cx("screen-legend-panel__item", item.kind === "line" && "screen-legend-panel__item--line")}>
+            <div
+              key={item.id}
+              className={cx(
+                "screen-legend-panel__item",
+                item.kind === "line" && "screen-legend-panel__item--line",
+                item.kind === "circle" && "screen-legend-panel__item--circle",
+              )}
+            >
               {item.kind === "marker" ? (
                 <img className={cx("screen-legend-panel__icon", item.iconClassName)} src={item.iconUrl} alt="" aria-hidden="true" />
+              ) : item.kind === "circle" ? (
+                <span className="screen-legend-panel__circle" aria-hidden="true" style={{ borderColor: item.color }} />
               ) : (
                 <span className="screen-legend-panel__line" aria-hidden="true" style={{ backgroundColor: item.color }} />
               )}
@@ -363,6 +383,15 @@ function toTrackLatLngs(points?: ScreenPositionTrackPoint[]) {
   return points.filter(validMapTrackPoint).map(toLatLng);
 }
 
+function validWarningZone(warningZone?: WarningZone | null): warningZone is WarningZone {
+  return Boolean(
+    warningZone &&
+      validMapPoint(warningZone.center) &&
+      Number.isFinite(warningZone.radiusMeters) &&
+      warningZone.radiusMeters > 0,
+  );
+}
+
 function collectRealMapPoints(deviceLocation: ScreenDeviceLocationResponse | null, positions: ScreenPositionTarget[]) {
   const points: L.LatLng[] = [];
   if (deviceLocation?.valid && validMapPoint(deviceLocation.point)) {
@@ -382,6 +411,14 @@ function collectRealMapPoints(deviceLocation: ScreenDeviceLocationResponse | nul
   return points;
 }
 
+function hasRealMapContent(
+  deviceLocation: ScreenDeviceLocationResponse | null,
+  positions: ScreenPositionTarget[],
+  warningZone?: WarningZone | null,
+) {
+  return collectRealMapPoints(deviceLocation, positions).length > 0 || validWarningZone(warningZone);
+}
+
 function fitBoundsPadding(map: L.Map) {
   const size = map.getSize();
   return {
@@ -394,18 +431,26 @@ function fitRealScreenBounds(
   map: L.Map,
   deviceLocation: ScreenDeviceLocationResponse | null,
   positions: ScreenPositionTarget[],
+  warningZone?: WarningZone | null,
 ) {
   const points = collectRealMapPoints(deviceLocation, positions);
-  if (!points.length) {
+  let bounds = points.length ? L.latLngBounds(points) : null;
+
+  if (validWarningZone(warningZone)) {
+    const circleBounds = toLatLng(warningZone.center).toBounds(warningZone.radiusMeters * 2);
+    bounds = bounds ? bounds.extend(circleBounds) : circleBounds;
+  }
+
+  if (!bounds) {
     map.setView(REFERENCE_MAP_CENTER, REFERENCE_MAP_ZOOM);
     return;
   }
-  if (points.length === 1) {
+  if (points.length === 1 && !validWarningZone(warningZone)) {
     map.setView(points[0], Math.max(map.getZoom(), 14), { animate: false });
     return;
   }
 
-  map.fitBounds(L.latLngBounds(points), {
+  map.fitBounds(bounds, {
     ...fitBoundsPadding(map),
     maxZoom: 14,
   });
@@ -476,6 +521,21 @@ function positionTooltipContent(target: ScreenPositionTarget, kind: "drone" | "p
   ].join("<br>");
 }
 
+function formatWarningZoneRadius(radiusMeters: number) {
+  if (radiusMeters >= 1000) {
+    return `${(radiusMeters / 1000).toFixed(radiusMeters >= 10000 ? 0 : 1)}km`;
+  }
+  return `${Math.round(radiusMeters)}m`;
+}
+
+function warningZoneTooltipContent(warningZone: WarningZone, t: TFunction) {
+  return [
+    `<strong>${escapeHtml(t("warningZone", { ns: "screen" }))}</strong>`,
+    `${escapeHtml(t("warningZoneRadius", { ns: "screen" }))}: ${escapeHtml(formatWarningZoneRadius(warningZone.radiusMeters))}`,
+    escapeHtml(formatCoordinate(warningZone.center)),
+  ].join("<br>");
+}
+
 function trajectoryTooltipContent(
   target: ScreenPositionTarget,
   kind: "drone" | "pilot",
@@ -537,6 +597,29 @@ function renderDeviceLayer(
   return group;
 }
 
+function renderWarningZoneLayer(group: L.LayerGroup, warningZone: WarningZone | null | undefined, t: TFunction) {
+  if (!validWarningZone(warningZone)) {
+    return;
+  }
+
+  L.circle([warningZone.center.latitude, warningZone.center.longitude], {
+    radius: warningZone.radiusMeters,
+    color: "#f97316",
+    fillColor: "#fb923c",
+    fillOpacity: 0.12,
+    opacity: 0.9,
+    weight: 2,
+    pane: trajectoryPane,
+    className: "screen-map-warning-zone",
+  })
+    .bindTooltip(warningZoneTooltipContent(warningZone, t), {
+      direction: "top",
+      className: "screen-map-tooltip",
+      opacity: 0.92,
+    })
+    .addTo(group);
+}
+
 function renderTrajectoryLayer(
   group: L.LayerGroup,
   target: ScreenPositionTarget,
@@ -591,22 +674,25 @@ function renderPositionLayers(
   positions: ScreenPositionTarget[],
   selectedId: string,
   whitelist: WhitelistItem[] | undefined,
+  warningZone: WarningZone | null | undefined,
+  warningZoneEnabled: boolean,
   onSelectPosition: (target: ScreenPositionTarget) => void,
   t: TFunction,
 ) {
   const group = L.layerGroup().addTo(map);
+  renderWarningZoneLayer(group, warningZone, t);
 
   positions.forEach((target) => {
     const selected = selectedId === target.id;
-    const whitelisted = isSerialWhitelisted(target.serial, whitelist);
+    const alerting = targetTriggersAlarm(target, whitelist, warningZone ?? null, warningZoneEnabled);
     const markerClassName = cx(
       selected && "screen-reference-marker-selected",
-      !whitelisted && "screen-reference-marker-alert",
+      alerting && "screen-reference-marker-alert",
     );
-    const remoteIcon = whitelisted
+    const remoteIcon = !alerting
       ? selected ? referenceMarkerIcons.selectedRemote : referenceMarkerIcons.remote
       : selected ? referenceMarkerIcons.selectedRemoteBlackFly : referenceMarkerIcons.remoteBlackFly;
-    const uavIcon = whitelisted
+    const uavIcon = !alerting
       ? selected ? referenceMarkerIcons.selectedUav : referenceMarkerIcons.uav
       : selected ? referenceMarkerIcons.selectedUavBlackFly : referenceMarkerIcons.uavBlackFly;
     renderTrajectoryLayer(group, target, "pilot", selected, onSelectPosition, t);
@@ -654,6 +740,8 @@ export function PositionMap({
   selectedId,
   positions,
   whitelist,
+  warningZone,
+  warningZoneEnabled = false,
   deviceLocation,
   deviceHeadingDeg,
   visibleMapLayers,
@@ -668,7 +756,14 @@ export function PositionMap({
   const positionLayerRef = useRef<L.LayerGroup | null>(null);
   const onSelectPositionRef = useRef(onSelectPosition);
   const selectedIdRef = useRef(selectedId);
-  const realDataRef = useRef<RealMapData>({ deviceLocation, deviceHeadingDeg, positions, whitelist });
+  const realDataRef = useRef<RealMapData>({
+    deviceLocation,
+    deviceHeadingDeg,
+    positions,
+    whitelist,
+    warningZone,
+    warningZoneEnabled,
+  });
   const hasFitRealBoundsRef = useRef(false);
   const visibleMapLayersKey = visibleMapLayers.join("|");
   const defaultMapLayer = referenceDefaultMapLayerForLocale(i18nInstance.language);
@@ -682,8 +777,15 @@ export function PositionMap({
   }, [selectedId]);
 
   useEffect(() => {
-    realDataRef.current = { deviceLocation, deviceHeadingDeg, positions, whitelist };
-  }, [deviceHeadingDeg, deviceLocation, positions, whitelist]);
+    realDataRef.current = {
+      deviceLocation,
+      deviceHeadingDeg,
+      positions,
+      whitelist,
+      warningZone,
+      warningZoneEnabled,
+    };
+  }, [deviceHeadingDeg, deviceLocation, positions, whitelist, warningZone, warningZoneEnabled]);
 
   const layerLabels = useMemo(() => {
     return Object.fromEntries(referenceMapLayers.map((key) => [key, t(key, { ns: "screen" })])) as Record<ReferenceMapLayer, string>;
@@ -737,7 +839,7 @@ export function PositionMap({
         className: "center-point-button",
         onClick: () => {
           const data = realDataRef.current;
-          fitRealScreenBounds(map, data.deviceLocation, data.positions);
+          fitRealScreenBounds(map, data.deviceLocation, data.positions, data.warningZone);
         },
       },
     ]);
@@ -757,6 +859,8 @@ export function PositionMap({
       data.positions,
       selectedIdRef.current,
       data.whitelist,
+      data.warningZone,
+      data.warningZoneEnabled === true,
       (target) => onSelectPositionRef.current(target),
       t,
     );
@@ -785,8 +889,8 @@ export function PositionMap({
         return;
       }
       map.invalidateSize();
-      if (collectRealMapPoints(data.deviceLocation, data.positions).length) {
-        fitRealScreenBounds(map, data.deviceLocation, data.positions);
+      if (hasRealMapContent(data.deviceLocation, data.positions, data.warningZone)) {
+        fitRealScreenBounds(map, data.deviceLocation, data.positions, data.warningZone);
         hasFitRealBoundsRef.current = true;
       }
     }, 0);
@@ -822,19 +926,26 @@ export function PositionMap({
       positions,
       selectedId,
       whitelist,
+      warningZone,
+      warningZoneEnabled,
       (target) => onSelectPositionRef.current(target),
       t,
     );
 
-    if (!hasFitRealBoundsRef.current && collectRealMapPoints(deviceLocation, positions).length) {
-      fitRealScreenBounds(map, deviceLocation, positions);
+    if (!hasFitRealBoundsRef.current && hasRealMapContent(deviceLocation, positions, warningZone)) {
+      fitRealScreenBounds(map, deviceLocation, positions, warningZone);
       hasFitRealBoundsRef.current = true;
     }
-  }, [deviceHeadingDeg, deviceLocation, positions, selectedId, t, whitelist]);
+  }, [deviceHeadingDeg, deviceLocation, positions, selectedId, t, whitelist, warningZone, warningZoneEnabled]);
 
   return (
     <div className={cx("screen-map-shell", className)}>
       <div ref={containerRef} className="screen-map dark" />
+      {warningZoneEnabled && !validWarningZone(warningZone) ? (
+        <div className="screen-map-warning-zone-hint" role="status">
+          {t("warningZoneNoDeviceLocation", { ns: "screen" })}
+        </div>
+      ) : null}
     </div>
   );
 }

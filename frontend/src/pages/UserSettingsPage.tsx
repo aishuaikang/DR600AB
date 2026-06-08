@@ -7,6 +7,14 @@ import { Panel, PanelBody } from "../components/Panel";
 import { SectionHeader } from "../components/SectionHeader";
 import type { UserSettings } from "../types";
 import { extractErrorMessage } from "../utils/session";
+import {
+  defaultWarningZoneRadiusMeters,
+  maxWarningZoneRadiusMeters,
+  minWarningZoneRadiusMeters,
+  resolveWarningZoneEnabled,
+  resolveWarningZoneRadiusMeters,
+  validWarningZoneRadius,
+} from "../utils/whitelist";
 
 const defaultIntrusionRetentionDays = 90;
 const intrusionRetentionOptions = [30, 90, 180, 0];
@@ -62,13 +70,26 @@ export function UserSettingsPage({
     kind: "idle",
     text: "",
   });
+  const [warningZoneSaving, setWarningZoneSaving] = useState(false);
+  const [warningZoneMessage, setWarningZoneMessage] = useState<{ kind: "idle" | "success" | "error"; text: string }>({
+    kind: "idle",
+    text: "",
+  });
   const [deviceSnQrDataUrl, setDeviceSnQrDataUrl] = useState("");
   const [retentionDraft, setRetentionDraft] = useState(() => String(userSettings.intrusionRetentionDays ?? defaultIntrusionRetentionDays));
+  const [warningZoneEnabledDraft, setWarningZoneEnabledDraft] = useState(() => resolveWarningZoneEnabled(userSettings));
+  const [warningZoneRadiusDraft, setWarningZoneRadiusDraft] = useState(() => String(resolveWarningZoneRadiusMeters(userSettings)));
   const normalizedDraft = titleDraft.trim();
   const changed = normalizedDraft !== appTitle;
   const savedRetentionDays = userSettings.intrusionRetentionDays ?? defaultIntrusionRetentionDays;
   const retentionDays = Number(retentionDraft);
   const retentionChanged = Number.isFinite(retentionDays) && retentionDays >= 0 && retentionDays !== savedRetentionDays;
+  const savedWarningZoneEnabled = resolveWarningZoneEnabled(userSettings);
+  const savedWarningZoneRadius = resolveWarningZoneRadiusMeters(userSettings);
+  const warningZoneRadius = Number(warningZoneRadiusDraft);
+  const warningZoneValid = validWarningZoneRadius(warningZoneRadius);
+  const warningZoneChanged =
+    (warningZoneEnabledDraft !== savedWarningZoneEnabled || warningZoneRadius !== savedWarningZoneRadius);
   const savedLatitude = userSettings.manualDeviceLocation?.latitude;
   const savedLongitude = userSettings.manualDeviceLocation?.longitude;
   const latitude = parseCoordinate(latitudeDraft);
@@ -96,6 +117,11 @@ export function UserSettingsPage({
   useEffect(() => {
     setRetentionDraft(String(userSettings.intrusionRetentionDays ?? defaultIntrusionRetentionDays));
   }, [userSettings.intrusionRetentionDays]);
+
+  useEffect(() => {
+    setWarningZoneEnabledDraft(resolveWarningZoneEnabled(userSettings));
+    setWarningZoneRadiusDraft(String(resolveWarningZoneRadiusMeters(userSettings)));
+  }, [userSettings.warningZoneEnabled, userSettings.warningZoneRadiusMeters]);
 
   useEffect(() => {
     let cancelled = false;
@@ -186,6 +212,27 @@ export function UserSettingsPage({
       setRetentionMessage({ kind: "error", text: extractErrorMessage(error, t("unexpectedError", { ns: "common" })) });
     } finally {
       setRetentionSaving(false);
+    }
+  };
+
+  const saveWarningZone = async () => {
+    if (warningZoneEnabledDraft && !warningZoneValid) {
+      setWarningZoneMessage({ kind: "error", text: t("warningZoneInvalid", { ns: "settings" }) });
+      return;
+    }
+    setWarningZoneSaving(true);
+    setWarningZoneMessage({ kind: "idle", text: "" });
+    try {
+      await onUserSettingsChange({
+        ...userSettings,
+        warningZoneEnabled: warningZoneEnabledDraft,
+        warningZoneRadiusMeters: warningZoneValid ? warningZoneRadius : savedWarningZoneRadius,
+      });
+      setWarningZoneMessage({ kind: "success", text: t("warningZoneSaved", { ns: "settings" }) });
+    } catch (error) {
+      setWarningZoneMessage({ kind: "error", text: extractErrorMessage(error, t("unexpectedError", { ns: "common" })) });
+    } finally {
+      setWarningZoneSaving(false);
     }
   };
 
@@ -362,6 +409,80 @@ export function UserSettingsPage({
               onClick={() => void saveManualLocation()}
             >
               {locationSaving ? t("loading", { ns: "common" }) : t("save", { ns: "common" })}
+            </button>
+          </div>
+        </PanelBody>
+      </Panel>
+
+      <Panel>
+        <PanelBody>
+          <SectionHeader
+            title={t("warningZoneTitle", { ns: "settings" })}
+            description={t("warningZoneDescription", { ns: "settings" })}
+          />
+
+          <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_18rem]">
+            <div className="grid gap-3">
+              <label className="flex items-center justify-between gap-3 rounded-2xl border border-base-300 bg-base-100/45 px-4 py-3">
+                <span className="grid gap-1">
+                  <span className="text-sm font-semibold text-base-content">{t("warningZoneEnabled", { ns: "settings" })}</span>
+                  <span className="text-xs leading-5 text-base-content/50">{t("warningZoneHint", { ns: "settings" })}</span>
+                </span>
+                <input
+                  className="toggle toggle-primary"
+                  type="checkbox"
+                  checked={warningZoneEnabledDraft}
+                  onChange={(event) => setWarningZoneEnabledDraft(event.target.checked)}
+                />
+              </label>
+
+              <label className="grid gap-1.5">
+                <span className="text-xs font-medium text-base-content/60">{t("warningZoneRadiusMeters", { ns: "settings" })}</span>
+                <input
+                  className="input input-bordered input-sm w-full bg-base-100"
+                  type="number"
+                  min={minWarningZoneRadiusMeters}
+                  max={maxWarningZoneRadiusMeters}
+                  step={1}
+                  inputMode="numeric"
+                  value={warningZoneRadiusDraft}
+                  placeholder={String(defaultWarningZoneRadiusMeters)}
+                  onChange={(event) => setWarningZoneRadiusDraft(event.target.value)}
+                />
+                <span className="text-xs leading-5 text-base-content/50">
+                  {t("warningZoneRadiusHint", {
+                    ns: "settings",
+                    min: minWarningZoneRadiusMeters,
+                    max: maxWarningZoneRadiusMeters,
+                  })}
+                </span>
+              </label>
+            </div>
+
+            <div className="rounded-2xl border border-base-300 bg-base-100/45 p-3">
+              <span className="text-[11px] font-semibold uppercase tracking-wide text-base-content/45">{t("savedValue", { ns: "settings" })}</span>
+              <strong className="mt-2 block text-sm font-semibold text-base-content">
+                {savedWarningZoneEnabled
+                  ? t("warningZoneSavedValue", { ns: "settings", value: savedWarningZoneRadius })
+                  : t("statusOff", { ns: "screen" })}
+              </strong>
+            </div>
+          </div>
+
+          {warningZoneMessage.text ? (
+            <div className={`alert py-2 text-sm ${warningZoneMessage.kind === "error" ? "alert-error" : "alert-success"}`}>
+              {warningZoneMessage.text}
+            </div>
+          ) : null}
+
+          <div className="flex flex-wrap justify-end gap-2">
+            <button
+              className="btn btn-sm btn-primary"
+              type="button"
+              disabled={warningZoneSaving || !warningZoneChanged}
+              onClick={() => void saveWarningZone()}
+            >
+              {warningZoneSaving ? t("loading", { ns: "common" }) : t("save", { ns: "common" })}
             </button>
           </div>
         </PanelBody>

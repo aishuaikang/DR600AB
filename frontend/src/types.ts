@@ -177,12 +177,20 @@ export interface GeoPoint {
   longitude: number;
 }
 
+export interface WarningZone {
+  id: string;
+  center: GeoPoint;
+  radiusMeters: number;
+}
+
 export interface UserSettings {
   deviceSn?: string;
   deviceHardwareId?: string;
   manualDeviceLocation?: GeoPoint;
   screenStrikeChannelLabels?: string[];
   intrusionRetentionDays?: number;
+  warningZoneEnabled?: boolean;
+  warningZoneRadiusMeters?: number;
   whitelist?: WhitelistItem[];
   screenAlarmSettings?: ScreenAlarmSettings;
 }

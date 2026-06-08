@@ -103,6 +103,8 @@ type UserSettings struct {
 	ManualDeviceLocation      *GeoPoint            `json:"manualDeviceLocation,omitempty"`
 	ScreenStrikeChannelLabels []string             `json:"screenStrikeChannelLabels,omitempty"`
 	IntrusionRetentionDays    *int                 `json:"intrusionRetentionDays,omitempty"`
+	WarningZoneEnabled        *bool                `json:"warningZoneEnabled,omitempty"`
+	WarningZoneRadiusMeters   *float64             `json:"warningZoneRadiusMeters,omitempty"`
 	Whitelist                 []WhitelistItem      `json:"whitelist,omitempty"`
 	ScreenAlarmSettings       *ScreenAlarmSettings `json:"screenAlarmSettings,omitempty"`
 }
@@ -123,7 +125,12 @@ type ScreenAlarmSettings struct {
 	Sound     bool `json:"sound"`
 }
 
-const DefaultIntrusionRetentionDays = 90
+const (
+	DefaultIntrusionRetentionDays  = 90
+	DefaultWarningZoneRadiusMeters = 500.0
+	MinWarningZoneRadiusMeters     = 10.0
+	MaxWarningZoneRadiusMeters     = 50000.0
+)
 
 // UserSettingsWithDefaults fills optional user settings with public defaults.
 func UserSettingsWithDefaults(settings UserSettings) UserSettings {
@@ -133,6 +140,16 @@ func UserSettingsWithDefaults(settings UserSettings) UserSettings {
 	}
 	if settings.ScreenAlarmSettings == nil {
 		settings.ScreenAlarmSettings = DefaultScreenAlarmSettings()
+	}
+	if settings.WarningZoneEnabled == nil {
+		enabled := false
+		settings.WarningZoneEnabled = &enabled
+	}
+	if settings.WarningZoneRadiusMeters == nil ||
+		*settings.WarningZoneRadiusMeters < MinWarningZoneRadiusMeters ||
+		*settings.WarningZoneRadiusMeters > MaxWarningZoneRadiusMeters {
+		radius := DefaultWarningZoneRadiusMeters
+		settings.WarningZoneRadiusMeters = &radius
 	}
 	return settings
 }

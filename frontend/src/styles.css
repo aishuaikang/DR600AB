@@ -649,6 +649,10 @@ body.virtual-keyboard-open .app-loading-overlay {
   gap: 0.56rem;
 }
 
+.screen-legend-panel__item--circle {
+  gap: 0.56rem;
+}
+
 .screen-legend-panel__icon {
   width: 1.12rem;
   height: 1.6rem;
@@ -673,6 +677,16 @@ body.virtual-keyboard-open .app-loading-overlay {
   flex: none;
   border-radius: 999px;
   box-shadow: 0 0 0.45rem rgba(0, 0, 0, 0.22);
+}
+
+.screen-legend-panel__circle {
+  width: 1.16rem;
+  height: 1.16rem;
+  flex: none;
+  border: 2px solid #f97316;
+  border-radius: 999px;
+  background: rgba(249, 115, 22, 0.16);
+  box-shadow: 0 0 0.42rem rgba(249, 115, 22, 0.34);
 }
 
 @media (max-width: 1279px) {
@@ -1609,6 +1623,35 @@ body.virtual-keyboard-open .app-loading-overlay {
 
 .screen-map-trajectory-point {
   filter: drop-shadow(0 0 0.36em rgba(0, 0, 0, 0.62));
+}
+
+.screen-map-warning-zone {
+  filter:
+    drop-shadow(0 0 0.22em rgba(249, 115, 22, 0.58))
+    drop-shadow(0 0 0.72em rgba(251, 146, 60, 0.28));
+}
+
+.screen-map-warning-zone-hint {
+  position: absolute;
+  left: 50%;
+  bottom: 2.4em;
+  z-index: 12;
+  max-width: min(28rem, calc(100% - 2rem));
+  transform: translateX(-50%);
+  border: 1px solid rgba(251, 146, 60, 0.42);
+  border-radius: 999px;
+  padding: 0.54em 0.92em;
+  color: rgba(255, 247, 237, 0.94);
+  background: rgba(24, 14, 6, 0.78);
+  box-shadow:
+    0 0.65em 1.35em rgba(0, 0, 0, 0.26),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  backdrop-filter: blur(10px);
+  font-size: 0.72em;
+  font-weight: 650;
+  line-height: 1.35;
+  text-align: center;
+  pointer-events: none;
 }
 
 .tip-text {

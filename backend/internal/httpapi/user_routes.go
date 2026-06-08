@@ -70,6 +70,15 @@ func (s *Server) handleUpdateUserSettings(c *fiber.Ctx) error {
 			"invalid intrusion retention days",
 		)
 	}
+	if !validWarningZoneRadius(req.WarningZoneRadiusMeters) {
+		return s.respondError(
+			c,
+			fiber.StatusBadRequest,
+			"invalid_request",
+			s.translator.T(locale, "errors", "invalid_request"),
+			"invalid warning zone radius",
+		)
+	}
 	req.ScreenStrikeChannelLabels = normalizeScreenStrikeChannelLabels(req.ScreenStrikeChannelLabels)
 	req.Whitelist = normalizeUserWhitelist(req.Whitelist, time.Now())
 	req.DeviceSN = ""
@@ -197,6 +206,16 @@ func validIntrusionRetentionDays(days *int) bool {
 		return true
 	}
 	return *days >= 0
+}
+
+func validWarningZoneRadius(radius *float64) bool {
+	if radius == nil {
+		return true
+	}
+	return !math.IsNaN(*radius) &&
+		!math.IsInf(*radius, 0) &&
+		*radius >= model.MinWarningZoneRadiusMeters &&
+		*radius <= model.MaxWarningZoneRadiusMeters
 }
 
 const intrusionPruneInterval = time.Minute

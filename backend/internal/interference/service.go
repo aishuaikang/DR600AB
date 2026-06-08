@@ -77,6 +77,8 @@ type ChannelDefinition struct {
 	Reserved bool
 }
 
+var discoverDefaultChannels = DefaultChannels
+
 // Service 管理 GPIO 通道状态，并发布通道事件。
 type Service struct {
 	mu sync.RWMutex
@@ -119,27 +121,18 @@ func NewService(store *store.MemoryStore, translator *i18n.Translator, definitio
 		}
 	}
 	if len(definitions) == 0 {
-		definitions = DefaultChannels()
+		definitions = discoverDefaultChannels()
 	}
 
-	channels := make(map[string]*channelState, len(definitions))
-	order := make([]string, 0, len(definitions))
-	for _, def := range definitions {
-		channels[def.ID] = &channelState{
-			def:          def,
-			actualLevel:  "unknown",
-			desiredLevel: "low",
-			status:       initialStatus(def),
-		}
-		order = append(order, def.ID)
-	}
-	return &Service{
-		channels:   channels,
-		order:      order,
+	svc := &Service{
+		channels:   make(map[string]*channelState, len(definitions)),
+		order:      make([]string, 0, len(definitions)),
 		pinFactory: pinFactory,
 		store:      store,
 		translator: translator,
 	}
+	svc.addChannelDefinitionsLocked(definitions)
+	return svc
 }
 
 // SetReportStore 设置干扰报告持久化存储。
@@ -177,11 +170,31 @@ func channelsFromBoardPins(pins []board.PinDefinition) []ChannelDefinition {
 	return definitions
 }
 
+func (s *Service) addChannelDefinitionsLocked(definitions []ChannelDefinition) {
+	for _, def := range definitions {
+		s.channels[def.ID] = &channelState{
+			def:          def,
+			actualLevel:  "unknown",
+			desiredLevel: "low",
+			status:       initialStatus(def),
+		}
+		s.order = append(s.order, def.ID)
+	}
+}
+
+func (s *Service) ensureDefaultChannelsLocked() {
+	if len(s.order) > 0 {
+		return
+	}
+	s.addChannelDefinitionsLocked(discoverDefaultChannels())
+}
+
 // ListChannels 按稳定展示顺序返回通道状态。
 func (s *Service) ListChannels() []model.GpioChannel {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
 
+	s.ensureDefaultChannelsLocked()
 	result := make([]model.GpioChannel, 0, len(s.order))
 	for _, id := range s.order {
 		result = append(result, s.dtoWithActual(s.channels[id]))
@@ -194,6 +207,7 @@ func (s *Service) SetState(id string, enabled bool, locale string) (model.GpioCh
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	s.ensureDefaultChannelsLocked()
 	channel, err := s.setStateLocked(id, enabled, locale)
 	if err == nil && s.isScreenStrikeChannelIDLocked(id) {
 		if !s.screenStrikeHasHighChannelLocked() {
@@ -212,9 +226,10 @@ func (s *Service) SetState(id string, enabled bool, locale string) (model.GpioCh
 
 // ScreenStrikeState 返回大屏干扰控制当前状态。
 func (s *Service) ScreenStrikeState() model.ScreenStrikeState {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
 
+	s.ensureDefaultChannelsLocked()
 	return s.screenStrikeStateLocked(time.Now())
 }
 
@@ -235,6 +250,7 @@ func (s *Service) applyScreenStrike(
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	s.ensureDefaultChannelsLocked()
 	if !enabled {
 		s.strikeSeq++
 		if s.strikeTimer != nil {

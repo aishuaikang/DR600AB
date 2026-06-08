@@ -52,7 +52,10 @@ import { extractErrorMessage } from "../utils/session";
 import {
   isSerialWhitelisted,
   removeWhitelistSerial,
+  resolveActiveWarningZone,
   resolveScreenAlarmSettings,
+  resolveWarningZoneEnabled,
+  targetTriggersAlarm,
   upsertWhitelistItem,
 } from "../utils/whitelist";
 import { ScreenMap, ScreenMapLegend } from "./ScreenMap";
@@ -2994,6 +2997,14 @@ export function ScreenPage({
     () => resolveScreenAlarmSettings(userSettings.screenAlarmSettings),
     [userSettings.screenAlarmSettings],
   );
+  const warningZoneEnabled = useMemo(
+    () => resolveWarningZoneEnabled(userSettings),
+    [userSettings.warningZoneEnabled],
+  );
+  const activeWarningZone = useMemo(
+    () => resolveActiveWarningZone(userSettings, deviceLocation),
+    [deviceLocation, userSettings.warningZoneEnabled, userSettings.warningZoneRadiusMeters],
+  );
   const alarmCounts = useMemo<ScreenAlarmSourceCount[]>(() => {
     return [
       {
@@ -3002,14 +3013,29 @@ export function ScreenPage({
       },
       {
         kind: "position",
-        count: alarmSettings.position ? countUnwhitelistedSerials(positions, userSettings.whitelist) : 0,
+        count: alarmSettings.position
+          ? positions.reduce(
+            (count, target) => count + (targetTriggersAlarm(target, userSettings.whitelist, activeWarningZone, warningZoneEnabled) ? 1 : 0),
+            0,
+          )
+          : 0,
       },
       {
         kind: "fpv",
         count: alarmSettings.fpv ? countUnwhitelistedSerials(fpvTargets, userSettings.whitelist) : 0,
       },
     ];
-  }, [alarmSettings.detection, alarmSettings.fpv, alarmSettings.position, fpvTargets, positions, targets, userSettings.whitelist]);
+  }, [
+    activeWarningZone,
+    alarmSettings.detection,
+    alarmSettings.fpv,
+    alarmSettings.position,
+    fpvTargets,
+    positions,
+    targets,
+    userSettings.whitelist,
+    warningZoneEnabled,
+  ]);
   const alarmActive = alarmCounts.some((item) => item.count > 0);
   const alarmSound = useScreenAlarmSound(alarmActive && alarmSettings.sound);
 
@@ -3505,6 +3531,8 @@ export function ScreenPage({
         selectedId={selectedId}
         positions={screenStatus?.detection.configured === false ? [] : positions}
         whitelist={userSettings.whitelist}
+        warningZone={activeWarningZone}
+        warningZoneEnabled={warningZoneEnabled}
         deviceLocation={deviceLocation}
         deviceHeadingDeg={liveCompassHeading?.headingDeg ?? screenStatus?.compass?.headingDeg}
         visibleMapLayers={visibleMapLayers}
