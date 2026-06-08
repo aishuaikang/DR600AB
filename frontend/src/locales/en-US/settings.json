@@ -188,6 +188,8 @@
   "fpvRecordNoFrames": "No viewable frame was saved for this record. Older records or sessions without frames only have metadata.",
   "fpvRecordPlay": "Play",
   "fpvRecordPause": "Pause",
+  "fpvRecordPreviousFrame": "Previous frame",
+  "fpvRecordNextFrame": "Next frame",
   "fpvRecordCurrentFrame": "Current Frame",
   "fpvRecordFrameBytes": "Frame Size",
   "fpvRecordNoMatch": "No FPV video records match the current filters",

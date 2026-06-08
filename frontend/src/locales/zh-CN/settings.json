@@ -188,6 +188,8 @@
   "fpvRecordNoFrames": "这条记录没有保存可查看画面，旧记录或无帧会话只能查看元数据。",
   "fpvRecordPlay": "播放",
   "fpvRecordPause": "暂停",
+  "fpvRecordPreviousFrame": "上一帧",
+  "fpvRecordNextFrame": "下一帧",
   "fpvRecordCurrentFrame": "当前帧",
   "fpvRecordFrameBytes": "帧大小",
   "fpvRecordNoMatch": "没有找到符合条件的图传记录",

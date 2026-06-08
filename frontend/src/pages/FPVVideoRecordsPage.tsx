@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { TFunction } from "i18next";
-import { ChevronDown, Eye, RefreshCw, Trash2, X } from "lucide-react";
+import { ChevronDown, ChevronLeft, ChevronRight, Eye, Pause, Play, RefreshCw, Trash2, X } from "lucide-react";
 
 import { deleteFPVVideoRecords, getFPVVideoRecord, getFPVVideoRecords } from "../api";
 import type { Banner, Tone } from "../app/types";
@@ -528,36 +528,55 @@ function FPVVideoRecordDetailModal({
 }) {
   const frames = record.frames ?? [];
   const frameCount = frames.length;
-  const currentFrame = frameCount > 0 ? frames[Math.min(frameIndex, frameCount - 1)] : undefined;
+  const boundedFrameIndex = Math.min(Math.max(frameIndex, 0), Math.max(0, frameCount - 1));
+  const currentFrame = frameCount > 0 ? frames[boundedFrameIndex] : undefined;
   const title = record.displayModel || record.model || t("fpvRecordUnknownTarget", { ns: "settings" });
+  const canSeekFrames = frameCount > 1;
+  const framePosition = frameCount > 0 ? `${boundedFrameIndex + 1} / ${frameCount}` : "0 / 0";
+  const goToPreviousFrame = () => {
+    if (!canSeekFrames) {
+      return;
+    }
+    onFrameIndexChange((boundedFrameIndex - 1 + frameCount) % frameCount);
+  };
+  const goToNextFrame = () => {
+    if (!canSeekFrames) {
+      return;
+    }
+    onFrameIndexChange((boundedFrameIndex + 1) % frameCount);
+  };
 
   return (
     <div className="app-modal-backdrop fixed inset-0 z-50 grid place-items-center bg-black/60 p-4" role="presentation" onClick={onClose}>
       <section
-        className="app-modal-card grid max-h-[92vh] w-full max-w-5xl gap-4 overflow-auto rounded-2xl border border-base-300 bg-base-100 p-4 shadow-2xl shadow-black/45"
+        className="app-modal-card flex max-h-[94vh] w-full max-w-6xl flex-col overflow-hidden rounded-xl border border-base-300 bg-base-100 shadow-2xl shadow-black/45"
         role="dialog"
         aria-modal="true"
         aria-labelledby="fpv-record-detail-title"
         onClick={(event) => event.stopPropagation()}
       >
-        <div className="flex min-w-0 items-start justify-between gap-3">
+        <div className="flex min-w-0 items-start justify-between gap-3 border-b border-base-300 px-4 py-3">
           <div className="min-w-0">
-            <span className="text-xs font-semibold uppercase text-base-content/45">{t("fpvRecordPreview", { ns: "settings" })}</span>
-            <h2 id="fpv-record-detail-title" className="truncate text-base font-semibold text-base-content">
+            <span className="text-xs font-semibold uppercase text-base-content/50">{t("fpvRecordPreview", { ns: "settings" })}</span>
+            <h2 id="fpv-record-detail-title" className="mt-0.5 truncate text-lg font-semibold text-base-content">
               {title}
             </h2>
-            <p className="mt-1 text-xs text-base-content/60">
-              {formatFrequency(locale, record.frequency)} · {formatTime(locale, record.startedAt)}
-            </p>
+            <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-base-content/60">
+              <Badge tone={statusTone(record.status)}>{statusLabel(record.status, t)}</Badge>
+              <span className="rounded-lg border border-base-300 bg-base-200/60 px-2 py-1 tabular-nums">{formatFrequency(locale, record.frequency)}</span>
+              <span className="rounded-lg border border-base-300 bg-base-200/60 px-2 py-1 tabular-nums">{formatRSSI(locale, record.rssi)}</span>
+              <span className="rounded-lg border border-base-300 bg-base-200/60 px-2 py-1 tabular-nums">{formatDuration(record.durationSeconds, t)}</span>
+              <span className="rounded-lg border border-base-300 bg-base-200/60 px-2 py-1 tabular-nums">{t("fpvRecordFrameCount", { ns: "settings" })}: {record.frameCount}</span>
+            </div>
           </div>
-          <button className="btn btn-ghost btn-sm h-8 min-h-8 w-8 shrink-0 rounded-xl px-0" type="button" aria-label={t("close", { ns: "common" })} onClick={onClose}>
+          <button className="btn btn-ghost btn-sm h-8 min-h-8 w-8 shrink-0 rounded-lg px-0" type="button" aria-label={t("close", { ns: "common" })} onClick={onClose}>
             <X size={16} aria-hidden="true" />
           </button>
         </div>
 
-        <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_18rem]">
-          <div className="grid min-w-0 gap-3">
-            <div className="grid aspect-video place-items-center overflow-hidden rounded-xl border border-base-300 bg-neutral">
+        <div className="grid min-h-0 gap-4 overflow-auto p-4 lg:grid-cols-[minmax(0,1fr)_20rem] lg:items-start">
+          <div className="grid min-w-0 gap-3 lg:self-start">
+            <div className="grid aspect-video max-h-[62vh] place-items-center overflow-hidden rounded-lg border border-base-300 bg-black">
               {currentFrame?.image ? (
                 <img className="h-full w-full object-contain [image-rendering:auto]" src={currentFrame.image} alt={t("fpvRecordFrameAlt", { ns: "settings" })} />
               ) : (
@@ -568,43 +587,73 @@ function FPVVideoRecordDetailModal({
               )}
             </div>
 
-            <div className="flex flex-wrap items-center gap-2">
-              <button
-                className="btn btn-sm btn-outline btn-info"
-                type="button"
-                disabled={frameCount <= 1}
-                onClick={() => onPlayingChange(!playing)}
-              >
-                <span>{playing ? t("fpvRecordPause", { ns: "settings" }) : t("fpvRecordPlay", { ns: "settings" })}</span>
-              </button>
-              <input
-                className="range range-info range-sm min-w-52 flex-1"
-                type="range"
-                min={0}
-                max={Math.max(0, frameCount - 1)}
-                step={1}
-                value={Math.min(frameIndex, Math.max(0, frameCount - 1))}
-                disabled={frameCount <= 1}
-                onChange={(event) => onFrameIndexChange(Number(event.currentTarget.value))}
-              />
-              <span className="w-24 text-right text-xs tabular-nums text-base-content/60">
-                {frameCount > 0 ? `${Math.min(frameIndex, frameCount - 1) + 1} / ${frameCount}` : "0 / 0"}
-              </span>
+            <div className="rounded-lg border border-base-300 bg-base-200/50 p-3">
+              <div className="grid grid-cols-[auto_auto_auto_minmax(4rem,1fr)] items-center gap-2 sm:grid-cols-[auto_auto_auto_minmax(0,1fr)_auto]">
+                <button
+                  className="btn btn-sm btn-circle btn-ghost"
+                  type="button"
+                  disabled={!canSeekFrames}
+                  aria-label={t("fpvRecordPreviousFrame", { ns: "settings" })}
+                  title={t("fpvRecordPreviousFrame", { ns: "settings" })}
+                  onClick={goToPreviousFrame}
+                >
+                  <ChevronLeft size={17} aria-hidden="true" />
+                </button>
+                <button
+                  className={cx("btn btn-sm min-w-24", playing ? "btn-outline btn-info" : "btn-info")}
+                  type="button"
+                  disabled={!canSeekFrames}
+                  aria-label={playing ? t("fpvRecordPause", { ns: "settings" }) : t("fpvRecordPlay", { ns: "settings" })}
+                  onClick={() => onPlayingChange(!playing)}
+                >
+                  {playing ? <Pause size={15} aria-hidden="true" /> : <Play size={15} aria-hidden="true" />}
+                  <span>{playing ? t("fpvRecordPause", { ns: "settings" }) : t("fpvRecordPlay", { ns: "settings" })}</span>
+                </button>
+                <button
+                  className="btn btn-sm btn-circle btn-ghost"
+                  type="button"
+                  disabled={!canSeekFrames}
+                  aria-label={t("fpvRecordNextFrame", { ns: "settings" })}
+                  title={t("fpvRecordNextFrame", { ns: "settings" })}
+                  onClick={goToNextFrame}
+                >
+                  <ChevronRight size={17} aria-hidden="true" />
+                </button>
+                <input
+                  className="range range-info range-sm col-span-full min-w-0 sm:col-span-1 sm:col-start-auto sm:row-start-auto"
+                  type="range"
+                  min={0}
+                  max={Math.max(0, frameCount - 1)}
+                  step={1}
+                  value={boundedFrameIndex}
+                  disabled={!canSeekFrames}
+                  onChange={(event) => onFrameIndexChange(Number(event.currentTarget.value))}
+                />
+                <span className="col-start-4 row-start-1 w-full text-right text-xs tabular-nums text-base-content/70 sm:col-start-auto sm:row-start-auto sm:w-20">{framePosition}</span>
+              </div>
+              <div className="mt-2 flex flex-wrap items-center justify-between gap-x-4 gap-y-1 text-xs text-base-content/55">
+                <span className="tabular-nums">{t("fpvRecordCurrentFrame", { ns: "settings" })}: {currentFrame ? `#${currentFrame.num}` : "-"}</span>
+                <span className="tabular-nums">{displayFrameSize(currentFrame)}</span>
+                <span className="tabular-nums">{formatFrameBytes(locale, currentFrame?.frameBytes)}</span>
+                <span className="tabular-nums">{formatTime(locale, currentFrame?.receivedAt || record.lastFrameAt)}</span>
+              </div>
             </div>
           </div>
 
-          <div className="grid content-start gap-2 text-sm">
-            <RecordDetailItem label={t("fpvRecordStatus", { ns: "settings" })} value={statusLabel(record.status, t)} />
-            <RecordDetailItem label={t("fpvRecordIdentity", { ns: "settings" })} value={record.serial || record.targetId || "-"} mono />
-            <RecordDetailItem label={t("fpvRecordFrequency", { ns: "settings" })} value={formatFrequency(locale, record.frequency)} />
-            <RecordDetailItem label={t("fpvRecordRssi", { ns: "settings" })} value={formatRSSI(locale, record.rssi)} />
-            <RecordDetailItem label={t("fpvRecordDuration", { ns: "settings" })} value={formatDuration(record.durationSeconds, t)} />
-            <RecordDetailItem label={t("fpvRecordFrameCount", { ns: "settings" })} value={String(record.frameCount)} />
-            <RecordDetailItem label={t("fpvRecordCurrentFrame", { ns: "settings" })} value={currentFrame ? `#${currentFrame.num}` : "-"} />
-            <RecordDetailItem label={t("fpvRecordLastFrameSize", { ns: "settings" })} value={displayFrameSize(currentFrame)} />
-            <RecordDetailItem label={t("fpvRecordFrameBytes", { ns: "settings" })} value={formatFrameBytes(locale, currentFrame?.frameBytes)} />
-            <RecordDetailItem label={t("fpvRecordLastFrameAt", { ns: "settings" })} value={formatTime(locale, currentFrame?.receivedAt || record.lastFrameAt)} />
-            {record.error ? <RecordDetailItem label={t("fpvRecordError", { ns: "settings" })} value={record.error} tone="error" /> : null}
+          <div className="grid content-start gap-3 rounded-lg border border-base-300 bg-base-200/35 p-3 text-sm lg:self-start">
+            <div className="grid grid-cols-2 gap-2">
+              <RecordDetailItem label={t("fpvRecordStartedAt", { ns: "settings" })} value={formatTime(locale, record.startedAt)} />
+              <RecordDetailItem label={t("fpvRecordEndedAt", { ns: "settings" })} value={formatTime(locale, record.endedAt)} />
+              <RecordDetailItem label={t("fpvRecordIdentity", { ns: "settings" })} value={record.serial || record.targetId || "-"} mono wide />
+              <RecordDetailItem label={t("fpvRecordModel", { ns: "settings" })} value={title} wide />
+              <RecordDetailItem label={t("fpvRecordFrequency", { ns: "settings" })} value={formatFrequency(locale, record.frequency)} />
+              <RecordDetailItem label={t("fpvRecordRssi", { ns: "settings" })} value={formatRSSI(locale, record.rssi)} />
+              <RecordDetailItem label={t("fpvRecordDuration", { ns: "settings" })} value={formatDuration(record.durationSeconds, t)} />
+              <RecordDetailItem label={t("fpvRecordFrameCount", { ns: "settings" })} value={String(record.frameCount)} />
+              <RecordDetailItem label={t("fpvRecordLastFrameSize", { ns: "settings" })} value={frameSize(record)} />
+              <RecordDetailItem label={t("fpvRecordLastFrameAt", { ns: "settings" })} value={formatTime(locale, record.lastFrameAt)} />
+              {record.error ? <RecordDetailItem label={t("fpvRecordError", { ns: "settings" })} value={record.error} tone="error" wide /> : null}
+            </div>
           </div>
         </div>
       </section>
@@ -617,16 +666,18 @@ function RecordDetailItem({
   value,
   mono,
   tone,
+  wide,
 }: {
   label: string;
   value: string;
   mono?: boolean;
   tone?: "error";
+  wide?: boolean;
 }) {
   return (
-    <div className="grid gap-1 rounded-xl border border-base-300 bg-base-200/50 p-3">
-      <span className="text-xs text-base-content/50">{label}</span>
-      <strong className={cx("min-w-0 break-words text-sm font-semibold", mono && "font-mono", tone === "error" && "text-error")}>{value}</strong>
+    <div className={cx("grid min-w-0 gap-1 rounded-lg border border-base-300 bg-base-100/70 px-3 py-2", wide && "col-span-2")}>
+      <span className="truncate text-xs text-base-content/50">{label}</span>
+      <strong className={cx("min-w-0 break-words text-sm font-semibold leading-snug", mono && "font-mono text-xs", tone === "error" && "text-error")}>{value}</strong>
     </div>
   );
 }
