@@ -192,25 +192,38 @@ const (
 
 // FPVVideoRecord 保存一次 FPV 图传视频查看会话。
 type FPVVideoRecord struct {
-	ID              string               `json:"id"`
-	TargetID        string               `json:"targetId,omitempty"`
-	Serial          string               `json:"serial,omitempty"`
-	Model           string               `json:"model,omitempty"`
-	DisplayModel    string               `json:"displayModel,omitempty"`
-	Device          string               `json:"device,omitempty"`
-	Frequency       float64              `json:"frequency,omitempty"`
-	RSSI            float64              `json:"rssi,omitempty"`
-	StartedAt       time.Time            `json:"startedAt"`
-	EndedAt         time.Time            `json:"endedAt"`
-	DurationSeconds int64                `json:"durationSeconds"`
-	Status          FPVVideoRecordStatus `json:"status"`
-	FrameCount      int                  `json:"frameCount"`
-	LastFrameRows   int                  `json:"lastFrameRows,omitempty"`
-	LastFrameCols   int                  `json:"lastFrameCols,omitempty"`
-	LastFrameAt     *time.Time           `json:"lastFrameAt,omitempty"`
-	Error           string               `json:"error,omitempty"`
-	LastRecord      any                  `json:"lastRecord,omitempty"`
-	CreatedAt       time.Time            `json:"createdAt"`
+	ID              string                `json:"id"`
+	TargetID        string                `json:"targetId,omitempty"`
+	Serial          string                `json:"serial,omitempty"`
+	Model           string                `json:"model,omitempty"`
+	DisplayModel    string                `json:"displayModel,omitempty"`
+	Device          string                `json:"device,omitempty"`
+	Frequency       float64               `json:"frequency,omitempty"`
+	RSSI            float64               `json:"rssi,omitempty"`
+	StartedAt       time.Time             `json:"startedAt"`
+	EndedAt         time.Time             `json:"endedAt"`
+	DurationSeconds int64                 `json:"durationSeconds"`
+	Status          FPVVideoRecordStatus  `json:"status"`
+	FrameCount      int                   `json:"frameCount"`
+	LastFrameRows   int                   `json:"lastFrameRows,omitempty"`
+	LastFrameCols   int                   `json:"lastFrameCols,omitempty"`
+	LastFrameAt     *time.Time            `json:"lastFrameAt,omitempty"`
+	Error           string                `json:"error,omitempty"`
+	LastRecord      any                   `json:"lastRecord,omitempty"`
+	Frames          []FPVVideoRecordFrame `json:"frames,omitempty"`
+	CreatedAt       time.Time             `json:"createdAt"`
+}
+
+// FPVVideoRecordFrame 保存 FPV 图传记录中可回放的一帧画面。
+type FPVVideoRecordFrame struct {
+	Num        int     `json:"num"`
+	Rows       int     `json:"rows"`
+	Cols       int     `json:"cols"`
+	PixelCount int     `json:"pixelCount"`
+	FrameBytes int64   `json:"frameBytes"`
+	RateKB     float64 `json:"rateKB"`
+	ReceivedAt string  `json:"receivedAt"`
+	Image      string  `json:"image"`
 }
 
 // FPVVideoRecordDeleteRequest deletes selected FPV video records.

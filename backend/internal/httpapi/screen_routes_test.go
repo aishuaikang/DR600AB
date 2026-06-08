@@ -385,6 +385,15 @@ func TestFPVVideoRecordLifecycleUsesTargetAndLastFrame(t *testing.T) {
 		Rows:       120,
 		Cols:       160,
 		ReceivedAt: frameAt,
+	}, []fpv.Frame{
+		{
+			Num:        3,
+			Rows:       120,
+			Cols:       160,
+			PixelCount: 19200,
+			ReceivedAt: frameAt,
+			Image:      "data:image/png;base64,test",
+		},
 	})
 
 	if len(records.items) != 1 {
@@ -402,6 +411,9 @@ func TestFPVVideoRecordLifecycleUsesTargetAndLastFrame(t *testing.T) {
 	}
 	if record.EndedAt.IsZero() {
 		t.Fatalf("EndedAt is zero, want finish time")
+	}
+	if len(record.Frames) != 1 || record.Frames[0].Image == "" {
+		t.Fatalf("Frames = %#v, want archived frame", record.Frames)
 	}
 }
 

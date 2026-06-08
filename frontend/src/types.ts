@@ -690,7 +690,19 @@ export interface FPVVideoRecord {
   lastFrameAt?: string;
   error?: string;
   lastRecord?: unknown;
+  frames?: FPVVideoRecordFrame[];
   createdAt: string;
+}
+
+export interface FPVVideoRecordFrame {
+  num: number;
+  rows: number;
+  cols: number;
+  pixelCount: number;
+  frameBytes: number;
+  rateKB: number;
+  receivedAt: string;
+  image: string;
 }
 
 export interface FPVVideoRecordDeleteRequest {

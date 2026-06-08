@@ -27,6 +27,7 @@ const (
 	defaultMaxFrameBytes     = 32 * 1024 * 1024
 	defaultFirstFrameTimeout = 3 * time.Second
 	defaultReadIdleTimeout   = 30 * time.Second
+	defaultMaxRecordFrames   = 120
 )
 
 var (
@@ -45,6 +46,7 @@ type Options struct {
 	MaxFrameBytes     int
 	FirstFrameTimeout time.Duration
 	ReadIdleTimeout   time.Duration
+	MaxRecordFrames   int
 	OpenListener      ListenerOpener
 }
 
@@ -114,6 +116,7 @@ type Service struct {
 	frameCount      int
 	updatedAt       time.Time
 	lastFrame       *Frame
+	recordFrames    []Frame
 	playback        *activePlayback
 	playbackSeq     uint64
 }
@@ -191,6 +194,7 @@ func (s *Service) BeginPlayback(frequency float64) (Playback, error) {
 	}
 	s.playback = &playback
 	s.lastFrame = nil
+	s.recordFrames = nil
 	s.frameCount = 0
 	s.updatedAt = playback.startedAt
 	s.broadcastLocked(statusMessage(s.snapshotLocked()))
@@ -208,6 +212,7 @@ func (s *Service) EndPlayback(token Playback) {
 
 	s.playback = nil
 	s.lastFrame = nil
+	s.recordFrames = nil
 	s.frameCount = 0
 	s.updatedAt = time.Now()
 	s.broadcastLocked(statusMessage(s.snapshotLocked()))
@@ -229,6 +234,18 @@ func (s *Service) LastFrame() *Frame {
 	}
 	frame := *s.lastFrame
 	return &frame
+}
+
+// RecordedFrames returns a copy of recently published frames for the active playback.
+func (s *Service) RecordedFrames() []Frame {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if len(s.recordFrames) == 0 {
+		return nil
+	}
+	frames := make([]Frame, len(s.recordFrames))
+	copy(frames, s.recordFrames)
+	return frames
 }
 
 // Subscribe registers a frame/status subscriber.
@@ -407,6 +424,13 @@ func (s *Service) publishFrame(frame Frame) {
 	s.frameCount = frame.Num
 	s.updatedAt = parseFrameTime(frame.ReceivedAt)
 	s.lastFrame = &frame
+	if s.options.MaxRecordFrames > 0 {
+		s.recordFrames = append(s.recordFrames, frame)
+		if overflow := len(s.recordFrames) - s.options.MaxRecordFrames; overflow > 0 {
+			copy(s.recordFrames, s.recordFrames[overflow:])
+			s.recordFrames = s.recordFrames[:len(s.recordFrames)-overflow]
+		}
+	}
 	s.broadcastLocked(Message{Name: "frame", Data: data})
 }
 
@@ -577,6 +601,12 @@ func normalizeOptions(options Options) Options {
 	}
 	if options.ReadIdleTimeout == 0 {
 		options.ReadIdleTimeout = defaultReadIdleTimeout
+	}
+	if options.MaxRecordFrames < 0 {
+		options.MaxRecordFrames = 0
+	}
+	if options.MaxRecordFrames == 0 {
+		options.MaxRecordFrames = defaultMaxRecordFrames
 	}
 	if options.OpenListener == nil {
 		options.OpenListener = net.Listen

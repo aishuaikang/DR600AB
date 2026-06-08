@@ -142,6 +142,7 @@ func New(cfg config.Config) (*App, error) {
 		Port:              cfg.FPVTCPPort,
 		BindRetryInterval: cfg.FPVBindRetryInterval,
 		MaxFrameBytes:     cfg.FPVMaxFrameBytes,
+		MaxRecordFrames:   cfg.FPVMaxRecordFrames,
 		FirstFrameTimeout: cfg.FPVFirstFrameTimeout,
 		ReadIdleTimeout:   cfg.FPVReadIdleTimeout,
 	})

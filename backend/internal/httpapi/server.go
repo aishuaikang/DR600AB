@@ -61,6 +61,7 @@ type InterferenceReportStore interface {
 type FPVVideoRecordStore interface {
 	Insert(model.FPVVideoRecord) error
 	List(fpvrecord.QueryOptions) ([]model.FPVVideoRecord, error)
+	Get(string) (model.FPVVideoRecord, bool, error)
 	Delete([]string) (int64, error)
 	Close() error
 }

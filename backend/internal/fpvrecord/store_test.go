@@ -19,22 +19,25 @@ func TestStoreInsertListDelete(t *testing.T) {
 	endedAt := startedAt.Add(12 * time.Second)
 	lastFrameAt := startedAt.Add(3 * time.Second)
 	record := model.FPVVideoRecord{
-		ID:              "fpv-1",
-		TargetID:        "target-1",
-		Serial:          "SN123",
-		Model:           "DJI_O3+",
-		DisplayModel:    "DJI O3+",
-		Device:          "detector",
-		Frequency:       1360,
-		RSSI:            -57.5,
-		StartedAt:       startedAt,
-		EndedAt:         endedAt,
-		Status:          model.FPVVideoRecordStatusCompleted,
-		FrameCount:      4,
-		LastFrameRows:   120,
-		LastFrameCols:   160,
-		LastFrameAt:     &lastFrameAt,
-		LastRecord:      model.ScreenDetectionLastRecord{ID: "record-1", Model: "DJI_O3+", Frequency: 1360},
+		ID:            "fpv-1",
+		TargetID:      "target-1",
+		Serial:        "SN123",
+		Model:         "DJI_O3+",
+		DisplayModel:  "DJI O3+",
+		Device:        "detector",
+		Frequency:     1360,
+		RSSI:          -57.5,
+		StartedAt:     startedAt,
+		EndedAt:       endedAt,
+		Status:        model.FPVVideoRecordStatusCompleted,
+		FrameCount:    4,
+		LastFrameRows: 120,
+		LastFrameCols: 160,
+		LastFrameAt:   &lastFrameAt,
+		LastRecord:    model.ScreenDetectionLastRecord{ID: "record-1", Model: "DJI_O3+", Frequency: 1360},
+		Frames: []model.FPVVideoRecordFrame{
+			{Num: 1, Rows: 120, Cols: 160, PixelCount: 19200, Image: "data:image/png;base64,test"},
+		},
 		CreatedAt:       startedAt,
 		DurationSeconds: 99,
 	}
@@ -61,6 +64,19 @@ func TestStoreInsertListDelete(t *testing.T) {
 	}
 	if item.LastRecord == nil {
 		t.Fatalf("LastRecord = nil, want stored JSON")
+	}
+	if len(item.Frames) != 0 {
+		t.Fatalf("list item Frames = %d, want omitted summary frames", len(item.Frames))
+	}
+	detail, ok, err := store.Get("fpv-1")
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	if !ok {
+		t.Fatalf("Get() ok = false, want true")
+	}
+	if len(detail.Frames) != 1 || detail.Frames[0].Image != record.Frames[0].Image {
+		t.Fatalf("detail Frames = %#v, want stored frame", detail.Frames)
 	}
 
 	deleted, err := store.Delete([]string{"fpv-1", "fpv-1", ""})

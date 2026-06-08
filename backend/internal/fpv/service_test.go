@@ -78,6 +78,32 @@ func TestEndPlaybackClearsLastFrame(t *testing.T) {
 	}
 }
 
+func TestRecordedFramesKeepsRecentFrames(t *testing.T) {
+	svc := NewService(Options{MaxRecordFrames: 2})
+	playback, err := svc.BeginPlayback(1360)
+	if err != nil {
+		t.Fatalf("BeginPlayback() error = %v", err)
+	}
+	defer svc.EndPlayback(playback)
+
+	for num := 1; num <= 3; num++ {
+		svc.publishFrame(Frame{
+			Num:        num,
+			Rows:       1,
+			Cols:       1,
+			PixelCount: 1,
+			FrameBytes: 5,
+			ReceivedAt: time.Now().Format(time.RFC3339Nano),
+			Image:      "data:image/png;base64,AA==",
+		})
+	}
+
+	frames := svc.RecordedFrames()
+	if len(frames) != 2 || frames[0].Num != 2 || frames[1].Num != 3 {
+		t.Fatalf("RecordedFrames() = %+v, want frames 2 and 3", frames)
+	}
+}
+
 func TestRunRetriesBindAndPublishesFrame(t *testing.T) {
 	addrCh := make(chan string, 1)
 	var attempts int

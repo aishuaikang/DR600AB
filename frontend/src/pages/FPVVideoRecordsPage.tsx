@@ -1,13 +1,13 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { TFunction } from "i18next";
-import { ChevronDown, RefreshCw, Trash2 } from "lucide-react";
+import { ChevronDown, Eye, RefreshCw, Trash2, X } from "lucide-react";
 
-import { deleteFPVVideoRecords, getFPVVideoRecords } from "../api";
+import { deleteFPVVideoRecords, getFPVVideoRecord, getFPVVideoRecords } from "../api";
 import type { Banner, Tone } from "../app/types";
 import { Badge } from "../components/Badge";
 import { Panel, PanelBody } from "../components/Panel";
 import { SectionHeader } from "../components/SectionHeader";
-import type { FPVVideoRecord, FPVVideoRecordStatus } from "../types";
+import type { FPVVideoRecord, FPVVideoRecordFrame, FPVVideoRecordStatus } from "../types";
 import { cx } from "../utils/classnames";
 import { formatNumber, formatTime } from "../utils/format";
 
@@ -15,6 +15,7 @@ type RecordFilter = "all" | FPVVideoRecordStatus;
 
 const recordPageSize = 50;
 const recordFilters: RecordFilter[] = ["all", "completed", "failed"];
+const framePlaybackIntervalMs = 160;
 
 function appendRecords(current: FPVVideoRecord[], incoming: FPVVideoRecord[]) {
   const existingIds = new Set(current.map((item) => item.id));
@@ -89,6 +90,26 @@ function frameSize(record: FPVVideoRecord) {
   return `${record.lastFrameRows} x ${record.lastFrameCols}`;
 }
 
+function displayFrameSize(frame?: FPVVideoRecordFrame) {
+  if (!frame?.rows || !frame.cols) {
+    return "-";
+  }
+  return `${frame.rows} x ${frame.cols}`;
+}
+
+function formatFrameBytes(locale: string, value?: number) {
+  if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) {
+    return "-";
+  }
+  if (value >= 1024 * 1024) {
+    return `${formatNumber(locale, value / 1024 / 1024, 1)} MB`;
+  }
+  if (value >= 1024) {
+    return `${formatNumber(locale, value / 1024, 1)} KB`;
+  }
+  return `${formatNumber(locale, value, 0)} B`;
+}
+
 export function FPVVideoRecordsPage({
   locale,
   t,
@@ -107,6 +128,10 @@ export function FPVVideoRecordsPage({
   const [nextOffset, setNextOffset] = useState(0);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [deleteBusy, setDeleteBusy] = useState(false);
+  const [detailRecord, setDetailRecord] = useState<FPVVideoRecord | null>(null);
+  const [detailLoadingId, setDetailLoadingId] = useState("");
+  const [detailFrameIndex, setDetailFrameIndex] = useState(0);
+  const [detailPlaying, setDetailPlaying] = useState(false);
 
   const loadRecords = useCallback(async (options?: { append?: boolean; offset?: number; preserveBanner?: boolean }) => {
     const append = Boolean(options?.append);
@@ -242,6 +267,42 @@ export function FPVVideoRecordsPage({
     }
   };
 
+  const openRecordDetail = async (record: FPVVideoRecord) => {
+    setDetailLoadingId(record.id);
+    setBanner({ kind: "loading", message: t("loading", { ns: "common" }) });
+    try {
+      const detail = await getFPVVideoRecord(record.id, locale);
+      setDetailRecord(detail);
+      setDetailFrameIndex(0);
+      setDetailPlaying((detail.frames?.length ?? 0) > 1);
+      setBanner({ kind: "idle", message: "" });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : t("unexpectedError", { ns: "common" });
+      setBanner({ kind: "error", message });
+    } finally {
+      setDetailLoadingId("");
+    }
+  };
+
+  const closeRecordDetail = () => {
+    setDetailRecord(null);
+    setDetailFrameIndex(0);
+    setDetailPlaying(false);
+  };
+
+  useEffect(() => {
+    if (!detailPlaying || !detailRecord?.frames || detailRecord.frames.length <= 1) {
+      return undefined;
+    }
+    const timer = window.setInterval(() => {
+      setDetailFrameIndex((current) => {
+        const frameCount = detailRecord.frames?.length ?? 0;
+        return frameCount > 0 ? (current + 1) % frameCount : 0;
+      });
+    }, framePlaybackIntervalMs);
+    return () => window.clearInterval(timer);
+  }, [detailPlaying, detailRecord]);
+
   return (
     <section className="flex min-h-0 min-w-0 flex-1">
       <Panel className="flex min-h-0 min-w-0 flex-1 flex-col">
@@ -323,7 +384,7 @@ export function FPVVideoRecordsPage({
           ) : null}
 
           <div className="min-h-0 min-w-0 flex-1 overflow-auto rounded-2xl border border-base-300 bg-base-100/70">
-            <table className="table table-zebra table-sm w-full min-w-[86rem] table-fixed">
+            <table className="table table-zebra table-sm w-full min-w-[94rem] table-fixed">
               <thead className="sticky top-0 z-10 bg-base-200">
                 <tr>
                   <th className="w-[4rem]">
@@ -353,12 +414,13 @@ export function FPVVideoRecordsPage({
                   <th className="w-[9rem]">{t("fpvRecordLastFrameSize", { ns: "settings" })}</th>
                   <th className="w-[13rem]">{t("fpvRecordLastFrameAt", { ns: "settings" })}</th>
                   <th className="w-[14rem]">{t("fpvRecordError", { ns: "settings" })}</th>
+                  <th className="w-[8rem]">{t("fpvRecordActions", { ns: "settings" })}</th>
                 </tr>
               </thead>
               <tbody>
                 {visibleRecords.length === 0 ? (
                   <tr>
-                    <td colSpan={13} className="p-3">
+                    <td colSpan={14} className="p-3">
                       <div className="admin-empty-state admin-empty-state--table">
                         {loading
                           ? t("loading", { ns: "common" })
@@ -393,6 +455,18 @@ export function FPVVideoRecordsPage({
                       <td className="tabular-nums whitespace-normal break-words">{frameSize(record)}</td>
                       <td className="tabular-nums whitespace-normal break-words">{formatTime(locale, record.lastFrameAt)}</td>
                       <td className={cx(record.error && "text-error", "whitespace-normal break-words")}>{record.error || "-"}</td>
+                      <td>
+                        <button
+                          className="btn btn-xs btn-outline btn-info"
+                          type="button"
+                          disabled={deleteBusy || detailLoadingId === record.id}
+                          onClick={() => void openRecordDetail(record)}
+                          title={t("fpvRecordView", { ns: "settings" })}
+                        >
+                          <Eye size={13} aria-hidden="true" />
+                          <span>{detailLoadingId === record.id ? t("loading", { ns: "common" }) : t("fpvRecordView", { ns: "settings" })}</span>
+                        </button>
+                      </td>
                     </tr>
                   ))
                 )}
@@ -414,6 +488,145 @@ export function FPVVideoRecordsPage({
           ) : null}
         </PanelBody>
       </Panel>
+      {detailRecord ? (
+        <FPVVideoRecordDetailModal
+          locale={locale}
+          record={detailRecord}
+          frameIndex={detailFrameIndex}
+          playing={detailPlaying}
+          t={t}
+          onClose={closeRecordDetail}
+          onFrameIndexChange={(index) => {
+            setDetailFrameIndex(index);
+            setDetailPlaying(false);
+          }}
+          onPlayingChange={setDetailPlaying}
+        />
+      ) : null}
     </section>
+  );
+}
+
+function FPVVideoRecordDetailModal({
+  locale,
+  record,
+  frameIndex,
+  playing,
+  t,
+  onClose,
+  onFrameIndexChange,
+  onPlayingChange,
+}: {
+  locale: string;
+  record: FPVVideoRecord;
+  frameIndex: number;
+  playing: boolean;
+  t: TFunction;
+  onClose: () => void;
+  onFrameIndexChange: (index: number) => void;
+  onPlayingChange: (playing: boolean) => void;
+}) {
+  const frames = record.frames ?? [];
+  const frameCount = frames.length;
+  const currentFrame = frameCount > 0 ? frames[Math.min(frameIndex, frameCount - 1)] : undefined;
+  const title = record.displayModel || record.model || t("fpvRecordUnknownTarget", { ns: "settings" });
+
+  return (
+    <div className="app-modal-backdrop fixed inset-0 z-50 grid place-items-center bg-black/60 p-4" role="presentation" onClick={onClose}>
+      <section
+        className="app-modal-card grid max-h-[92vh] w-full max-w-5xl gap-4 overflow-auto rounded-2xl border border-base-300 bg-base-100 p-4 shadow-2xl shadow-black/45"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="fpv-record-detail-title"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <div className="flex min-w-0 items-start justify-between gap-3">
+          <div className="min-w-0">
+            <span className="text-xs font-semibold uppercase text-base-content/45">{t("fpvRecordPreview", { ns: "settings" })}</span>
+            <h2 id="fpv-record-detail-title" className="truncate text-base font-semibold text-base-content">
+              {title}
+            </h2>
+            <p className="mt-1 text-xs text-base-content/60">
+              {formatFrequency(locale, record.frequency)} · {formatTime(locale, record.startedAt)}
+            </p>
+          </div>
+          <button className="btn btn-ghost btn-sm h-8 min-h-8 w-8 shrink-0 rounded-xl px-0" type="button" aria-label={t("close", { ns: "common" })} onClick={onClose}>
+            <X size={16} aria-hidden="true" />
+          </button>
+        </div>
+
+        <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_18rem]">
+          <div className="grid min-w-0 gap-3">
+            <div className="grid aspect-video place-items-center overflow-hidden rounded-xl border border-base-300 bg-neutral">
+              {currentFrame?.image ? (
+                <img className="h-full w-full object-contain [image-rendering:auto]" src={currentFrame.image} alt={t("fpvRecordFrameAlt", { ns: "settings" })} />
+              ) : (
+                <div className="grid place-items-center gap-2 px-4 text-center text-sm text-neutral-content/70">
+                  <Eye size={30} aria-hidden="true" />
+                  <span>{t("fpvRecordNoFrames", { ns: "settings" })}</span>
+                </div>
+              )}
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                className="btn btn-sm btn-outline btn-info"
+                type="button"
+                disabled={frameCount <= 1}
+                onClick={() => onPlayingChange(!playing)}
+              >
+                <span>{playing ? t("fpvRecordPause", { ns: "settings" }) : t("fpvRecordPlay", { ns: "settings" })}</span>
+              </button>
+              <input
+                className="range range-info range-sm min-w-52 flex-1"
+                type="range"
+                min={0}
+                max={Math.max(0, frameCount - 1)}
+                step={1}
+                value={Math.min(frameIndex, Math.max(0, frameCount - 1))}
+                disabled={frameCount <= 1}
+                onChange={(event) => onFrameIndexChange(Number(event.currentTarget.value))}
+              />
+              <span className="w-24 text-right text-xs tabular-nums text-base-content/60">
+                {frameCount > 0 ? `${Math.min(frameIndex, frameCount - 1) + 1} / ${frameCount}` : "0 / 0"}
+              </span>
+            </div>
+          </div>
+
+          <div className="grid content-start gap-2 text-sm">
+            <RecordDetailItem label={t("fpvRecordStatus", { ns: "settings" })} value={statusLabel(record.status, t)} />
+            <RecordDetailItem label={t("fpvRecordIdentity", { ns: "settings" })} value={record.serial || record.targetId || "-"} mono />
+            <RecordDetailItem label={t("fpvRecordFrequency", { ns: "settings" })} value={formatFrequency(locale, record.frequency)} />
+            <RecordDetailItem label={t("fpvRecordRssi", { ns: "settings" })} value={formatRSSI(locale, record.rssi)} />
+            <RecordDetailItem label={t("fpvRecordDuration", { ns: "settings" })} value={formatDuration(record.durationSeconds, t)} />
+            <RecordDetailItem label={t("fpvRecordFrameCount", { ns: "settings" })} value={String(record.frameCount)} />
+            <RecordDetailItem label={t("fpvRecordCurrentFrame", { ns: "settings" })} value={currentFrame ? `#${currentFrame.num}` : "-"} />
+            <RecordDetailItem label={t("fpvRecordLastFrameSize", { ns: "settings" })} value={displayFrameSize(currentFrame)} />
+            <RecordDetailItem label={t("fpvRecordFrameBytes", { ns: "settings" })} value={formatFrameBytes(locale, currentFrame?.frameBytes)} />
+            <RecordDetailItem label={t("fpvRecordLastFrameAt", { ns: "settings" })} value={formatTime(locale, currentFrame?.receivedAt || record.lastFrameAt)} />
+            {record.error ? <RecordDetailItem label={t("fpvRecordError", { ns: "settings" })} value={record.error} tone="error" /> : null}
+          </div>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function RecordDetailItem({
+  label,
+  value,
+  mono,
+  tone,
+}: {
+  label: string;
+  value: string;
+  mono?: boolean;
+  tone?: "error";
+}) {
+  return (
+    <div className="grid gap-1 rounded-xl border border-base-300 bg-base-200/50 p-3">
+      <span className="text-xs text-base-content/50">{label}</span>
+      <strong className={cx("min-w-0 break-words text-sm font-semibold", mono && "font-mono", tone === "error" && "text-error")}>{value}</strong>
+    </div>
   );
 }

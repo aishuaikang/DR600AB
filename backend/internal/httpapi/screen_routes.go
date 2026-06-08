@@ -108,11 +108,12 @@ func (s *Server) handleScreenFPVVideo(c *fiber.Ctx) error {
 		defer func() {
 			status := s.fpv.Snapshot()
 			frame := s.fpv.LastFrame()
+			frames := s.fpv.RecordedFrames()
 			if err := s.stopFPVPlayback(); err != nil {
 				fmt.Printf("停止 FPV 图传命令失败: %v\n", err)
 			}
 			s.fpv.EndPlayback(playback)
-			s.finishFPVVideoRecord(sessionRecord, status, frame)
+			s.finishFPVVideoRecord(sessionRecord, status, frame, frames)
 		}()
 
 		events, unsubscribe := s.fpv.Subscribe(s.cfg.EventBufferSize)
@@ -201,7 +202,7 @@ func (s *Server) lookupFPVVideoTarget(targetID string, frequency float64) model.
 	return model.ScreenDetectionTarget{}
 }
 
-func (s *Server) finishFPVVideoRecord(record model.FPVVideoRecord, status fpv.Status, frame *fpv.Frame) {
+func (s *Server) finishFPVVideoRecord(record model.FPVVideoRecord, status fpv.Status, frame *fpv.Frame, frames []fpv.Frame) {
 	if s.fpvRecords == nil || strings.TrimSpace(record.ID) == "" || record.StartedAt.IsZero() {
 		return
 	}
@@ -217,9 +218,33 @@ func (s *Server) finishFPVVideoRecord(record model.FPVVideoRecord, status fpv.St
 			record.LastFrameAt = receivedAt
 		}
 	}
+	record.Frames = fpvFramesToRecordFrames(frames)
 	if err := s.fpvRecords.Insert(record); err != nil {
 		fmt.Printf("写入 FPV 图传记录失败: %v\n", err)
 	}
+}
+
+func fpvFramesToRecordFrames(frames []fpv.Frame) []model.FPVVideoRecordFrame {
+	if len(frames) == 0 {
+		return nil
+	}
+	out := make([]model.FPVVideoRecordFrame, 0, len(frames))
+	for _, frame := range frames {
+		if strings.TrimSpace(frame.Image) == "" {
+			continue
+		}
+		out = append(out, model.FPVVideoRecordFrame{
+			Num:        frame.Num,
+			Rows:       frame.Rows,
+			Cols:       frame.Cols,
+			PixelCount: frame.PixelCount,
+			FrameBytes: frame.FrameBytes,
+			RateKB:     frame.RateKB,
+			ReceivedAt: frame.ReceivedAt,
+			Image:      frame.Image,
+		})
+	}
+	return out
 }
 
 func (s *Server) startFPVPlayback(playback fpv.Playback) error {

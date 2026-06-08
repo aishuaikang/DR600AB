@@ -27,6 +27,7 @@ type Config struct {
 	FPVTCPPort               int
 	FPVBindRetryInterval     time.Duration
 	FPVMaxFrameBytes         int
+	FPVMaxRecordFrames       int
 	FPVFirstFrameTimeout     time.Duration
 	FPVReadIdleTimeout       time.Duration
 	DefaultBaudRate          int
@@ -81,6 +82,7 @@ func Load() (Config, error) {
 		FPVTCPPort:               envInt("API_FPV_TCP_PORT", 49600),
 		FPVBindRetryInterval:     time.Duration(envInt("API_FPV_BIND_RETRY_MS", 1000)) * time.Millisecond,
 		FPVMaxFrameBytes:         envInt("API_FPV_MAX_FRAME_MB", 32) * 1024 * 1024,
+		FPVMaxRecordFrames:       envInt("API_FPV_MAX_RECORD_FRAMES", 120),
 		FPVFirstFrameTimeout:     time.Duration(envInt("API_FPV_FIRST_FRAME_TIMEOUT_MS", 3000)) * time.Millisecond,
 		FPVReadIdleTimeout:       time.Duration(envInt("API_FPV_READ_IDLE_TIMEOUT_MS", 30000)) * time.Millisecond,
 		DefaultBaudRate:          envInt("API_DEFAULT_BAUD", 115200),

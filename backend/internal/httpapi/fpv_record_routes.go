@@ -10,6 +10,7 @@ import (
 // registerFPVVideoRecordRoutes 挂载 FPV 图传观看记录接口。
 func (s *Server) registerFPVVideoRecordRoutes(api fiber.Router) {
 	api.Get("/fpv-video-records", s.handleFPVVideoRecords)
+	api.Get("/fpv-video-records/:id", s.handleFPVVideoRecord)
 	api.Delete("/fpv-video-records", s.handleDeleteFPVVideoRecords)
 }
 
@@ -49,6 +50,40 @@ func (s *Server) handleFPVVideoRecords(c *fiber.Ctx) error {
 		)
 	}
 	return c.JSON(pagedListResponse(items, limit, offset))
+}
+
+// handleFPVVideoRecord 返回一条 FPV 图传观看记录详情。
+func (s *Server) handleFPVVideoRecord(c *fiber.Ctx) error {
+	locale := s.resolveLocale(c)
+	if s.fpvRecords == nil {
+		return s.respondError(
+			c,
+			fiber.StatusNotFound,
+			"fpv_video_record_not_found",
+			s.translator.T(locale, "errors", "fpv_video_record_not_found"),
+			nil,
+		)
+	}
+	record, ok, err := s.fpvRecords.Get(c.Params("id"))
+	if err != nil {
+		return s.respondError(
+			c,
+			fiber.StatusInternalServerError,
+			"internal",
+			s.translator.T(locale, "errors", "internal"),
+			err.Error(),
+		)
+	}
+	if !ok {
+		return s.respondError(
+			c,
+			fiber.StatusNotFound,
+			"fpv_video_record_not_found",
+			s.translator.T(locale, "errors", "fpv_video_record_not_found"),
+			nil,
+		)
+	}
+	return c.JSON(record)
 }
 
 // handleDeleteFPVVideoRecords deletes selected FPV video records.

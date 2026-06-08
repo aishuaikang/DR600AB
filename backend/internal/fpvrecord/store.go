@@ -106,6 +106,38 @@ CREATE INDEX IF NOT EXISTS idx_fpv_video_records_started_at ON fpv_video_records
 	if _, err := s.db.Exec(schema); err != nil {
 		return fmt.Errorf("初始化 FPV 图传记录库失败: %w", err)
 	}
+	if err := s.ensureColumn("fpv_video_records", "frames_json", "TEXT"); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (s *Store) ensureColumn(table, column, definition string) error {
+	rows, err := s.db.Query(`PRAGMA table_info(` + table + `)`)
+	if err != nil {
+		return fmt.Errorf("检查 FPV 图传记录库字段失败: %w", err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var cid int
+		var name, dataType string
+		var notNull int
+		var defaultValue sql.NullString
+		var primaryKey int
+		if err := rows.Scan(&cid, &name, &dataType, &notNull, &defaultValue, &primaryKey); err != nil {
+			return fmt.Errorf("读取 FPV 图传记录库字段失败: %w", err)
+		}
+		if name == column {
+			return nil
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("读取 FPV 图传记录库字段失败: %w", err)
+	}
+	if _, err := s.db.Exec(`ALTER TABLE ` + table + ` ADD COLUMN ` + column + ` ` + definition); err != nil {
+		return fmt.Errorf("迁移 FPV 图传记录库字段失败: %w", err)
+	}
 	return nil
 }
 
@@ -122,8 +154,8 @@ func (s *Store) Insert(record model.FPVVideoRecord) error {
 		`INSERT OR REPLACE INTO fpv_video_records (
 			id, target_id, serial, model, display_model, device, frequency, rssi,
 			started_at, ended_at, duration_seconds, status, frame_count,
-			last_frame_rows, last_frame_cols, last_frame_at, error, last_record_json, created_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			last_frame_rows, last_frame_cols, last_frame_at, error, last_record_json, frames_json, created_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		record.ID,
 		record.TargetID,
 		record.Serial,
@@ -142,6 +174,7 @@ func (s *Store) Insert(record model.FPVVideoRecord) error {
 		nullableTime(record.LastFrameAt),
 		record.Error,
 		jsonString(record.LastRecord),
+		jsonString(record.Frames),
 		formatTime(record.CreatedAt),
 	)
 	if err != nil {
@@ -168,7 +201,7 @@ func (s *Store) List(options QueryOptions) ([]model.FPVVideoRecord, error) {
 	query := `SELECT
 		id, target_id, serial, model, display_model, device, frequency, rssi,
 		started_at, ended_at, duration_seconds, status, frame_count,
-		last_frame_rows, last_frame_cols, last_frame_at, error, last_record_json, created_at
+		last_frame_rows, last_frame_cols, last_frame_at, error, last_record_json, NULL AS frames_json, created_at
 		FROM fpv_video_records`
 	if options.Status != "" {
 		query += ` WHERE status = ?`
@@ -195,6 +228,41 @@ func (s *Store) List(options QueryOptions) ([]model.FPVVideoRecord, error) {
 		return nil, fmt.Errorf("读取 FPV 图传记录失败: %w", err)
 	}
 	return items, nil
+}
+
+// Get returns one FPV video record by ID, including archived frame snapshots.
+func (s *Store) Get(id string) (model.FPVVideoRecord, bool, error) {
+	if s == nil || s.db == nil {
+		return model.FPVVideoRecord{}, false, nil
+	}
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return model.FPVVideoRecord{}, false, nil
+	}
+	rows, err := s.db.Query(
+		`SELECT
+		id, target_id, serial, model, display_model, device, frequency, rssi,
+		started_at, ended_at, duration_seconds, status, frame_count,
+		last_frame_rows, last_frame_cols, last_frame_at, error, last_record_json, frames_json, created_at
+		FROM fpv_video_records WHERE id = ?`,
+		id,
+	)
+	if err != nil {
+		return model.FPVVideoRecord{}, false, fmt.Errorf("查询 FPV 图传记录失败: %w", err)
+	}
+	defer rows.Close()
+
+	if !rows.Next() {
+		return model.FPVVideoRecord{}, false, nil
+	}
+	record, err := scanRecord(rows)
+	if err != nil {
+		return model.FPVVideoRecord{}, false, err
+	}
+	if err := rows.Err(); err != nil {
+		return model.FPVVideoRecord{}, false, fmt.Errorf("读取 FPV 图传记录失败: %w", err)
+	}
+	return record, true, nil
 }
 
 // Delete removes selected FPV video records.
@@ -267,6 +335,7 @@ func scanRecord(rows *sql.Rows) (model.FPVVideoRecord, error) {
 	var startedAt, endedAt, createdAt string
 	var lastFrameAt sql.NullString
 	var lastRecordJSON sql.NullString
+	var framesJSON sql.NullString
 	if err := rows.Scan(
 		&record.ID,
 		&record.TargetID,
@@ -286,6 +355,7 @@ func scanRecord(rows *sql.Rows) (model.FPVVideoRecord, error) {
 		&lastFrameAt,
 		&record.Error,
 		&lastRecordJSON,
+		&framesJSON,
 		&createdAt,
 	); err != nil {
 		return model.FPVVideoRecord{}, fmt.Errorf("读取 FPV 图传记录字段失败: %w", err)
@@ -301,6 +371,7 @@ func scanRecord(rows *sql.Rows) (model.FPVVideoRecord, error) {
 		}
 	}
 	record.LastRecord = decodeJSONAny(lastRecordJSON)
+	record.Frames = decodeFrames(framesJSON)
 	return record, nil
 }
 
@@ -341,6 +412,17 @@ func decodeJSONAny(value sql.NullString) any {
 		return nil
 	}
 	return decoded
+}
+
+func decodeFrames(value sql.NullString) []model.FPVVideoRecordFrame {
+	if !value.Valid || strings.TrimSpace(value.String) == "" {
+		return nil
+	}
+	var frames []model.FPVVideoRecordFrame
+	if err := json.Unmarshal([]byte(value.String), &frames); err != nil {
+		return nil
+	}
+	return frames
 }
 
 func formatTime(value time.Time) string {

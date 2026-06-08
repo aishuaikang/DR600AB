@@ -393,6 +393,10 @@ export function getFPVVideoRecords(
   return requestJson<ListResponse<FPVVideoRecord>>(`/fpv-video-records?${params.toString()}`, {}, locale);
 }
 
+export function getFPVVideoRecord(id: string, locale: string): Promise<FPVVideoRecord> {
+  return requestJson<FPVVideoRecord>(`/fpv-video-records/${encodeURIComponent(id)}`, {}, locale);
+}
+
 export function deleteFPVVideoRecords(
   payload: FPVVideoRecordDeleteRequest,
   locale: string,

@@ -48,6 +48,15 @@ func (s *memoryFPVVideoRecordStore) List(options fpvrecord.QueryOptions) ([]mode
 	return append([]model.FPVVideoRecord(nil), filtered[offset:end]...), nil
 }
 
+func (s *memoryFPVVideoRecordStore) Get(id string) (model.FPVVideoRecord, bool, error) {
+	for _, item := range s.items {
+		if item.ID == id {
+			return item, true, nil
+		}
+	}
+	return model.FPVVideoRecord{}, false, nil
+}
+
 func (s *memoryFPVVideoRecordStore) Delete(ids []string) (int64, error) {
 	idSet := make(map[string]struct{}, len(ids))
 	for _, id := range ids {
@@ -173,6 +182,71 @@ func TestHandleFPVVideoRecordsRejectsInvalidStatus(t *testing.T) {
 	}
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusBadRequest)
+	}
+}
+
+func TestHandleFPVVideoRecordReturnsDetailFrames(t *testing.T) {
+	now := time.Date(2026, 6, 8, 10, 0, 0, 0, time.UTC)
+	server := &Server{
+		translator: mustTranslator(t),
+		fpvRecords: &memoryFPVVideoRecordStore{
+			items: []model.FPVVideoRecord{
+				{
+					ID:        "record-1",
+					Status:    model.FPVVideoRecordStatusCompleted,
+					StartedAt: now,
+					EndedAt:   now.Add(time.Second),
+					Frames: []model.FPVVideoRecordFrame{
+						{Num: 1, Rows: 2, Cols: 2, Image: "data:image/png;base64,test"},
+					},
+				},
+			},
+		},
+	}
+	server.app = fiber.New()
+	api := server.app.Group("/api/v1")
+	server.registerFPVVideoRecordRoutes(api)
+
+	req, err := http.NewRequest(http.MethodGet, "/api/v1/fpv-video-records/record-1", nil)
+	if err != nil {
+		t.Fatalf("NewRequest() error = %v", err)
+	}
+	resp, err := server.app.Test(req)
+	if err != nil {
+		t.Fatalf("app.Test() error = %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusOK)
+	}
+
+	var body model.FPVVideoRecord
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("Decode() error = %v", err)
+	}
+	if len(body.Frames) != 1 || body.Frames[0].Image == "" {
+		t.Fatalf("Frames = %#v, want one detail frame", body.Frames)
+	}
+}
+
+func TestHandleFPVVideoRecordReturnsNotFound(t *testing.T) {
+	server := &Server{
+		translator: mustTranslator(t),
+		fpvRecords: &memoryFPVVideoRecordStore{},
+	}
+	server.app = fiber.New()
+	api := server.app.Group("/api/v1")
+	server.registerFPVVideoRecordRoutes(api)
+
+	req, err := http.NewRequest(http.MethodGet, "/api/v1/fpv-video-records/missing", nil)
+	if err != nil {
+		t.Fatalf("NewRequest() error = %v", err)
+	}
+	resp, err := server.app.Test(req)
+	if err != nil {
+		t.Fatalf("app.Test() error = %v", err)
+	}
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusNotFound)
 	}
 }
 
