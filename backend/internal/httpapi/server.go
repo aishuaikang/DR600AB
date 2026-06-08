@@ -14,6 +14,7 @@ import (
 	"dr600ab-api/internal/detection"
 	"dr600ab-api/internal/developer"
 	"dr600ab-api/internal/fpv"
+	"dr600ab-api/internal/fpvrecord"
 	"dr600ab-api/internal/gps"
 	"dr600ab-api/internal/i18n"
 	"dr600ab-api/internal/interference"
@@ -56,6 +57,14 @@ type InterferenceReportStore interface {
 	Close() error
 }
 
+// FPVVideoRecordStore 查询已归档的 FPV 图传观看记录。
+type FPVVideoRecordStore interface {
+	Insert(model.FPVVideoRecord) error
+	List(fpvrecord.QueryOptions) ([]model.FPVVideoRecord, error)
+	Delete([]string) (int64, error)
+	Close() error
+}
+
 type intrusionDeviceLocationSetter interface {
 	SetDeviceLocationProvider(intrusion.DeviceLocationProvider)
 }
@@ -81,6 +90,7 @@ type Server struct {
 	intrusions          IntrusionStore
 	reports             DeceptionReportStore
 	interferenceReports InterferenceReportStore
+	fpvRecords          FPVVideoRecordStore
 
 	intrusionPruneMu      sync.Mutex
 	lastIntrusionPruneRun time.Time
@@ -101,6 +111,7 @@ func New(
 	intrusionStore IntrusionStore,
 	reportStore DeceptionReportStore,
 	interferenceReportStore InterferenceReportStore,
+	fpvRecordStore FPVVideoRecordStore,
 	fpvSvc *fpv.Service,
 ) *Server {
 	s := &Server{
@@ -118,6 +129,7 @@ func New(
 		intrusions:          intrusionStore,
 		reports:             reportStore,
 		interferenceReports: interferenceReportStore,
+		fpvRecords:          fpvRecordStore,
 	}
 	s.app = fiber.New(fiber.Config{
 		AppName: "dr600ab-api",
@@ -170,6 +182,9 @@ func (s *Server) Shutdown() error {
 	if s.interferenceReports != nil {
 		_, _ = s.interferenceReports.CloseRunning("service_shutdown", time.Now())
 		_ = s.interferenceReports.Close()
+	}
+	if s.fpvRecords != nil {
+		_ = s.fpvRecords.Close()
 	}
 	return s.app.Shutdown()
 }

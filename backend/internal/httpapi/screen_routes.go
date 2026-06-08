@@ -15,6 +15,7 @@ import (
 	"dr600ab-api/internal/deception"
 	"dr600ab-api/internal/detection"
 	"dr600ab-api/internal/fpv"
+	"dr600ab-api/internal/fpvrecord"
 	"dr600ab-api/internal/interference"
 	"dr600ab-api/internal/model"
 )
@@ -98,16 +99,20 @@ func (s *Server) handleScreenFPVVideo(c *fiber.Ctx) error {
 		return s.respondError(c, fiber.StatusInternalServerError, "fpv_control_failed", "图传控制命令发送失败", err.Error())
 	}
 
+	sessionRecord := s.startFPVVideoRecord(c.Query("targetId"), playback.Frequency)
 	serverDone := c.Context().Done()
 	c.Set(fiber.HeaderContentType, "text/event-stream")
 	c.Set(fiber.HeaderCacheControl, "no-cache")
 	c.Set(fiber.HeaderConnection, "keep-alive")
 	c.Context().SetBodyStreamWriter(func(w *bufio.Writer) {
 		defer func() {
+			status := s.fpv.Snapshot()
+			frame := s.fpv.LastFrame()
 			if err := s.stopFPVPlayback(); err != nil {
 				fmt.Printf("停止 FPV 图传命令失败: %v\n", err)
 			}
 			s.fpv.EndPlayback(playback)
+			s.finishFPVVideoRecord(sessionRecord, status, frame)
 		}()
 
 		events, unsubscribe := s.fpv.Subscribe(s.cfg.EventBufferSize)
@@ -145,6 +150,78 @@ func (s *Server) handleScreenFPVVideo(c *fiber.Ctx) error {
 	return nil
 }
 
+func (s *Server) startFPVVideoRecord(targetID string, frequency float64) model.FPVVideoRecord {
+	record := model.FPVVideoRecord{
+		ID:        fpvrecord.NewRecordID(),
+		Frequency: frequency,
+		StartedAt: time.Now(),
+		Status:    model.FPVVideoRecordStatusCompleted,
+		CreatedAt: time.Now(),
+	}
+	targetID = strings.TrimSpace(targetID)
+	if s.detection == nil {
+		return record
+	}
+	target := s.lookupFPVVideoTarget(targetID, frequency)
+	if target.ID == "" {
+		return record
+	}
+	record.TargetID = target.ID
+	record.Serial = target.Serial
+	record.Model = target.Model
+	record.DisplayModel = target.DisplayModel
+	if record.DisplayModel == "" {
+		record.DisplayModel = model.DisplayModelName(target.Model)
+	}
+	record.Device = target.Device
+	record.Frequency = target.Frequency
+	record.RSSI = target.RSSI
+	record.LastRecord = target.LastRecord
+	return record
+}
+
+func (s *Server) lookupFPVVideoTarget(targetID string, frequency float64) model.ScreenDetectionTarget {
+	targets := s.detection.ScreenDetections(200)
+	if targetID != "" {
+		for _, target := range targets {
+			if target.ID == targetID {
+				return target
+			}
+		}
+	}
+	if frequency <= 0 {
+		return model.ScreenDetectionTarget{}
+	}
+	roundedFrequency := int(math.Round(frequency))
+	for _, target := range targets {
+		if int(math.Round(target.Frequency)) == roundedFrequency {
+			return target
+		}
+	}
+	return model.ScreenDetectionTarget{}
+}
+
+func (s *Server) finishFPVVideoRecord(record model.FPVVideoRecord, status fpv.Status, frame *fpv.Frame) {
+	if s.fpvRecords == nil || strings.TrimSpace(record.ID) == "" || record.StartedAt.IsZero() {
+		return
+	}
+	record.EndedAt = time.Now()
+	record.FrameCount = status.FrameCount
+	if frame != nil {
+		record.LastFrameRows = frame.Rows
+		record.LastFrameCols = frame.Cols
+		if frame.Num > record.FrameCount {
+			record.FrameCount = frame.Num
+		}
+		if receivedAt := parseFPVFrameTime(frame.ReceivedAt); receivedAt != nil {
+			record.LastFrameAt = receivedAt
+		}
+	}
+	if err := s.fpvRecords.Insert(record); err != nil {
+		fmt.Printf("写入 FPV 图传记录失败: %v\n", err)
+	}
+}
+
 func (s *Server) startFPVPlayback(playback fpv.Playback) error {
 	if err := s.detection.SendCommands(fmt.Sprintf("start -imag %s\r\n", s.fpv.Address())); err != nil {
 		return err
@@ -175,6 +252,18 @@ func parseFPVFrequency(c *fiber.Ctx) (float64, error) {
 		return 0, fmt.Errorf("invalid frequency: %q", raw)
 	}
 	return frequency, nil
+}
+
+func parseFPVFrameTime(value string) *time.Time {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return nil
+	}
+	parsed, err := time.Parse(time.RFC3339Nano, value)
+	if err != nil {
+		return nil
+	}
+	return &parsed
 }
 
 func writeJSONSSE(w *bufio.Writer, event string, value any) error {

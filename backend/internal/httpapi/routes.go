@@ -30,6 +30,7 @@ func (s *Server) routes() {
 	s.registerIntrusionRoutes(api)
 	s.registerDeceptionReportRoutes(api)
 	s.registerInterferenceReportRoutes(api)
+	s.registerFPVVideoRecordRoutes(api)
 	s.registerScreenRoutes(api)
 	s.registerInterferenceRoutes(api)
 	s.registerDeceptionRoutes(api)

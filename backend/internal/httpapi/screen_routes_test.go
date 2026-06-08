@@ -359,6 +359,52 @@ func TestScreenFPVPlaybackRollsBackImageOutputWhenBandCommandFails(t *testing.T)
 	)
 }
 
+func TestFPVVideoRecordLifecycleUsesTargetAndLastFrame(t *testing.T) {
+	detectionSvc := newScreenFPVDetectionService(t)
+	now := time.Date(2026, 6, 8, 10, 0, 0, 0, time.UTC)
+	detectionSvc.Store().AddDetection(model.DetectionRecord{
+		ID:         "record-1",
+		Kind:       "detect",
+		ReceivedAt: now,
+		Device:     "detector",
+		Model:      "DJI_O3+",
+		Frequency:  1360,
+		RSSI:       -55,
+		Summary:    "FPV",
+	})
+	records := &memoryFPVVideoRecordStore{}
+	server := &Server{
+		detection:  detectionSvc,
+		fpvRecords: records,
+	}
+
+	started := server.startFPVVideoRecord("", 1360)
+	frameAt := now.Add(2 * time.Second).Format(time.RFC3339Nano)
+	server.finishFPVVideoRecord(started, fpv.Status{FrameCount: 1}, &fpv.Frame{
+		Num:        3,
+		Rows:       120,
+		Cols:       160,
+		ReceivedAt: frameAt,
+	})
+
+	if len(records.items) != 1 {
+		t.Fatalf("len(records) = %d, want 1", len(records.items))
+	}
+	record := records.items[0]
+	if record.TargetID == "" || record.Model != "DJI_O3+" || record.DisplayModel == "" {
+		t.Fatalf("record target = %+v, want detection target details", record)
+	}
+	if record.FrameCount != 3 || record.LastFrameRows != 120 || record.LastFrameCols != 160 {
+		t.Fatalf("record frame = count %d rows %d cols %d, want 3 120 160", record.FrameCount, record.LastFrameRows, record.LastFrameCols)
+	}
+	if record.LastFrameAt == nil || record.LastFrameAt.Format(time.RFC3339Nano) != frameAt {
+		t.Fatalf("LastFrameAt = %v, want %s", record.LastFrameAt, frameAt)
+	}
+	if record.EndedAt.IsZero() {
+		t.Fatalf("EndedAt is zero, want finish time")
+	}
+}
+
 func newScreenFPVTestServer(t *testing.T, detectionSvc *detection.Service, fpvSvc *fpv.Service) *Server {
 	t.Helper()
 	translator, err := i18n.New("zh-CN")

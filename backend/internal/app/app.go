@@ -12,6 +12,7 @@ import (
 	"dr600ab-api/internal/detection"
 	"dr600ab-api/internal/developer"
 	"dr600ab-api/internal/fpv"
+	"dr600ab-api/internal/fpvrecord"
 	"dr600ab-api/internal/gps"
 	"dr600ab-api/internal/httpapi"
 	"dr600ab-api/internal/i18n"
@@ -54,16 +55,25 @@ func New(cfg config.Config) (*App, error) {
 		_ = reportStore.Close()
 		return nil, err
 	}
+	fpvRecordStore, err := fpvrecord.NewStore(cfg.FPVVideoRecordDBPath, fpvrecord.Options{DBKey: cfg.DBKey})
+	if err != nil {
+		_ = intrusionStore.Close()
+		_ = reportStore.Close()
+		_ = interferenceReportStore.Close()
+		return nil, err
+	}
 	if _, err := reportStore.CloseRunning("abnormal_restart", time.Now()); err != nil {
 		_ = intrusionStore.Close()
 		_ = reportStore.Close()
 		_ = interferenceReportStore.Close()
+		_ = fpvRecordStore.Close()
 		return nil, err
 	}
 	if _, err := interferenceReportStore.CloseRunning("abnormal_restart", time.Now()); err != nil {
 		_ = intrusionStore.Close()
 		_ = reportStore.Close()
 		_ = interferenceReportStore.Close()
+		_ = fpvRecordStore.Close()
 		return nil, err
 	}
 	state.SetIntrusionArchiver(intrusionStore)
@@ -95,6 +105,7 @@ func New(cfg config.Config) (*App, error) {
 		_ = intrusionStore.Close()
 		_ = reportStore.Close()
 		_ = interferenceReportStore.Close()
+		_ = fpvRecordStore.Close()
 		return nil, err
 	}
 	gpsSvc := gps.NewService(state, translator, settingsStore, gps.Options{
@@ -162,6 +173,7 @@ func New(cfg config.Config) (*App, error) {
 			intrusionStore,
 			reportStore,
 			interferenceReportStore,
+			fpvRecordStore,
 			fpvSvc,
 		),
 		fpvCancel: fpvCancel,

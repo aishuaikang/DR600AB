@@ -17,6 +17,7 @@ type Config struct {
 	IntrusionDBPath          string
 	DeceptionReportDBPath    string
 	InterferenceReportDBPath string
+	FPVVideoRecordDBPath     string
 	DBKey                    string
 	OfflineMapPath           string
 	DetectionDefaultBaud     int
@@ -70,6 +71,7 @@ func Load() (Config, error) {
 		IntrusionDBPath:          envString("API_INTRUSION_DB_PATH", "./backend/data/intrusions.db"),
 		DeceptionReportDBPath:    envString("API_DECEPTION_REPORT_DB_PATH", "./backend/data/deception-reports.db"),
 		InterferenceReportDBPath: envString("API_INTERFERENCE_REPORT_DB_PATH", "./backend/data/interference-reports.db"),
+		FPVVideoRecordDBPath:     envString("API_FPV_VIDEO_RECORD_DB_PATH", "./backend/data/fpv-video-records.db"),
 		DBKey:                    dbKey,
 		OfflineMapPath:           envString("API_OFFLINE_MAP_PATH", "./static/map"),
 		DetectionDefaultBaud:     legacyDetectionBaud,

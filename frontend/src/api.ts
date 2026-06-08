@@ -20,6 +20,10 @@ import type {
   DeveloperLoginRequest,
   DeveloperSessionResponse,
   EventMessage,
+  FPVVideoRecord,
+  FPVVideoRecordDeleteRequest,
+  FPVVideoRecordDeleteResponse,
+  FPVVideoRecordStatus,
   GpioChannel,
   GpioChannelStateRequest,
   GpioChannelStateResponse,
@@ -373,6 +377,32 @@ export function deleteIntrusions(payload: IntrusionDeleteRequest, locale: string
   }, locale);
 }
 
+export function getFPVVideoRecords(
+  locale: string,
+  limit = 200,
+  status?: FPVVideoRecordStatus | "all",
+  offset = 0,
+): Promise<ListResponse<FPVVideoRecord>> {
+  const params = new URLSearchParams({ limit: String(limit) });
+  if (offset > 0) {
+    params.set("offset", String(offset));
+  }
+  if (status && status !== "all") {
+    params.set("status", status);
+  }
+  return requestJson<ListResponse<FPVVideoRecord>>(`/fpv-video-records?${params.toString()}`, {}, locale);
+}
+
+export function deleteFPVVideoRecords(
+  payload: FPVVideoRecordDeleteRequest,
+  locale: string,
+): Promise<FPVVideoRecordDeleteResponse> {
+  return requestJson<FPVVideoRecordDeleteResponse>("/fpv-video-records", {
+    method: "DELETE",
+    body: JSON.stringify(payload),
+  }, locale);
+}
+
 export function getUserSettings(): Promise<UserSettings> {
   return requestJson<UserSettings>("/user/settings");
 }
@@ -696,6 +726,9 @@ export function openScreenStream(handlers: ScreenStreamHandlers): () => void {
 
 export function openScreenFpvVideo(frequency: number, handlers: ScreenFpvVideoHandlers): () => void {
   const params = new URLSearchParams({ frequency: String(frequency) });
+  if (handlers.targetId) {
+    params.set("targetId", handlers.targetId);
+  }
   const controller = new AbortController();
   const fallbackMessage = i18n.t("fpvVideoConnectionError", { ns: "screen" });
 

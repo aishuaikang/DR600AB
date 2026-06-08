@@ -7,6 +7,7 @@ export type Page =
   | DebugRecordPage
   | "deception-reports"
   | "developer-settings"
+  | "fpv-records"
   | "gps-records"
   | "intrusions"
   | "interference-reports"

@@ -105,6 +105,7 @@ export interface DeceptionQueryResponse {
 
 export type DeceptionReportStatus = "running" | "completed" | "failed" | "abnormal";
 export type InterferenceReportStatus = "running" | "completed" | "failed" | "abnormal";
+export type FPVVideoRecordStatus = "completed" | "failed";
 
 export interface GPSFix {
   latitude: number;
@@ -670,6 +671,36 @@ export interface InterferenceReportDeleteResponse {
   deleted: number;
 }
 
+export interface FPVVideoRecord {
+  id: string;
+  targetId?: string;
+  serial?: string;
+  model?: string;
+  displayModel?: string;
+  device?: string;
+  frequency?: number;
+  rssi?: number;
+  startedAt: string;
+  endedAt: string;
+  durationSeconds: number;
+  status: FPVVideoRecordStatus;
+  frameCount: number;
+  lastFrameRows?: number;
+  lastFrameCols?: number;
+  lastFrameAt?: string;
+  error?: string;
+  lastRecord?: unknown;
+  createdAt: string;
+}
+
+export interface FPVVideoRecordDeleteRequest {
+  ids: string[];
+}
+
+export interface FPVVideoRecordDeleteResponse {
+  deleted: number;
+}
+
 export interface DeceptionRecord {
   time: string;
   direction: string;
@@ -926,6 +957,7 @@ export interface ScreenStreamHandlers {
 }
 
 export interface ScreenFpvVideoHandlers {
+  targetId?: string;
   onStatus?: (status: ScreenFpvStatus) => void;
   onFrame?: (frame: ScreenFpvFrame) => void;
   onError?: (error: Error) => void;

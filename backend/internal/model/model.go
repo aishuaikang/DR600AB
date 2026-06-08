@@ -182,6 +182,47 @@ type IntrusionDeleteResponse struct {
 	Deleted int64 `json:"deleted"`
 }
 
+// FPVVideoRecordStatus 描述 FPV 图传观看记录状态。
+type FPVVideoRecordStatus string
+
+const (
+	FPVVideoRecordStatusCompleted FPVVideoRecordStatus = "completed"
+	FPVVideoRecordStatusFailed    FPVVideoRecordStatus = "failed"
+)
+
+// FPVVideoRecord 保存一次 FPV 图传视频查看会话。
+type FPVVideoRecord struct {
+	ID              string               `json:"id"`
+	TargetID        string               `json:"targetId,omitempty"`
+	Serial          string               `json:"serial,omitempty"`
+	Model           string               `json:"model,omitempty"`
+	DisplayModel    string               `json:"displayModel,omitempty"`
+	Device          string               `json:"device,omitempty"`
+	Frequency       float64              `json:"frequency,omitempty"`
+	RSSI            float64              `json:"rssi,omitempty"`
+	StartedAt       time.Time            `json:"startedAt"`
+	EndedAt         time.Time            `json:"endedAt"`
+	DurationSeconds int64                `json:"durationSeconds"`
+	Status          FPVVideoRecordStatus `json:"status"`
+	FrameCount      int                  `json:"frameCount"`
+	LastFrameRows   int                  `json:"lastFrameRows,omitempty"`
+	LastFrameCols   int                  `json:"lastFrameCols,omitempty"`
+	LastFrameAt     *time.Time           `json:"lastFrameAt,omitempty"`
+	Error           string               `json:"error,omitempty"`
+	LastRecord      any                  `json:"lastRecord,omitempty"`
+	CreatedAt       time.Time            `json:"createdAt"`
+}
+
+// FPVVideoRecordDeleteRequest deletes selected FPV video records.
+type FPVVideoRecordDeleteRequest struct {
+	IDs []string `json:"ids"`
+}
+
+// FPVVideoRecordDeleteResponse reports how many FPV video records were deleted.
+type FPVVideoRecordDeleteResponse struct {
+	Deleted int64 `json:"deleted"`
+}
+
 // ScreenDeviceLocationResponse 返回大屏地图使用的设备位置。
 type ScreenDeviceLocationResponse struct {
 	Source    string     `json:"source"`

@@ -38,6 +38,7 @@ import { VirtualKeyboard } from "./components/VirtualKeyboard";
 import { getStoredLocale, persistLocale, supportedLocales } from "./i18n";
 import { useHashPage } from "./hooks/useHashPage";
 import { DeceptionReportsPage } from "./pages/DeceptionReportsPage";
+import { FPVVideoRecordsPage } from "./pages/FPVVideoRecordsPage";
 import { InterferencePage } from "./pages/InterferencePage";
 import { InterferenceReportsPage } from "./pages/InterferenceReportsPage";
 import { GPSRecordsPage } from "./pages/GPSRecordsPage";
@@ -158,7 +159,7 @@ function App() {
   const developerActive = Boolean(developerSession);
   const developerToken = developerSession?.token ?? "";
   const debugAccessBlocked = !developerActive && isDebugPage(page);
-  const needsRuntimeData = page !== "screen" && page !== "settings" && page !== "whitelist" && page !== "intrusions" && page !== "deception-reports" && !debugAccessBlocked;
+  const needsRuntimeData = page !== "screen" && page !== "settings" && page !== "whitelist" && page !== "intrusions" && page !== "fpv-records" && page !== "deception-reports" && !debugAccessBlocked;
   const deceptionReportsVisible = adminScreenStatus?.deception.configured !== false;
 
   const syncSerialSelection = useCallback((receivePort: string, sendPort: string, rxBaudRate?: number, txBaudRate?: number) => {
@@ -1047,6 +1048,13 @@ function App() {
                     userSettings={userSettings}
                     t={t}
                     onUserSettingsChange={handleUserSettingsChange}
+                  />
+                ) : null}
+
+                {page === "fpv-records" ? (
+                  <FPVVideoRecordsPage
+                    locale={locale}
+                    t={t}
                   />
                 ) : null}
 

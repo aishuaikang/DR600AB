@@ -3467,6 +3467,7 @@ export function ScreenPage({
     setFpvVideoFrame(null);
     setFpvVideoError("");
     return openScreenFpvVideo(fpvVideoTarget.frequency, {
+      targetId: fpvVideoTarget.id,
       onStatus: setFpvVideoStatus,
       onFrame: setFpvVideoFrame,
       onError: (error) => setFpvVideoError(error.message),

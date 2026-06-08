@@ -1,6 +1,7 @@
 {
   "screen": "Situation Screen",
   "intrusions": "Target Intrusions",
+  "fpvRecords": "FPV Video",
   "interferenceReports": "Interference Reports",
   "deceptionReports": "Spoofing Reports",
   "detectionRecords": "Detection Data",
