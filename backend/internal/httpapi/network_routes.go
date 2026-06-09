@@ -22,8 +22,8 @@ func (s *Server) registerNetworkRoutes(api fiber.Router) {
 // handleNetworkInterfaces 返回当前系统网口状态。
 func (s *Server) handleNetworkInterfaces(c *fiber.Ctx) error {
 	locale := s.resolveLocale(c)
-	if err := s.requireDeveloper(c, locale); err != nil {
-		return err
+	if !s.requireDeveloper(c, locale) {
+		return nil
 	}
 
 	interfaces, err := s.network.ListInterfaces(c.Context())
@@ -53,8 +53,8 @@ func (s *Server) handleNetworkInterfaces(c *fiber.Ctx) error {
 // handleUpdateNetworkInterfacePriorities 批量更新网口路由优先级。
 func (s *Server) handleUpdateNetworkInterfacePriorities(c *fiber.Ctx) error {
 	locale := s.resolveLocale(c)
-	if err := s.requireDeveloper(c, locale); err != nil {
-		return err
+	if !s.requireDeveloper(c, locale) {
+		return nil
 	}
 
 	var req model.NetworkPriorityBatchRequest
@@ -82,8 +82,8 @@ func (s *Server) handleUpdateNetworkInterfacePriorities(c *fiber.Ctx) error {
 // handleUpdateNetworkInterface 更新指定网口 IPv4 配置。
 func (s *Server) handleUpdateNetworkInterface(c *fiber.Ctx) error {
 	locale := s.resolveLocale(c)
-	if err := s.requireDeveloper(c, locale); err != nil {
-		return err
+	if !s.requireDeveloper(c, locale) {
+		return nil
 	}
 
 	var req model.NetworkInterfaceUpdateRequest
@@ -111,8 +111,8 @@ func (s *Server) handleUpdateNetworkInterface(c *fiber.Ctx) error {
 // handleWiFiNetworks 返回附近无线网络。
 func (s *Server) handleWiFiNetworks(c *fiber.Ctx) error {
 	locale := s.resolveLocale(c)
-	if err := s.requireDeveloper(c, locale); err != nil {
-		return err
+	if !s.requireDeveloper(c, locale) {
+		return nil
 	}
 
 	networks, err := s.network.ScanWiFi(c.Context())
@@ -144,8 +144,8 @@ func (s *Server) handleWiFiNetworks(c *fiber.Ctx) error {
 // handleConnectWiFi 连接指定无线网络。
 func (s *Server) handleConnectWiFi(c *fiber.Ctx) error {
 	locale := s.resolveLocale(c)
-	if err := s.requireDeveloper(c, locale); err != nil {
-		return err
+	if !s.requireDeveloper(c, locale) {
+		return nil
 	}
 
 	var req model.WiFiConnectRequest
@@ -168,18 +168,37 @@ func (s *Server) handleConnectWiFi(c *fiber.Ctx) error {
 	})
 }
 
-func (s *Server) requireDeveloper(c *fiber.Ctx, locale string) error {
+func (s *Server) requireDeveloper(c *fiber.Ctx, locale string) bool {
 	err := s.developer.Validate(s.developerToken(c))
 	if err == nil {
-		return nil
+		return true
 	}
-	return s.respondError(
+	_ = s.respondError(
 		c,
 		fiber.StatusUnauthorized,
 		"developer_invalid_session",
 		s.translator.T(locale, "errors", "developer_invalid_session"),
 		nil,
 	)
+	return false
+}
+
+func (s *Server) requireDeveloperOrLicenseRecovery(c *fiber.Ctx, locale string) bool {
+	err := s.developer.Validate(s.developerToken(c))
+	if err == nil {
+		return true
+	}
+	if s.licenseRecoveryAllowed() {
+		return true
+	}
+	_ = s.respondError(
+		c,
+		fiber.StatusUnauthorized,
+		"developer_invalid_session",
+		s.translator.T(locale, "errors", "developer_invalid_session"),
+		nil,
+	)
+	return false
 }
 
 func (s *Server) developerToken(c *fiber.Ctx) string {

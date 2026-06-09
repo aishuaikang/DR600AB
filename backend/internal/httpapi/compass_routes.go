@@ -19,8 +19,8 @@ func (s *Server) registerCompassRoutes(api fiber.Router) {
 // handleCurrentCompassSession 返回当前三维电子罗盘串口会话状态。
 func (s *Server) handleCurrentCompassSession(c *fiber.Ctx) error {
 	locale := s.resolveLocale(c)
-	if err := s.requireDeveloper(c, locale); err != nil {
-		return err
+	if !s.requireDeveloper(c, locale) {
+		return nil
 	}
 	return c.JSON(s.compass.Current(locale))
 }
@@ -28,8 +28,8 @@ func (s *Server) handleCurrentCompassSession(c *fiber.Ctx) error {
 // handleCompassSettings 在存在持久化设置时返回三维电子罗盘串口设置。
 func (s *Server) handleCompassSettings(c *fiber.Ctx) error {
 	locale := s.resolveLocale(c)
-	if err := s.requireDeveloper(c, locale); err != nil {
-		return err
+	if !s.requireDeveloper(c, locale) {
+		return nil
 	}
 	settings, ok, err := s.compass.Settings()
 	if err != nil {
@@ -50,8 +50,8 @@ func (s *Server) handleCompassSettings(c *fiber.Ctx) error {
 // handleUpdateCompassSettings 校验设置，并启动或更新三维电子罗盘串口会话。
 func (s *Server) handleUpdateCompassSettings(c *fiber.Ctx) error {
 	locale := s.resolveLocale(c)
-	if err := s.requireDeveloper(c, locale); err != nil {
-		return err
+	if !s.requireDeveloper(c, locale) {
+		return nil
 	}
 	var req model.CompassSessionRequest
 	if err := c.BodyParser(&req); err != nil {
@@ -87,8 +87,8 @@ func (s *Server) handleUpdateCompassSettings(c *fiber.Ctx) error {
 // handleCompassRecords 返回三维电子罗盘角度记录。
 func (s *Server) handleCompassRecords(c *fiber.Ctx) error {
 	locale := s.resolveLocale(c)
-	if err := s.requireDeveloper(c, locale); err != nil {
-		return err
+	if !s.requireDeveloper(c, locale) {
+		return nil
 	}
 	items := s.compass.Records(parseLimit(c, 200))
 	return c.JSON(model.ListResponse[model.CompassRecord]{

@@ -19,6 +19,7 @@ type Config struct {
 	InterferenceReportDBPath string
 	FPVVideoRecordDBPath     string
 	DBKey                    string
+	LicensePath              string
 	OfflineMapPath           string
 	DetectionDefaultBaud     int
 	DetectionDefaultRxBaud   int
@@ -74,6 +75,7 @@ func Load() (Config, error) {
 		InterferenceReportDBPath: envString("API_INTERFERENCE_REPORT_DB_PATH", "./backend/data/interference-reports.db"),
 		FPVVideoRecordDBPath:     envString("API_FPV_VIDEO_RECORD_DB_PATH", "./backend/data/fpv-video-records.db"),
 		DBKey:                    dbKey,
+		LicensePath:              envString("API_LICENSE_PATH", "./license.lic"),
 		OfflineMapPath:           envString("API_OFFLINE_MAP_PATH", "./static/map"),
 		DetectionDefaultBaud:     legacyDetectionBaud,
 		DetectionDefaultRxBaud:   envInt("API_DETECTION_DEFAULT_RX_BAUD", firstNonZero(legacyDetectionBaud, 115200)),

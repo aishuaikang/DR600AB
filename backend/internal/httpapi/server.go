@@ -20,6 +20,7 @@ import (
 	"dr600ab-api/internal/interference"
 	"dr600ab-api/internal/interferencereport"
 	"dr600ab-api/internal/intrusion"
+	"dr600ab-api/internal/license"
 	"dr600ab-api/internal/model"
 	"dr600ab-api/internal/network"
 )
@@ -93,6 +94,7 @@ type Server struct {
 	reports             DeceptionReportStore
 	interferenceReports InterferenceReportStore
 	fpvRecords          FPVVideoRecordStore
+	license             *license.Service
 
 	intrusionPruneMu      sync.Mutex
 	lastIntrusionPruneRun time.Time
@@ -115,6 +117,7 @@ func New(
 	interferenceReportStore InterferenceReportStore,
 	fpvRecordStore FPVVideoRecordStore,
 	fpvSvc *fpv.Service,
+	licenseSvc *license.Service,
 ) *Server {
 	s := &Server{
 		cfg:                 cfg,
@@ -132,6 +135,7 @@ func New(
 		reports:             reportStore,
 		interferenceReports: interferenceReportStore,
 		fpvRecords:          fpvRecordStore,
+		license:             licenseSvc,
 	}
 	s.app = fiber.New(fiber.Config{
 		AppName: "dr600ab-api",

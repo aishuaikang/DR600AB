@@ -36,6 +36,18 @@ func TestLoadDirectDBKeyWinsOverFile(t *testing.T) {
 	}
 }
 
+func TestLoadReadsLicensePath(t *testing.T) {
+	t.Setenv("API_LICENSE_PATH", "/tmp/dr600ab-license.lic")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if cfg.LicensePath != "/tmp/dr600ab-license.lic" {
+		t.Fatalf("LicensePath = %q, want /tmp/dr600ab-license.lic", cfg.LicensePath)
+	}
+}
+
 func TestLoadErrorsWhenDBKeyFileMissing(t *testing.T) {
 	t.Setenv("API_DB_KEY", "")
 	t.Setenv("API_DB_KEY_FILE", filepath.Join(t.TempDir(), "missing.key"))

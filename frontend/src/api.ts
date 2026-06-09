@@ -40,6 +40,8 @@ import type {
   InterferenceReportStatus,
   InterferenceReportSummary,
   ListResponse,
+  LicenseInfo,
+  LicenseUploadResponse,
   LocaleMeta,
   NetworkInterfacesResponse,
   NetworkPriorityBatchRequest,
@@ -74,8 +76,10 @@ import i18n from "./i18n";
 const API_PREFIX = "/api/v1";
 
 type UnauthorizedHandler = (error: ApiRequestError) => void;
+type LicenseInvalidHandler = (error: ApiRequestError) => void;
 
 let unauthorizedHandler: UnauthorizedHandler | null = null;
+let licenseInvalidHandler: LicenseInvalidHandler | null = null;
 
 export function setUnauthorizedHandler(handler: UnauthorizedHandler | null) {
   unauthorizedHandler = handler;
@@ -83,6 +87,16 @@ export function setUnauthorizedHandler(handler: UnauthorizedHandler | null) {
   return () => {
     if (unauthorizedHandler === handler) {
       unauthorizedHandler = null;
+    }
+  };
+}
+
+export function setLicenseInvalidHandler(handler: LicenseInvalidHandler | null) {
+  licenseInvalidHandler = handler;
+
+  return () => {
+    if (licenseInvalidHandler === handler) {
+      licenseInvalidHandler = null;
     }
   };
 }
@@ -144,6 +158,12 @@ async function requestJson<T>(path: string, init: RequestInit = {}, locale?: str
     if (response.status === 401 && headers.has("X-Developer-Token")) {
       unauthorizedHandler?.(error);
     }
+    if (
+      (response.status === 403 || response.status === 503) &&
+      (error.code === "device_sn_missing" || error.code?.startsWith("license_"))
+    ) {
+      licenseInvalidHandler?.(error);
+    }
     throw error;
   }
 
@@ -156,6 +176,19 @@ async function requestJson<T>(path: string, init: RequestInit = {}, locale?: str
 
 export function getLocales(): Promise<LocaleMeta> {
   return requestJson<LocaleMeta>("/meta/locales");
+}
+
+export function getLicenseStatus(locale?: string): Promise<LicenseInfo> {
+  return requestJson<LicenseInfo>("/license/status", {}, locale);
+}
+
+export function uploadLicense(file: File, locale: string): Promise<LicenseUploadResponse> {
+  const body = new FormData();
+  body.append("file", file);
+  return requestJson<LicenseUploadResponse>("/license/upload", {
+    method: "POST",
+    body,
+  }, locale);
 }
 
 export function getPorts(locale: string, developerToken: string): Promise<PortsResponse> {

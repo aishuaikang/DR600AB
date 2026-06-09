@@ -19,6 +19,7 @@ import (
 	"dr600ab-api/internal/interference"
 	"dr600ab-api/internal/interferencereport"
 	"dr600ab-api/internal/intrusion"
+	"dr600ab-api/internal/license"
 	"dr600ab-api/internal/network"
 	"dr600ab-api/internal/settings"
 	"dr600ab-api/internal/store"
@@ -40,6 +41,13 @@ func New(cfg config.Config) (*App, error) {
 
 	state := store.NewMemoryStore(cfg.MaxDetectionRecords, cfg.MaxParsedMessages)
 	settingsStore := settings.NewStore(cfg.SettingsPath)
+	licenseSvc := license.NewService(cfg.LicensePath, func() (string, error) {
+		userSettings, ok, err := settingsStore.LoadUser()
+		if err != nil || !ok {
+			return "", err
+		}
+		return userSettings.DeviceSN, nil
+	})
 	intrusionStore, err := intrusion.NewStore(cfg.IntrusionDBPath, intrusion.Options{DBKey: cfg.DBKey})
 	if err != nil {
 		return nil, err
@@ -158,6 +166,7 @@ func New(cfg config.Config) (*App, error) {
 	deceptionSvc.RestoreSavedSettings(cfg.DefaultLocale)
 	compassSvc.RestoreSavedSettings(cfg.DefaultLocale)
 	_ = networkSvc.RestoreSavedSettings(context.Background())
+	licenseSvc.Refresh()
 
 	return &App{
 		server: httpapi.New(
@@ -176,6 +185,7 @@ func New(cfg config.Config) (*App, error) {
 			interferenceReportStore,
 			fpvRecordStore,
 			fpvSvc,
+			licenseSvc,
 		),
 		fpvCancel: fpvCancel,
 		fpvDone:   fpvDone,

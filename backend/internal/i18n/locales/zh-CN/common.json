@@ -16,6 +16,7 @@
   "strike.started": "干扰已开启",
   "strike.stopped": "干扰已停止",
   "developer.login": "开发者登录已启用",
+  "license.uploaded": "License 已上传并激活",
   "network.updated": "网口配置已更新",
   "network.priority_updated": "网络优先级已更新",
   "wifi.connected": "Wi-Fi 连接请求已提交",

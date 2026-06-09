@@ -4,6 +4,23 @@ export interface LocaleMeta {
   namespaces: string[];
 }
 
+export interface LicenseInfo {
+  deviceSn?: string;
+  customer?: string;
+  issuedAt?: string;
+  expiresAt?: string;
+  isPermanent: boolean;
+  remainingDays?: number;
+  valid: boolean;
+  code?: string;
+  message?: string;
+}
+
+export interface LicenseUploadResponse {
+  license: LicenseInfo;
+  message: string;
+}
+
 export type ParsedMessageType =
   | "did_encrypted"
   | "rid"

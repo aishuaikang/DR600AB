@@ -2,12 +2,14 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import {
+  type ApiRequestError,
   createDeveloperSessionRequest,
   deleteDeveloperSessionRequest,
   getCompassSession,
   getCompassSettings,
   getDeceptionSession,
   getDeceptionSettings,
+  getLicenseStatus,
   getScreenStatus,
   getChannels,
   getDetectionSettings,
@@ -22,12 +24,14 @@ import {
   getUserSettings,
   openDetectionStream,
   setChannelState,
+  setLicenseInvalidHandler,
   setUnauthorizedHandler,
   updateCompassSettings,
   updateDetectionSettings,
   updateDeceptionSettings,
   updateGPSSettings,
   updateUserSettings,
+  uploadLicense,
 } from "./api";
 import { MESSAGE_PAGE_ORDER } from "./app/message-pages";
 import { isDebugPage } from "./app/navigation";
@@ -43,6 +47,7 @@ import { InterferencePage } from "./pages/InterferencePage";
 import { InterferenceReportsPage } from "./pages/InterferenceReportsPage";
 import { GPSRecordsPage } from "./pages/GPSRecordsPage";
 import { IntrusionsPage } from "./pages/IntrusionsPage";
+import { LicensePage } from "./pages/LicensePage";
 import { MessagePage } from "./pages/MessagePage";
 import { NetworkSettingsPage } from "./pages/NetworkSettingsPage";
 import { ScreenPage } from "./pages/ScreenPage";
@@ -67,6 +72,7 @@ import type {
   GpioChannel,
   GPSRecord,
   GPSSessionResponse,
+  LicenseInfo,
   LocaleMeta,
   ParsedMessage,
   PortInfo,
@@ -149,6 +155,9 @@ function App() {
   const [gpsBanner, setGPSBanner] = useState<Banner>({ kind: "idle", message: "" });
   const [compassBanner, setCompassBanner] = useState<Banner>({ kind: "idle", message: "" });
   const [gpsRecordsBanner, setGPSRecordsBanner] = useState<Banner>({ kind: "idle", message: "" });
+  const [licenseBanner, setLicenseBanner] = useState<Banner>({ kind: "idle", message: "" });
+  const [license, setLicense] = useState<LicenseInfo | null>(null);
+  const [licenseLoading, setLicenseLoading] = useState(true);
   const [runtimeLoading, setRuntimeLoading] = useState(false);
   const [gpsRecordsLoading, setGPSRecordsLoading] = useState(false);
   const [channelBusyId, setChannelBusyId] = useState("");
@@ -158,9 +167,14 @@ function App() {
   const lastAppliedCompassRef = useRef("");
   const developerActive = Boolean(developerSession);
   const developerToken = developerSession?.token ?? "";
-  const debugAccessBlocked = !developerActive && isDebugPage(page);
-  const needsRuntimeData = page !== "screen" && page !== "settings" && page !== "whitelist" && page !== "intrusions" && page !== "fpv-records" && page !== "deception-reports" && !debugAccessBlocked;
-  const deceptionReportsVisible = adminScreenStatus?.deception.configured !== false;
+  const licenseValid = license?.valid === true;
+  const licenseInvalid = license !== null && !licenseValid;
+  const licenseRecoveryMode = licenseInvalid && !license.deviceSn;
+  const debugAccessBlocked = licenseValid && !developerActive && isDebugPage(page);
+  const needsRuntimeData = licenseValid && page !== "screen" && page !== "settings" && page !== "whitelist" && page !== "intrusions" && page !== "fpv-records" && page !== "deception-reports" && !debugAccessBlocked;
+  const needsSerialRecoveryData = licenseRecoveryMode;
+  const serialSettingsEnabled = needsRuntimeData || needsSerialRecoveryData;
+  const deceptionReportsVisible = licenseValid ? adminScreenStatus?.deception.configured !== false : false;
 
   const syncSerialSelection = useCallback((receivePort: string, sendPort: string, rxBaudRate?: number, txBaudRate?: number) => {
     const nextReceivePort = receivePort.trim();
@@ -218,6 +232,81 @@ function App() {
   }, [navigate, page, t]);
 
   useEffect(() => setUnauthorizedHandler(handleUnauthorized), [handleUnauthorized]);
+
+  const loadLicenseStatus = useCallback(async () => {
+    setLicenseLoading(true);
+    try {
+      const response = await getLicenseStatus(locale);
+      setLicense(response);
+      if (response.valid) {
+        setLicenseBanner({ kind: "idle", message: "" });
+      } else if (response.message) {
+        setLicenseBanner({ kind: "error", message: response.message });
+      }
+    } catch (error) {
+      setLicense({
+        isPermanent: false,
+        valid: false,
+        code: "license_verification_failed",
+        message: extractErrorMessage(error, t("unexpectedError", { ns: "common" })),
+      });
+      setLicenseBanner({ kind: "error", message: extractErrorMessage(error, t("unexpectedError", { ns: "common" })) });
+    } finally {
+      setLicenseLoading(false);
+    }
+  }, [locale, t]);
+
+  const handleLicenseInvalid = useCallback((error: Error) => {
+    const requestError = error as ApiRequestError;
+    const detailLicense = requestError.details && typeof requestError.details === "object"
+      ? requestError.details as Partial<LicenseInfo>
+      : null;
+    setLicense((current) => ({
+      isPermanent: detailLicense?.isPermanent ?? current?.isPermanent ?? false,
+      valid: false,
+      deviceSn: detailLicense?.deviceSn ?? current?.deviceSn,
+      customer: detailLicense?.customer ?? current?.customer,
+      issuedAt: detailLicense?.issuedAt ?? current?.issuedAt,
+      expiresAt: detailLicense?.expiresAt ?? current?.expiresAt,
+      remainingDays: detailLicense?.remainingDays ?? current?.remainingDays,
+      code: requestError.code ?? detailLicense?.code ?? "license_verification_failed",
+      message: detailLicense?.message ?? error.message,
+    }));
+    setLicenseBanner({ kind: "error", message: error.message || t("license.invalid", { ns: "common" }) });
+    setRuntimeLoading(false);
+    setGPSRecordsLoading(false);
+  }, [t]);
+
+  useEffect(() => setLicenseInvalidHandler(handleLicenseInvalid), [handleLicenseInvalid]);
+
+  const loadSerialRecoveryData = useCallback(async () => {
+    setRuntimeLoading(true);
+    setBanner({ kind: "loading", message: t("loading", { ns: "common" }) });
+    try {
+      const [metaRes, portsRes, sessionRes, settingsRes] = await Promise.all([
+        getLocales(),
+        getPorts(locale, developerToken),
+        getSession(locale, developerToken),
+        getDetectionSettings(locale, developerToken),
+      ]);
+
+      setMeta(metaRes);
+      setPorts(portsRes.ports);
+      setSession(sessionRes);
+      const { receivePort, sendPort } = resolveInitialPorts(sessionRes, settingsRes, portsRes.ports);
+      const baudRates = detectionBaudRates(sessionRes.baudRate || sessionRes.rxBaudRate || sessionRes.txBaudRate ? sessionRes : settingsRes);
+      syncSerialSelection(receivePort, sendPort, baudRates.rxBaudRate, baudRates.txBaudRate);
+      setBanner({
+        kind: sessionBannerKind(sessionRes),
+        message: sessionBannerText(sessionRes, sessionRes.active ? t("active", { ns: "common" }) : t("idle", { ns: "common" })),
+      });
+      await loadLicenseStatus();
+    } catch (error) {
+      setBanner({ kind: "error", message: extractErrorMessage(error, t("unexpectedError", { ns: "common" })) });
+    } finally {
+      setRuntimeLoading(false);
+    }
+  }, [developerToken, loadLicenseStatus, locale, syncSerialSelection, t]);
 
   const bootstrap = useCallback(async () => {
     setRuntimeLoading(true);
@@ -362,7 +451,11 @@ function App() {
   }, [loadUserSettings]);
 
   useEffect(() => {
-    if (page === "screen") {
+    void loadLicenseStatus();
+  }, [loadLicenseStatus]);
+
+  useEffect(() => {
+    if (!licenseValid || page === "screen") {
       return;
     }
     void loadAdminScreenStatus();
@@ -370,7 +463,7 @@ function App() {
       void loadAdminScreenStatus();
     }, 5000);
     return () => window.clearInterval(timer);
-  }, [loadAdminScreenStatus, page]);
+  }, [licenseValid, loadAdminScreenStatus, page]);
 
   useEffect(() => {
     if (page !== "settings") {
@@ -382,6 +475,33 @@ function App() {
     }, 3000);
     return () => window.clearInterval(timer);
   }, [loadUserSettings, page]);
+
+  useEffect(() => {
+    if (!needsSerialRecoveryData) {
+      return;
+    }
+    let cancelled = false;
+    const load = async () => {
+      if (cancelled) {
+        return;
+      }
+      await loadSerialRecoveryData();
+    };
+    void load();
+    return () => {
+      cancelled = true;
+    };
+  }, [loadSerialRecoveryData, needsSerialRecoveryData]);
+
+  useEffect(() => {
+    if (!licenseRecoveryMode) {
+      return;
+    }
+    const timer = window.setInterval(() => {
+      void loadLicenseStatus();
+    }, 3000);
+    return () => window.clearInterval(timer);
+  }, [licenseRecoveryMode, loadLicenseStatus]);
 
   useEffect(() => {
     if (!needsRuntimeData) {
@@ -401,14 +521,14 @@ function App() {
   }, [bootstrap, needsRuntimeData]);
 
   useEffect(() => {
-    if (page !== "gps-records" || !developerActive) {
+    if (!licenseValid || page !== "gps-records" || !developerActive) {
       return;
     }
     void loadGPSRecords();
-  }, [developerActive, loadGPSRecords, page]);
+  }, [developerActive, licenseValid, loadGPSRecords, page]);
 
   useEffect(() => {
-    if (page !== "interference" || !developerActive) {
+    if (!licenseValid || page !== "interference" || !developerActive) {
       return;
     }
 
@@ -432,10 +552,10 @@ function App() {
       void sync();
     }, 1_000);
     return () => window.clearInterval(timer);
-  }, [developerActive, page, refreshChannels]);
+  }, [developerActive, licenseValid, page, refreshChannels]);
 
   useEffect(() => {
-    if (!needsRuntimeData) {
+    if (!serialSettingsEnabled) {
       return;
     }
     const receivePort = selectedReceivePort.trim();
@@ -474,7 +594,11 @@ function App() {
             kind: sessionBannerKind(response),
             message: sessionBannerText(response, response.message || t("active", { ns: "common" })),
           });
-          await bootstrap();
+          if (licenseValid) {
+            await bootstrap();
+          } else {
+            await loadSerialRecoveryData();
+          }
         } catch (error) {
           setBanner({ kind: "error", message: extractErrorMessage(error, t("unexpectedError", { ns: "common" })) });
         }
@@ -482,7 +606,7 @@ function App() {
     }, 350);
 
     return () => window.clearTimeout(timer);
-  }, [bootstrap, developerToken, locale, needsRuntimeData, selectedDetectionRxBaudRate, selectedDetectionTxBaudRate, selectedReceivePort, selectedSendPort, t]);
+  }, [bootstrap, developerToken, licenseValid, loadSerialRecoveryData, locale, selectedDetectionRxBaudRate, selectedDetectionTxBaudRate, selectedReceivePort, selectedSendPort, serialSettingsEnabled, t]);
 
   useEffect(() => {
     if (!needsRuntimeData) {
@@ -779,17 +903,17 @@ function App() {
         }
       },
       onParsed: (event) => {
-        if (developerActive && event.payload) {
+        if (licenseValid && developerActive && event.payload) {
           setMessages((items) => dedupeParsed(items, event.payload!, 400));
         }
       },
       onDetection: (event) => {
-        if (developerActive && event.payload) {
+        if (licenseValid && developerActive && event.payload) {
           setDetections((items) => dedupeDetections(items, event.payload!, 400));
         }
       },
       onChannelUpdated: (event) => {
-        if (developerActive && event.payload) {
+        if (licenseValid && developerActive && event.payload) {
           setChannels((items) => normalizeGpioChannels(dedupeById(items, event.payload!, 16)));
         }
       },
@@ -799,7 +923,7 @@ function App() {
     });
 
     return close;
-  }, [developerActive, developerToken, locale, needsRuntimeData, syncCompassSelection, syncDeceptionSelection, syncGPSSelection, syncSerialSelection, t]);
+  }, [developerActive, developerToken, licenseValid, locale, needsRuntimeData, syncCompassSelection, syncDeceptionSelection, syncGPSSelection, syncSerialSelection, t]);
 
   const sessionActive = Boolean(session?.active);
   const sessionStateLabel = session
@@ -958,6 +1082,42 @@ function App() {
       }
     }
   };
+
+  const handleUploadLicense = async (file: File) => {
+    const response = await uploadLicense(file, locale);
+    setLicense(response.license);
+    setLicenseBanner({ kind: "success", message: response.message });
+  };
+
+  if (licenseLoading && license === null) {
+    return <PageLoading label={loadingLabel} />;
+  }
+
+  if (!licenseValid) {
+    return (
+      <LicensePage
+        appTitle={appTitle}
+        license={license}
+        loading={licenseLoading}
+        locale={locale}
+        ports={ports}
+        banner={licenseBanner.message ? licenseBanner : banner}
+        session={session}
+        selectedReceivePort={selectedReceivePort}
+        selectedSendPort={selectedSendPort}
+        selectedDetectionRxBaudRate={selectedDetectionRxBaudRate}
+        selectedDetectionTxBaudRate={selectedDetectionTxBaudRate}
+        t={t}
+        onRefreshLicense={loadLicenseStatus}
+        onUploadLicense={handleUploadLicense}
+        onRefreshPorts={loadSerialRecoveryData}
+        onReceivePortChange={setSelectedReceivePort}
+        onSendPortChange={setSelectedSendPort}
+        onDetectionRxBaudRateChange={setSelectedDetectionRxBaudRate}
+        onDetectionTxBaudRateChange={setSelectedDetectionTxBaudRate}
+      />
+    );
+  }
 
   if (page === "screen") {
     return (

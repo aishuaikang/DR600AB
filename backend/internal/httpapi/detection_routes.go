@@ -10,13 +10,27 @@ import (
 
 // registerDetectionRoutes 挂载串口会话、事件流和记录接口。
 func (s *Server) registerDetectionRoutes(api fiber.Router) {
+	s.registerDetectionRecoveryRoutes(api)
+	s.registerDetectionSessionRoutes(api)
+	s.registerDetectionRecordRoutes(api)
+}
+
+// registerDetectionRecoveryRoutes 挂载授权恢复所需的串口配置接口。
+func (s *Server) registerDetectionRecoveryRoutes(api fiber.Router) {
 	api.Get("/serial/ports", s.handlePorts)
 	api.Get("/detection/settings", s.handleDetectionSettings)
 	api.Get("/detection/session", s.handleCurrentSession)
 	api.Put("/detection/settings", s.handleUpdateDetectionSettings)
+}
+
+// registerDetectionSessionRoutes 挂载授权后可用的设备会话配置接口。
+func (s *Server) registerDetectionSessionRoutes(api fiber.Router) {
 	api.Get("/gps/settings", s.handleGPSSettings)
 	api.Get("/gps/session", s.handleCurrentGPSSession)
 	api.Put("/gps/settings", s.handleUpdateGPSSettings)
+}
+
+func (s *Server) registerDetectionRecordRoutes(api fiber.Router) {
 	api.Get("/gps/records", s.handleGPSRecords)
 	api.Get("/detection/stream", s.handleStream)
 	api.Get("/detection/records", s.handleDetectionRecords)
@@ -26,8 +40,8 @@ func (s *Server) registerDetectionRoutes(api fiber.Router) {
 // handleCurrentGPSSession 返回当前 GPS 会话响应。
 func (s *Server) handleCurrentGPSSession(c *fiber.Ctx) error {
 	locale := s.resolveLocale(c)
-	if err := s.requireDeveloper(c, locale); err != nil {
-		return err
+	if !s.requireDeveloper(c, locale) {
+		return nil
 	}
 	return c.JSON(s.gps.Current(locale))
 }
@@ -35,8 +49,8 @@ func (s *Server) handleCurrentGPSSession(c *fiber.Ctx) error {
 // handleGPSSettings 在存在持久化设置时返回 GPS 设置。
 func (s *Server) handleGPSSettings(c *fiber.Ctx) error {
 	locale := s.resolveLocale(c)
-	if err := s.requireDeveloper(c, locale); err != nil {
-		return err
+	if !s.requireDeveloper(c, locale) {
+		return nil
 	}
 	settings, ok, err := s.gps.Settings()
 	if err != nil {
@@ -57,8 +71,8 @@ func (s *Server) handleGPSSettings(c *fiber.Ctx) error {
 // handleUpdateGPSSettings 校验设置，并启动或更新 GPS 会话。
 func (s *Server) handleUpdateGPSSettings(c *fiber.Ctx) error {
 	locale := s.resolveLocale(c)
-	if err := s.requireDeveloper(c, locale); err != nil {
-		return err
+	if !s.requireDeveloper(c, locale) {
+		return nil
 	}
 	var req model.GPSSessionRequest
 	if err := c.BodyParser(&req); err != nil {
@@ -94,8 +108,8 @@ func (s *Server) handleUpdateGPSSettings(c *fiber.Ctx) error {
 // handleGPSRecords 返回最新 GPS NMEA 记录。
 func (s *Server) handleGPSRecords(c *fiber.Ctx) error {
 	locale := s.resolveLocale(c)
-	if err := s.requireDeveloper(c, locale); err != nil {
-		return err
+	if !s.requireDeveloper(c, locale) {
+		return nil
 	}
 	items := s.gps.Records(parseLimit(c, 100))
 	return c.JSON(model.ListResponse[model.GPSRecord]{
@@ -107,8 +121,8 @@ func (s *Server) handleGPSRecords(c *fiber.Ctx) error {
 // handlePorts 返回可用串口和当前会话状态。
 func (s *Server) handlePorts(c *fiber.Ctx) error {
 	locale := s.resolveLocale(c)
-	if err := s.requireDeveloper(c, locale); err != nil {
-		return err
+	if !s.requireDeveloperOrLicenseRecovery(c, locale) {
+		return nil
 	}
 	ports, err := s.detection.ListPorts()
 	if err != nil {
@@ -153,8 +167,8 @@ func (s *Server) handlePorts(c *fiber.Ctx) error {
 // handleCurrentSession 返回当前侦测会话响应。
 func (s *Server) handleCurrentSession(c *fiber.Ctx) error {
 	locale := s.resolveLocale(c)
-	if err := s.requireDeveloper(c, locale); err != nil {
-		return err
+	if !s.requireDeveloperOrLicenseRecovery(c, locale) {
+		return nil
 	}
 	return c.JSON(s.detection.Current(locale))
 }
@@ -162,8 +176,8 @@ func (s *Server) handleCurrentSession(c *fiber.Ctx) error {
 // handleDetectionSettings 在存在持久化设置时返回侦测设置。
 func (s *Server) handleDetectionSettings(c *fiber.Ctx) error {
 	locale := s.resolveLocale(c)
-	if err := s.requireDeveloper(c, locale); err != nil {
-		return err
+	if !s.requireDeveloperOrLicenseRecovery(c, locale) {
+		return nil
 	}
 	settings, ok, err := s.detection.Settings()
 	if err != nil {
@@ -184,8 +198,8 @@ func (s *Server) handleDetectionSettings(c *fiber.Ctx) error {
 // handleUpdateDetectionSettings 校验设置，并启动或更新侦测会话。
 func (s *Server) handleUpdateDetectionSettings(c *fiber.Ctx) error {
 	locale := s.resolveLocale(c)
-	if err := s.requireDeveloper(c, locale); err != nil {
-		return err
+	if !s.requireDeveloperOrLicenseRecovery(c, locale) {
+		return nil
 	}
 	var req model.DetectionSessionRequest
 	if err := c.BodyParser(&req); err != nil {
@@ -221,8 +235,8 @@ func (s *Server) handleUpdateDetectionSettings(c *fiber.Ctx) error {
 // handleDetectionRecords 返回标准化侦测列表行。
 func (s *Server) handleDetectionRecords(c *fiber.Ctx) error {
 	locale := s.resolveLocale(c)
-	if err := s.requireDeveloper(c, locale); err != nil {
-		return err
+	if !s.requireDeveloper(c, locale) {
+		return nil
 	}
 	items := s.detection.Records(parseLimit(c, 200))
 	return c.JSON(model.ListResponse[model.DetectionRecord]{
@@ -234,8 +248,8 @@ func (s *Server) handleDetectionRecords(c *fiber.Ctx) error {
 // handleParsedRecords 返回原始解析结果行。
 func (s *Server) handleParsedRecords(c *fiber.Ctx) error {
 	locale := s.resolveLocale(c)
-	if err := s.requireDeveloper(c, locale); err != nil {
-		return err
+	if !s.requireDeveloper(c, locale) {
+		return nil
 	}
 	items := s.detection.Parsed(parseLimit(c, 200))
 	return c.JSON(model.ListResponse[model.ParsedMessage]{

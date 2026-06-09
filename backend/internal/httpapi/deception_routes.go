@@ -23,8 +23,8 @@ func (s *Server) registerDeceptionRoutes(api fiber.Router) {
 // handleCurrentDeceptionSession 返回当前 GNSS 诱骗设备串口会话状态。
 func (s *Server) handleCurrentDeceptionSession(c *fiber.Ctx) error {
 	locale := s.resolveLocale(c)
-	if err := s.requireDeveloper(c, locale); err != nil {
-		return err
+	if !s.requireDeveloper(c, locale) {
+		return nil
 	}
 	return c.JSON(s.deception.Current(locale))
 }
@@ -32,8 +32,8 @@ func (s *Server) handleCurrentDeceptionSession(c *fiber.Ctx) error {
 // handleDeceptionSettings 在存在持久化设置时返回 GNSS 诱骗设备串口设置。
 func (s *Server) handleDeceptionSettings(c *fiber.Ctx) error {
 	locale := s.resolveLocale(c)
-	if err := s.requireDeveloper(c, locale); err != nil {
-		return err
+	if !s.requireDeveloper(c, locale) {
+		return nil
 	}
 	settings, ok, err := s.deception.Settings()
 	if err != nil {
@@ -63,8 +63,8 @@ func (s *Server) handleStartDeceptionSession(c *fiber.Ctx) error {
 
 func (s *Server) startDeceptionFromBody(c *fiber.Ctx) error {
 	locale := s.resolveLocale(c)
-	if err := s.requireDeveloper(c, locale); err != nil {
-		return err
+	if !s.requireDeveloper(c, locale) {
+		return nil
 	}
 
 	var req model.DeceptionSessionRequest
@@ -101,8 +101,8 @@ func (s *Server) startDeceptionFromBody(c *fiber.Ctx) error {
 // handleStopDeceptionSession 停止 GNSS 诱骗设备串口会话。
 func (s *Server) handleStopDeceptionSession(c *fiber.Ctx) error {
 	locale := s.resolveLocale(c)
-	if err := s.requireDeveloper(c, locale); err != nil {
-		return err
+	if !s.requireDeveloper(c, locale) {
+		return nil
 	}
 	return c.JSON(s.deception.Stop(locale))
 }
@@ -110,8 +110,8 @@ func (s *Server) handleStopDeceptionSession(c *fiber.Ctx) error {
 // handleDeceptionRecords 返回 GNSS 诱骗设备协议交互记录。
 func (s *Server) handleDeceptionRecords(c *fiber.Ctx) error {
 	locale := s.resolveLocale(c)
-	if err := s.requireDeveloper(c, locale); err != nil {
-		return err
+	if !s.requireDeveloper(c, locale) {
+		return nil
 	}
 	items := s.deception.Records(parseLimit(c, 200))
 	return c.JSON(model.ListResponse[model.DeceptionRecord]{
@@ -123,8 +123,8 @@ func (s *Server) handleDeceptionRecords(c *fiber.Ctx) error {
 // handleDeceptionQuery 查询 GNSS 诱骗设备状态项。
 func (s *Server) handleDeceptionQuery(c *fiber.Ctx) error {
 	locale := s.resolveLocale(c)
-	if err := s.requireDeveloper(c, locale); err != nil {
-		return err
+	if !s.requireDeveloper(c, locale) {
+		return nil
 	}
 	response, err := s.deception.Query(c.Params("item"), locale)
 	if err != nil {

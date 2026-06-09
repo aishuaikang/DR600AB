@@ -13,6 +13,25 @@ type LocaleMeta struct {
 	Namespaces []string `json:"namespaces"`
 }
 
+// LicenseInfo 描述本机授权状态和证书内容。
+type LicenseInfo struct {
+	DeviceSN      string     `json:"deviceSn,omitempty"`
+	Customer      string     `json:"customer,omitempty"`
+	IssuedAt      *time.Time `json:"issuedAt,omitempty"`
+	ExpiresAt     *time.Time `json:"expiresAt,omitempty"`
+	IsPermanent   bool       `json:"isPermanent"`
+	RemainingDays int        `json:"remainingDays,omitempty"`
+	Valid         bool       `json:"valid"`
+	Code          string     `json:"code,omitempty"`
+	Message       string     `json:"message,omitempty"`
+}
+
+// LicenseUploadResponse 返回授权文件上传后的最新授权状态。
+type LicenseUploadResponse struct {
+	License LicenseInfo `json:"license"`
+	Message string      `json:"message"`
+}
+
 // PortInfo 描述一个串口，以及它是否被当前会话占用。
 type PortInfo struct {
 	Name   string `json:"name"`

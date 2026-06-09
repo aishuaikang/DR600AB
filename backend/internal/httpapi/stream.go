@@ -14,8 +14,8 @@ import (
 // handleStream 保持服务端事件流开启，用于推送运行时更新。
 func (s *Server) handleStream(c *fiber.Ctx) error {
 	locale := s.resolveLocale(c)
-	if err := s.requireDeveloper(c, locale); err != nil {
-		return err
+	if !s.requireDeveloper(c, locale) {
+		return nil
 	}
 
 	ctx := c.Context()
