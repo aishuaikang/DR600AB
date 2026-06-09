@@ -41,6 +41,48 @@ function formatBaudRate(value: number) {
   return String(normalizeSerialBaudRate(value));
 }
 
+function copyTextFallback(text: string) {
+  const textarea = document.createElement("textarea");
+  textarea.value = text;
+  textarea.setAttribute("readonly", "true");
+  textarea.style.position = "fixed";
+  textarea.style.left = "-9999px";
+  textarea.style.top = "0";
+  textarea.style.opacity = "0";
+
+  document.body.appendChild(textarea);
+  textarea.focus();
+  textarea.select();
+  textarea.setSelectionRange(0, text.length);
+
+  try {
+    return document.execCommand("copy");
+  } finally {
+    document.body.removeChild(textarea);
+  }
+}
+
+async function copyText(text: string) {
+  if (!text) {
+    return false;
+  }
+
+  if (copyTextFallback(text)) {
+    return true;
+  }
+
+  if (window.isSecureContext && navigator.clipboard?.writeText) {
+    try {
+      await navigator.clipboard.writeText(text);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  return false;
+}
+
 export function LicensePage({
   appTitle,
   license,
@@ -123,11 +165,10 @@ export function LicensePage({
     if (!deviceSN) {
       return;
     }
-    try {
-      await navigator.clipboard.writeText(deviceSN);
+    if (await copyText(deviceSN)) {
       setCopyDone(true);
       window.setTimeout(() => setCopyDone(false), 1500);
-    } catch {
+    } else {
       setCopyDone(false);
     }
   };
