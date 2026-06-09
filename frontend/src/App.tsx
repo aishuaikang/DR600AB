@@ -31,7 +31,6 @@ import {
   updateDeceptionSettings,
   updateGPSSettings,
   updateUserSettings,
-  uploadLicense,
 } from "./api";
 import { MESSAGE_PAGE_ORDER } from "./app/message-pages";
 import { isDebugPage } from "./app/navigation";
@@ -1083,12 +1082,6 @@ function App() {
     }
   };
 
-  const handleUploadLicense = async (file: File) => {
-    const response = await uploadLicense(file, locale);
-    setLicense(response.license);
-    setLicenseBanner({ kind: "success", message: response.message });
-  };
-
   if (licenseLoading && license === null) {
     return <PageLoading label={loadingLabel} />;
   }
@@ -1109,7 +1102,6 @@ function App() {
         selectedDetectionTxBaudRate={selectedDetectionTxBaudRate}
         t={t}
         onRefreshLicense={loadLicenseStatus}
-        onUploadLicense={handleUploadLicense}
         onRefreshPorts={loadSerialRecoveryData}
         onReceivePortChange={setSelectedReceivePort}
         onSendPortChange={setSelectedSendPort}

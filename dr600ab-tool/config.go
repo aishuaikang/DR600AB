@@ -8,10 +8,11 @@ import (
 )
 
 type AppConfig struct {
-	SSH        *SavedSSHConfig `json:"ssh,omitempty"`
-	InstallDir string          `json:"installDir,omitempty"`
-	Firmware   string          `json:"firmware,omitempty"`
-	MapPackage string          `json:"mapPackage,omitempty"`
+	SSH         *SavedSSHConfig `json:"ssh,omitempty"`
+	InstallDir  string          `json:"installDir,omitempty"`
+	Firmware    string          `json:"firmware,omitempty"`
+	MapPackage  string          `json:"mapPackage,omitempty"`
+	LicensePath string          `json:"licensePath,omitempty"`
 }
 
 type SavedSSHConfig struct {

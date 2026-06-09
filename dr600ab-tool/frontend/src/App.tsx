@@ -11,6 +11,7 @@ import {
   RefreshCw,
   Server,
   ShieldAlert,
+  ShieldCheck,
   ShieldOff,
   Target,
   UploadCloud,
@@ -32,6 +33,7 @@ import { api, onProgress } from "./wails";
 
 const pageItems: Array<{ id: Page; label: string; icon: typeof Server }> = [
   { id: "deploy", label: "部署更新", icon: HardDriveUpload },
+  { id: "license", label: "授权管理", icon: ShieldCheck },
   { id: "intrusions", label: "目标入侵", icon: ShieldAlert },
   { id: "interference-reports", label: "干扰报告", icon: ShieldOff },
   { id: "deception-reports", label: "诱骗报告", icon: Target },
@@ -292,6 +294,7 @@ export function App() {
   const [fullUpdate, setFullUpdate] = useState(false);
   const [mapPackage, setMapPackage] = useState("");
   const [keepMapBackup, setKeepMapBackup] = useState(false);
+  const [licensePath, setLicensePath] = useState("");
   const [probe, setProbe] = useState<RemoteProbe | null>(null);
   const [remoteDirModal, setRemoteDirModal] = useState<{ open: boolean; path: string; entries: RemoteEntry[]; loading: boolean }>({
     open: false,
@@ -304,6 +307,7 @@ export function App() {
   const [deployProgress, setDeployProgress] = useState<ProgressEvent[]>([]);
   const [dbProgress, setDBProgress] = useState<ProgressEvent[]>([]);
   const [mapProgress, setMapProgress] = useState<ProgressEvent[]>([]);
+  const [licenseProgress, setLicenseProgress] = useState<ProgressEvent[]>([]);
   const [busy, setBusy] = useState("");
 
   const [intrusions, setIntrusions] = useState<IntrusionRecord[]>([]);
@@ -323,6 +327,7 @@ export function App() {
       onProgress("deploy-progress", (event) => appendProgress(setDeployProgress, event)),
       onProgress("db-sync-progress", (event) => appendProgress(setDBProgress, event)),
       onProgress("offline-map-progress", (event) => appendProgress(setMapProgress, event)),
+      onProgress("license-progress", (event) => appendProgress(setLicenseProgress, event)),
     ];
     return () => cleanups.forEach((cleanup) => cleanup());
   }, []);
@@ -344,6 +349,7 @@ export function App() {
         setInstallDir(loadedInstallDir);
         setFirmwarePath(loaded.firmware || "");
         setMapPackage(loaded.mapPackage || "");
+        setLicensePath(loaded.licensePath || "");
         updateSSHStatus(status);
         if (status.connected) {
           setEntered(true);
@@ -430,6 +436,7 @@ export function App() {
       setDeployProgress([]);
       setDBProgress([]);
       setMapProgress([]);
+      setLicenseProgress([]);
       setNotice({ tone: "success", message: status.message });
       await runProbe({ auto: true });
     } catch (error) {
@@ -658,6 +665,33 @@ export function App() {
     }
   };
 
+  const chooseLicenseFile = async () => {
+    try {
+      const path = await api.selectLicenseFile();
+      if (path) {
+        setLicensePath(path);
+        persistConfig({ licensePath: path });
+      }
+    } catch (error) {
+      setNotice({ tone: "error", message: messageOf(error) });
+    }
+  };
+
+  const uploadLicense = async () => {
+    setBusy("license");
+    setLicenseProgress([]);
+    setNotice({ tone: "loading", message: "正在上传授权文件" });
+    try {
+      const result = await api.uploadLicense({ installDir, licensePath });
+      setNotice({ tone: "success", message: result.message });
+      await runProbe();
+    } catch (error) {
+      setNotice({ tone: "error", message: messageOf(error) });
+    } finally {
+      setBusy("");
+    }
+  };
+
   const uploadMap = async () => {
     setBusy("map");
     setMapProgress([]);
@@ -818,6 +852,16 @@ export function App() {
                 onCleanupBackup={cleanupMapBackup}
                 onKeepBackupChange={setKeepMapBackup}
                 onUpload={uploadMap}
+              />
+            ) : null}
+            {page === "license" ? (
+              <LicenseToolPage
+                busy={busy}
+                connected={connected}
+                licensePath={licensePath}
+                licenseProgress={licenseProgress}
+                onChooseLicense={chooseLicenseFile}
+                onUpload={uploadLicense}
               />
             ) : null}
           </div>
@@ -1394,6 +1438,52 @@ function OfflineMapPage({
       <section className="panel">
         <h2>地图进度</h2>
         <ProgressList items={mapProgress} />
+      </section>
+    </div>
+  );
+}
+
+function LicenseToolPage({
+  busy,
+  connected,
+  licensePath,
+  licenseProgress,
+  onChooseLicense,
+  onUpload,
+}: {
+  busy: string;
+  connected: boolean;
+  licensePath: string;
+  licenseProgress: ProgressEvent[];
+  onChooseLicense: () => void;
+  onUpload: () => void;
+}) {
+  return (
+    <div className="page-grid two">
+      <section className="panel">
+        <h2>上传授权文件</h2>
+        <div className="form-grid">
+          <label className="file-field wide">
+            License 文件
+            <div>
+              <input readOnly value={licensePath} placeholder="选择与设备 SN 匹配的 license.lic" />
+              <button type="button" onClick={onChooseLicense}>
+                <FileArchive size={16} />
+                选择
+              </button>
+            </div>
+          </label>
+        </div>
+        <div className="actions">
+          <button className="primary" type="button" disabled={!connected || !licensePath || busy === "license"} onClick={() => void onUpload()}>
+            <UploadCloud size={16} />
+            上传并激活
+          </button>
+        </div>
+      </section>
+      <section className="panel">
+        <h2>授权进度</h2>
+        <ProgressList items={licenseProgress} />
       </section>
     </div>
   );

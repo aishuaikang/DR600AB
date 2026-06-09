@@ -123,6 +123,23 @@ func (a *App) SelectOfflineMapPackage() (string, error) {
 	return path, nil
 }
 
+func (a *App) SelectLicenseFile() (string, error) {
+	if a.ctx == nil {
+		return "", errors.New("应用尚未就绪")
+	}
+	path, err := runtime.OpenFileDialog(a.ctx, runtime.OpenDialogOptions{
+		Title: "选择 DR600AB 授权文件",
+		Filters: []runtime.FileFilter{
+			{DisplayName: "授权文件 (*.lic)", Pattern: "*.lic"},
+			{DisplayName: "所有文件", Pattern: "*"},
+		},
+	})
+	if err != nil {
+		return "", err
+	}
+	return path, nil
+}
+
 func (a *App) saveCSVPath(defaultName string) (string, error) {
 	if a.ctx == nil {
 		return "", errors.New("应用尚未就绪")

@@ -16,11 +16,6 @@ export interface LicenseInfo {
   message?: string;
 }
 
-export interface LicenseUploadResponse {
-  license: LicenseInfo;
-  message: string;
-}
-
 export type ParsedMessageType =
   | "did_encrypted"
   | "rid"

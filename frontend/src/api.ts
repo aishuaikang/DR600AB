@@ -41,7 +41,6 @@ import type {
   InterferenceReportSummary,
   ListResponse,
   LicenseInfo,
-  LicenseUploadResponse,
   LocaleMeta,
   NetworkInterfacesResponse,
   NetworkPriorityBatchRequest,
@@ -180,15 +179,6 @@ export function getLocales(): Promise<LocaleMeta> {
 
 export function getLicenseStatus(locale?: string): Promise<LicenseInfo> {
   return requestJson<LicenseInfo>("/license/status", {}, locale);
-}
-
-export function uploadLicense(file: File, locale: string): Promise<LicenseUploadResponse> {
-  const body = new FormData();
-  body.append("file", file);
-  return requestJson<LicenseUploadResponse>("/license/upload", {
-    method: "POST",
-    body,
-  }, locale);
 }
 
 export function getPorts(locale: string, developerToken: string): Promise<PortsResponse> {

@@ -7,6 +7,7 @@ import type {
   InterferenceReportSummary,
   IntrusionQuery,
   IntrusionRecord,
+  LicenseUploadRequest,
   OfflineMapUploadRequest,
   ProgressEvent,
   RemoteEntry,
@@ -37,6 +38,8 @@ type AppBridge = {
   SelectOfflineMapPackage(): Promise<string>;
   UploadOfflineMap(request: OfflineMapUploadRequest): Promise<{ installDir: string; tileCount: number; message: string }>;
   CleanupOfflineMapBackup(request: { installDir: string }): Promise<string>;
+  SelectLicenseFile(): Promise<string>;
+  UploadLicense(request: LicenseUploadRequest): Promise<{ message: string }>;
 };
 
 declare global {
@@ -82,6 +85,8 @@ export const api = {
   selectOfflineMapPackage: () => bridge().SelectOfflineMapPackage(),
   uploadOfflineMap: (request: OfflineMapUploadRequest) => bridge().UploadOfflineMap(request),
   cleanupOfflineMapBackup: (installDir: string) => bridge().CleanupOfflineMapBackup({ installDir }),
+  selectLicenseFile: () => bridge().SelectLicenseFile(),
+  uploadLicense: (request: LicenseUploadRequest) => bridge().UploadLicense(request),
 };
 
 export function onProgress(name: string, callback: (event: ProgressEvent) => void) {

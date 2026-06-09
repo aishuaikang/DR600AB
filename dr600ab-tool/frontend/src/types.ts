@@ -1,4 +1,4 @@
-export type Page = "deploy" | "intrusions" | "interference-reports" | "deception-reports" | "offline-map";
+export type Page = "deploy" | "intrusions" | "interference-reports" | "deception-reports" | "offline-map" | "license";
 
 export interface SavedConfig {
   ssh?: {
@@ -11,6 +11,7 @@ export interface SavedConfig {
   installDir?: string;
   firmware?: string;
   mapPackage?: string;
+  licensePath?: string;
 }
 
 export interface SSHConnectRequest {
@@ -201,6 +202,11 @@ export interface OfflineMapUploadRequest {
   installDir: string;
   packagePath: string;
   keepBackup: boolean;
+}
+
+export interface LicenseUploadRequest {
+  installDir: string;
+  licensePath: string;
 }
 
 export interface ExportResult {

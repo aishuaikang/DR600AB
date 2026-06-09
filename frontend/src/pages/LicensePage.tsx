@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import type { TFunction } from "i18next";
-import { CheckCircle2, Copy, RefreshCw, ShieldAlert, ShieldCheck, Upload } from "lucide-react";
+import { CheckCircle2, Copy, RefreshCw, ShieldAlert, ShieldCheck } from "lucide-react";
 
 import type { Banner } from "../app/types";
 import { BannerAlert } from "../components/BannerAlert";
@@ -15,7 +15,6 @@ import {
 } from "../serial-profile";
 import type { DetectionSessionResponse, LicenseInfo, PortInfo } from "../types";
 import { cx } from "../utils/classnames";
-import { extractErrorMessage } from "../utils/session";
 
 function formatDateTime(value: string | undefined, locale: string) {
   if (!value) {
@@ -56,7 +55,6 @@ export function LicensePage({
   selectedDetectionTxBaudRate,
   t,
   onRefreshLicense,
-  onUploadLicense,
   onRefreshPorts,
   onReceivePortChange,
   onSendPortChange,
@@ -76,22 +74,16 @@ export function LicensePage({
   selectedDetectionTxBaudRate: number;
   t: TFunction;
   onRefreshLicense: () => Promise<void>;
-  onUploadLicense: (file: File) => Promise<void>;
   onRefreshPorts: () => Promise<void>;
   onReceivePortChange: (value: string) => void;
   onSendPortChange: (value: string) => void;
   onDetectionRxBaudRateChange: (value: number) => void;
   onDetectionTxBaudRateChange: (value: number) => void;
 }) {
-  const [selectedFile, setSelectedFile] = useState<File | null>(null);
-  const [uploading, setUploading] = useState(false);
-  const [localBanner, setLocalBanner] = useState<Banner>({ kind: "idle", message: "" });
   const [copyDone, setCopyDone] = useState(false);
   const [detectionRxBaudRateDraft, setDetectionRxBaudRateDraft] = useState(() => formatBaudRate(selectedDetectionRxBaudRate));
   const [detectionTxBaudRateDraft, setDetectionTxBaudRateDraft] = useState(() => formatBaudRate(selectedDetectionTxBaudRate));
   const deviceSN = license?.deviceSn || "";
-  const canUpload = Boolean(selectedFile && deviceSN && !uploading);
-  const shownBanner = localBanner.message ? localBanner : banner;
 
   useEffect(() => {
     setDetectionRxBaudRateDraft(formatBaudRate(selectedDetectionRxBaudRate));
@@ -140,28 +132,6 @@ export function LicensePage({
     }
   };
 
-  const uploadSelectedFile = async () => {
-    if (!selectedFile) {
-      setLocalBanner({ kind: "error", message: t("license.selectFileFirst", { ns: "common" }) });
-      return;
-    }
-    if (!deviceSN) {
-      setLocalBanner({ kind: "error", message: t("license.noDeviceSn", { ns: "common" }) });
-      return;
-    }
-    setUploading(true);
-    setLocalBanner({ kind: "loading", message: t("license.uploading", { ns: "common" }) });
-    try {
-      await onUploadLicense(selectedFile);
-      setSelectedFile(null);
-      setLocalBanner({ kind: "success", message: t("license.uploaded", { ns: "common" }) });
-    } catch (error) {
-      setLocalBanner({ kind: "error", message: extractErrorMessage(error, t("unexpectedError", { ns: "common" })) });
-    } finally {
-      setUploading(false);
-    }
-  };
-
   return (
     <div className="min-h-dvh bg-base-100 text-base-content">
       <main className="mx-auto flex min-h-dvh w-full max-w-5xl flex-col gap-3 px-3 py-4 sm:px-5 lg:py-6">
@@ -188,7 +158,7 @@ export function LicensePage({
               </button>
             </div>
 
-            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+            <div className="grid gap-3 md:grid-cols-3">
               <InfoTile label={t("license.currentStatus", { ns: "common" })}>
                 <span className={cx("inline-flex items-center gap-1.5", statusTone)}>
                   {license?.valid ? <ShieldCheck size={16} /> : <ShieldAlert size={16} />}
@@ -211,7 +181,6 @@ export function LicensePage({
                   ) : null}
                 </span>
               </InfoTile>
-              <InfoTile label={t("license.customer", { ns: "common" })} value={license?.customer || "-"} />
               <InfoTile label={t("license.remaining", { ns: "common" })} value={license ? formatRemainingDays(license, t) : "-"} />
             </div>
 
@@ -227,40 +196,7 @@ export function LicensePage({
               </div>
             ) : null}
 
-            <BannerAlert banner={shownBanner} />
-          </PanelBody>
-        </Panel>
-
-        <Panel>
-          <PanelBody>
-            <SectionHeader
-              title={t("license.uploadTitle", { ns: "common" })}
-              description={t("license.uploadHint", { ns: "common" })}
-            />
-
-            <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_auto] md:items-end">
-              <label className="grid gap-1.5">
-                <span className="text-xs font-medium text-base-content/60">{t("license.file", { ns: "common" })}</span>
-                <input
-                  className="file-input file-input-bordered file-input-primary file-input-sm w-full bg-base-100"
-                  type="file"
-                  accept=".lic,.license,text/plain,application/octet-stream"
-                  onChange={(event) => {
-                    setLocalBanner({ kind: "idle", message: "" });
-                    setSelectedFile(event.currentTarget.files?.[0] ?? null);
-                  }}
-                />
-              </label>
-              <button
-                className="btn btn-sm btn-primary"
-                type="button"
-                disabled={!canUpload}
-                onClick={() => void uploadSelectedFile()}
-              >
-                {uploading ? <LoadingSpinner size={16} /> : <Upload size={16} />}
-                <span>{t("license.upload", { ns: "common" })}</span>
-              </button>
-            </div>
+            <BannerAlert banner={banner} />
           </PanelBody>
         </Panel>
 
