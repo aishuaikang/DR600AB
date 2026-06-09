@@ -237,19 +237,16 @@ function App() {
     try {
       const response = await getLicenseStatus(locale);
       setLicense(response);
-      if (response.valid) {
-        setLicenseBanner({ kind: "idle", message: "" });
-      } else if (response.message) {
-        setLicenseBanner({ kind: "error", message: response.message });
-      }
+      setLicenseBanner({ kind: "idle", message: "" });
     } catch (error) {
+      const message = extractErrorMessage(error, t("unexpectedError", { ns: "common" }));
       setLicense({
         isPermanent: false,
         valid: false,
         code: "license_verification_failed",
-        message: extractErrorMessage(error, t("unexpectedError", { ns: "common" })),
+        message,
       });
-      setLicenseBanner({ kind: "error", message: extractErrorMessage(error, t("unexpectedError", { ns: "common" })) });
+      setLicenseBanner({ kind: "idle", message: "" });
     } finally {
       setLicenseLoading(false);
     }
@@ -271,7 +268,7 @@ function App() {
       code: requestError.code ?? detailLicense?.code ?? "license_verification_failed",
       message: detailLicense?.message ?? error.message,
     }));
-    setLicenseBanner({ kind: "error", message: error.message || t("license.invalid", { ns: "common" }) });
+    setLicenseBanner({ kind: "idle", message: "" });
     setRuntimeLoading(false);
     setGPSRecordsLoading(false);
   }, [t]);
