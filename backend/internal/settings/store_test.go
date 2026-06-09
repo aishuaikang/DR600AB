@@ -317,11 +317,15 @@ func TestStoreSavesEditableUserSettingsWithoutOverwritingDeviceSN(t *testing.T) 
 	}
 }
 
-func TestStoreSavesIntrusionRetentionDays(t *testing.T) {
+func TestStoreSavesArchiveRetentionDays(t *testing.T) {
 	store := NewStore(filepath.Join(t.TempDir(), "settings.json"))
-	retentionDays := 0
+	intrusionRetentionDays := 0
+	fpvVideoRetentionDays := 180
 
-	if err := store.SaveUser(model.UserSettings{IntrusionRetentionDays: &retentionDays}); err != nil {
+	if err := store.SaveUser(model.UserSettings{
+		IntrusionRetentionDays: &intrusionRetentionDays,
+		FPVVideoRetentionDays:  &fpvVideoRetentionDays,
+	}); err != nil {
 		t.Fatalf("SaveUser() error = %v", err)
 	}
 
@@ -331,6 +335,9 @@ func TestStoreSavesIntrusionRetentionDays(t *testing.T) {
 	}
 	if gotUser.IntrusionRetentionDays == nil || *gotUser.IntrusionRetentionDays != 0 {
 		t.Fatalf("retention days = %#v, want 0", gotUser.IntrusionRetentionDays)
+	}
+	if gotUser.FPVVideoRetentionDays == nil || *gotUser.FPVVideoRetentionDays != 180 {
+		t.Fatalf("fpv video retention days = %#v, want 180", gotUser.FPVVideoRetentionDays)
 	}
 }
 

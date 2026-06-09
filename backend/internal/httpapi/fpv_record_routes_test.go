@@ -75,6 +75,24 @@ func (s *memoryFPVVideoRecordStore) Delete(ids []string) (int64, error) {
 	return deleted, nil
 }
 
+func (s *memoryFPVVideoRecordStore) PruneRetention(days int, now time.Time) (int64, error) {
+	if days <= 0 {
+		return 0, nil
+	}
+	cutoff := now.AddDate(0, 0, -days)
+	next := s.items[:0]
+	var deleted int64
+	for _, item := range s.items {
+		if item.StartedAt.Before(cutoff) {
+			deleted++
+			continue
+		}
+		next = append(next, item)
+	}
+	s.items = next
+	return deleted, nil
+}
+
 func (s *memoryFPVVideoRecordStore) Close() error {
 	return nil
 }
@@ -182,6 +200,63 @@ func TestHandleFPVVideoRecordsRejectsInvalidStatus(t *testing.T) {
 	}
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusBadRequest)
+	}
+}
+
+func TestHandleFPVVideoRecordsPrunesByCurrentUserSettings(t *testing.T) {
+	now := time.Now()
+	oldStartedAt := now.AddDate(0, 0, -100)
+	recentStartedAt := now.AddDate(0, 0, -10)
+	retentionDays := 90
+	store := &memoryFPVVideoRecordStore{
+		items: []model.FPVVideoRecord{
+			{
+				ID:        "old",
+				Status:    model.FPVVideoRecordStatusCompleted,
+				StartedAt: oldStartedAt,
+				EndedAt:   oldStartedAt.Add(time.Second),
+			},
+			{
+				ID:        "recent",
+				Status:    model.FPVVideoRecordStatusCompleted,
+				StartedAt: recentStartedAt,
+				EndedAt:   recentStartedAt.Add(time.Second),
+			},
+		},
+	}
+	server := &Server{
+		translator: mustTranslator(t),
+		userSettings: &memoryUserSettingsStore{
+			settings: model.UserSettings{FPVVideoRetentionDays: &retentionDays},
+			ok:       true,
+		},
+		fpvRecords: store,
+	}
+	server.app = fiber.New()
+	api := server.app.Group("/api/v1")
+	server.registerFPVVideoRecordRoutes(api)
+
+	req, err := http.NewRequest(http.MethodGet, "/api/v1/fpv-video-records", nil)
+	if err != nil {
+		t.Fatalf("NewRequest() error = %v", err)
+	}
+	resp, err := server.app.Test(req)
+	if err != nil {
+		t.Fatalf("app.Test() error = %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusOK)
+	}
+
+	var body model.ListResponse[model.FPVVideoRecord]
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("Decode() error = %v", err)
+	}
+	if body.Count != 1 || body.Items[0].ID != "recent" {
+		t.Fatalf("body = %#v, want recent record", body)
+	}
+	if len(store.items) != 1 || store.items[0].ID != "recent" {
+		t.Fatalf("store items = %#v, want only recent", store.items)
 	}
 }
 

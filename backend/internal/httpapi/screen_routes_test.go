@@ -361,7 +361,7 @@ func TestScreenFPVPlaybackRollsBackImageOutputWhenBandCommandFails(t *testing.T)
 
 func TestFPVVideoRecordLifecycleUsesTargetAndLastFrame(t *testing.T) {
 	detectionSvc := newScreenFPVDetectionService(t)
-	now := time.Date(2026, 6, 8, 10, 0, 0, 0, time.UTC)
+	now := time.Now()
 	detectionSvc.Store().AddDetection(model.DetectionRecord{
 		ID:         "record-1",
 		Kind:       "detect",

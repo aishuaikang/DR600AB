@@ -33,6 +33,15 @@ func (s *Server) handleFPVVideoRecords(c *fiber.Ctx) error {
 			Count: 0,
 		})
 	}
+	if err := s.pruneFPVVideoRecordsByCurrentUserSettings(); err != nil {
+		return s.respondError(
+			c,
+			fiber.StatusInternalServerError,
+			"internal",
+			s.translator.T(locale, "errors", "internal"),
+			err.Error(),
+		)
+	}
 	limit := parseLimit(c, 200)
 	offset := parseOffset(c)
 	items, err := s.fpvRecords.List(fpvrecord.QueryOptions{

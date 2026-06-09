@@ -63,6 +63,7 @@ type FPVVideoRecordStore interface {
 	List(fpvrecord.QueryOptions) ([]model.FPVVideoRecord, error)
 	Get(string) (model.FPVVideoRecord, bool, error)
 	Delete([]string) (int64, error)
+	PruneRetention(days int, now time.Time) (int64, error)
 	Close() error
 }
 

@@ -127,6 +127,75 @@ func TestStoreListFiltersStatusAndPages(t *testing.T) {
 	}
 }
 
+func TestStorePruneRetention(t *testing.T) {
+	store, err := NewStore(filepath.Join(t.TempDir(), "fpv-video-records.db"))
+	if err != nil {
+		t.Fatalf("NewStore() error = %v", err)
+	}
+	defer store.Close()
+
+	now := time.Date(2026, 6, 8, 10, 0, 0, 0, time.UTC)
+	oldStartedAt := now.AddDate(0, 0, -100)
+	recentStartedAt := now.AddDate(0, 0, -10)
+	records := []model.FPVVideoRecord{
+		{ID: "old", StartedAt: oldStartedAt, EndedAt: oldStartedAt.Add(time.Second), Status: model.FPVVideoRecordStatusCompleted},
+		{ID: "recent", StartedAt: recentStartedAt, EndedAt: recentStartedAt.Add(time.Second), Status: model.FPVVideoRecordStatusCompleted},
+	}
+	for _, record := range records {
+		if err := store.Insert(record); err != nil {
+			t.Fatalf("Insert(%s) error = %v", record.ID, err)
+		}
+	}
+
+	deleted, err := store.PruneRetention(90, now)
+	if err != nil {
+		t.Fatalf("PruneRetention() error = %v", err)
+	}
+	if deleted != 1 {
+		t.Fatalf("deleted = %d, want 1", deleted)
+	}
+	items, err := store.List(QueryOptions{Limit: 10})
+	if err != nil {
+		t.Fatalf("List() error = %v", err)
+	}
+	if len(items) != 1 || items[0].ID != "recent" {
+		t.Fatalf("items = %#v, want only recent", items)
+	}
+}
+
+func TestStorePruneRetentionZeroKeepsRecords(t *testing.T) {
+	store, err := NewStore(filepath.Join(t.TempDir(), "fpv-video-records.db"))
+	if err != nil {
+		t.Fatalf("NewStore() error = %v", err)
+	}
+	defer store.Close()
+
+	startedAt := time.Date(2026, 6, 8, 10, 0, 0, 0, time.UTC).AddDate(0, 0, -100)
+	if err := store.Insert(model.FPVVideoRecord{
+		ID:        "old",
+		StartedAt: startedAt,
+		EndedAt:   startedAt.Add(time.Second),
+		Status:    model.FPVVideoRecordStatusCompleted,
+	}); err != nil {
+		t.Fatalf("Insert() error = %v", err)
+	}
+
+	deleted, err := store.PruneRetention(0, time.Date(2026, 6, 8, 10, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatalf("PruneRetention() error = %v", err)
+	}
+	if deleted != 0 {
+		t.Fatalf("deleted = %d, want 0", deleted)
+	}
+	items, err := store.List(QueryOptions{Limit: 10})
+	if err != nil {
+		t.Fatalf("List() error = %v", err)
+	}
+	if len(items) != 1 || items[0].ID != "old" {
+		t.Fatalf("items = %#v, want old record kept", items)
+	}
+}
+
 func TestParseStatus(t *testing.T) {
 	if status, err := ParseStatus("completed"); err != nil || status != model.FPVVideoRecordStatusCompleted {
 		t.Fatalf("ParseStatus(completed) = %q, %v; want completed, nil", status, err)

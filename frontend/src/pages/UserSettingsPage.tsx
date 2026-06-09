@@ -17,6 +17,7 @@ import {
 } from "../utils/whitelist";
 
 const defaultIntrusionRetentionDays = 90;
+const defaultFPVVideoRetentionDays = 90;
 const intrusionRetentionOptions = [30, 90, 180, 0];
 
 function coordinateDraft(value: number | undefined) {
@@ -70,6 +71,11 @@ export function UserSettingsPage({
     kind: "idle",
     text: "",
   });
+  const [fpvRetentionSaving, setFPVRetentionSaving] = useState(false);
+  const [fpvRetentionMessage, setFPVRetentionMessage] = useState<{ kind: "idle" | "success" | "error"; text: string }>({
+    kind: "idle",
+    text: "",
+  });
   const [warningZoneSaving, setWarningZoneSaving] = useState(false);
   const [warningZoneMessage, setWarningZoneMessage] = useState<{ kind: "idle" | "success" | "error"; text: string }>({
     kind: "idle",
@@ -77,6 +83,7 @@ export function UserSettingsPage({
   });
   const [deviceSnQrDataUrl, setDeviceSnQrDataUrl] = useState("");
   const [retentionDraft, setRetentionDraft] = useState(() => String(userSettings.intrusionRetentionDays ?? defaultIntrusionRetentionDays));
+  const [fpvRetentionDraft, setFPVRetentionDraft] = useState(() => String(userSettings.fpvVideoRetentionDays ?? defaultFPVVideoRetentionDays));
   const [warningZoneEnabledDraft, setWarningZoneEnabledDraft] = useState(() => resolveWarningZoneEnabled(userSettings));
   const [warningZoneRadiusDraft, setWarningZoneRadiusDraft] = useState(() => String(resolveWarningZoneRadiusMeters(userSettings)));
   const normalizedDraft = titleDraft.trim();
@@ -84,6 +91,9 @@ export function UserSettingsPage({
   const savedRetentionDays = userSettings.intrusionRetentionDays ?? defaultIntrusionRetentionDays;
   const retentionDays = Number(retentionDraft);
   const retentionChanged = Number.isFinite(retentionDays) && retentionDays >= 0 && retentionDays !== savedRetentionDays;
+  const savedFPVRetentionDays = userSettings.fpvVideoRetentionDays ?? defaultFPVVideoRetentionDays;
+  const fpvRetentionDays = Number(fpvRetentionDraft);
+  const fpvRetentionChanged = Number.isFinite(fpvRetentionDays) && fpvRetentionDays >= 0 && fpvRetentionDays !== savedFPVRetentionDays;
   const savedWarningZoneEnabled = resolveWarningZoneEnabled(userSettings);
   const savedWarningZoneRadius = resolveWarningZoneRadiusMeters(userSettings);
   const warningZoneRadius = Number(warningZoneRadiusDraft);
@@ -117,6 +127,10 @@ export function UserSettingsPage({
   useEffect(() => {
     setRetentionDraft(String(userSettings.intrusionRetentionDays ?? defaultIntrusionRetentionDays));
   }, [userSettings.intrusionRetentionDays]);
+
+  useEffect(() => {
+    setFPVRetentionDraft(String(userSettings.fpvVideoRetentionDays ?? defaultFPVVideoRetentionDays));
+  }, [userSettings.fpvVideoRetentionDays]);
 
   useEffect(() => {
     setWarningZoneEnabledDraft(resolveWarningZoneEnabled(userSettings));
@@ -212,6 +226,26 @@ export function UserSettingsPage({
       setRetentionMessage({ kind: "error", text: extractErrorMessage(error, t("unexpectedError", { ns: "common" })) });
     } finally {
       setRetentionSaving(false);
+    }
+  };
+
+  const saveFPVVideoRetention = async () => {
+    if (!Number.isFinite(fpvRetentionDays) || fpvRetentionDays < 0) {
+      setFPVRetentionMessage({ kind: "error", text: t("fpvVideoRetentionInvalid", { ns: "settings" }) });
+      return;
+    }
+    setFPVRetentionSaving(true);
+    setFPVRetentionMessage({ kind: "idle", text: "" });
+    try {
+      await onUserSettingsChange({
+        ...userSettings,
+        fpvVideoRetentionDays: fpvRetentionDays,
+      });
+      setFPVRetentionMessage({ kind: "success", text: t("fpvVideoRetentionSaved", { ns: "settings" }) });
+    } catch (error) {
+      setFPVRetentionMessage({ kind: "error", text: extractErrorMessage(error, t("unexpectedError", { ns: "common" })) });
+    } finally {
+      setFPVRetentionSaving(false);
     }
   };
 
@@ -538,6 +572,61 @@ export function UserSettingsPage({
               onClick={() => void saveIntrusionRetention()}
             >
               {retentionSaving ? t("loading", { ns: "common" }) : t("save", { ns: "common" })}
+            </button>
+          </div>
+        </PanelBody>
+      </Panel>
+
+      <Panel>
+        <PanelBody>
+          <SectionHeader
+            title={t("fpvVideoRetentionTitle", { ns: "settings" })}
+            description={t("fpvVideoRetentionDescription", { ns: "settings" })}
+          />
+
+          <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_18rem]">
+            <label className="grid gap-1.5">
+              <span className="text-xs font-medium text-base-content/60">{t("fpvVideoRetentionField", { ns: "settings" })}</span>
+              <select
+                className="select select-bordered select-sm w-full bg-base-100"
+                value={fpvRetentionDraft}
+                onChange={(event) => setFPVRetentionDraft(event.target.value)}
+              >
+                {intrusionRetentionOptions.map((days) => (
+                  <option key={days} value={days}>
+                    {days === 0
+                      ? t("fpvVideoRetentionForever", { ns: "settings" })
+                      : t("fpvVideoRetentionDays", { ns: "settings", value: days })}
+                  </option>
+                ))}
+              </select>
+              <span className="text-xs leading-5 text-base-content/50">{t("fpvVideoRetentionHint", { ns: "settings" })}</span>
+            </label>
+
+            <div className="rounded-2xl border border-base-300 bg-base-100/45 p-3">
+              <span className="text-[11px] font-semibold uppercase tracking-wide text-base-content/45">{t("savedValue", { ns: "settings" })}</span>
+              <strong className="mt-2 block text-sm font-semibold text-base-content">
+                {savedFPVRetentionDays === 0
+                  ? t("fpvVideoRetentionForever", { ns: "settings" })
+                  : t("fpvVideoRetentionDays", { ns: "settings", value: savedFPVRetentionDays })}
+              </strong>
+            </div>
+          </div>
+
+          {fpvRetentionMessage.text ? (
+            <div className={`alert py-2 text-sm ${fpvRetentionMessage.kind === "error" ? "alert-error" : "alert-success"}`}>
+              {fpvRetentionMessage.text}
+            </div>
+          ) : null}
+
+          <div className="flex flex-wrap justify-end gap-2">
+            <button
+              className="btn btn-sm btn-primary"
+              type="button"
+              disabled={fpvRetentionSaving || !fpvRetentionChanged}
+              onClick={() => void saveFPVVideoRetention()}
+            >
+              {fpvRetentionSaving ? t("loading", { ns: "common" }) : t("save", { ns: "common" })}
             </button>
           </div>
         </PanelBody>

@@ -291,6 +291,33 @@ func (s *Store) Delete(ids []string) (int64, error) {
 	return deleted, nil
 }
 
+// PruneBefore removes FPV video records started before cutoff.
+func (s *Store) PruneBefore(cutoff time.Time) (int64, error) {
+	if s == nil || s.db == nil || cutoff.IsZero() {
+		return 0, nil
+	}
+	result, err := s.db.Exec(`DELETE FROM fpv_video_records WHERE started_at < ?`, formatTime(cutoff))
+	if err != nil {
+		return 0, fmt.Errorf("清理过期 FPV 图传记录失败: %w", err)
+	}
+	deleted, err := result.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("读取清理 FPV 图传记录数量失败: %w", err)
+	}
+	return deleted, nil
+}
+
+// PruneRetention removes records older than the configured retention days. 0 means keep forever.
+func (s *Store) PruneRetention(days int, now time.Time) (int64, error) {
+	if days <= 0 {
+		return 0, nil
+	}
+	if now.IsZero() {
+		now = time.Now()
+	}
+	return s.PruneBefore(now.AddDate(0, 0, -days))
+}
+
 func normalizeRecord(record model.FPVVideoRecord) model.FPVVideoRecord {
 	if strings.TrimSpace(record.ID) == "" {
 		record.ID = NewRecordID()

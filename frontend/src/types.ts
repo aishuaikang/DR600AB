@@ -190,6 +190,7 @@ export interface UserSettings {
   manualDeviceLocation?: GeoPoint;
   screenStrikeChannelLabels?: string[];
   intrusionRetentionDays?: number;
+  fpvVideoRetentionDays?: number;
   warningZoneEnabled?: boolean;
   warningZoneRadiusMeters?: number;
   whitelist?: WhitelistItem[];

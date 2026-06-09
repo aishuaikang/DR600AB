@@ -122,6 +122,9 @@ func TestHandleUpdateUserSettingsPreservesDeviceSN(t *testing.T) {
 	if store.settings.IntrusionRetentionDays == nil || *store.settings.IntrusionRetentionDays != model.DefaultIntrusionRetentionDays {
 		t.Fatalf("retention days = %#v, want default", store.settings.IntrusionRetentionDays)
 	}
+	if store.settings.FPVVideoRetentionDays == nil || *store.settings.FPVVideoRetentionDays != model.DefaultFPVVideoRetentionDays {
+		t.Fatalf("fpv video retention days = %#v, want default", store.settings.FPVVideoRetentionDays)
+	}
 }
 
 func TestHandleUserSettingsReturnsDefaultIntrusionRetention(t *testing.T) {
@@ -150,6 +153,9 @@ func TestHandleUserSettingsReturnsDefaultIntrusionRetention(t *testing.T) {
 	}
 	if body.IntrusionRetentionDays == nil || *body.IntrusionRetentionDays != model.DefaultIntrusionRetentionDays {
 		t.Fatalf("retention days = %#v, want default", body.IntrusionRetentionDays)
+	}
+	if body.FPVVideoRetentionDays == nil || *body.FPVVideoRetentionDays != model.DefaultFPVVideoRetentionDays {
+		t.Fatalf("fpv video retention days = %#v, want default", body.FPVVideoRetentionDays)
 	}
 	if body.ScreenAlarmSettings == nil ||
 		!body.ScreenAlarmSettings.Detection ||
@@ -277,6 +283,57 @@ func TestHandleUpdateUserSettingsPrunesIntrusions(t *testing.T) {
 	}
 }
 
+func TestHandleUpdateUserSettingsPrunesFPVVideoRecords(t *testing.T) {
+	oldStartedAt := time.Now().AddDate(0, 0, -100)
+	recentStartedAt := time.Now().AddDate(0, 0, -10)
+	retentionDays := 90
+	fpvRecords := &memoryFPVVideoRecordStore{
+		items: []model.FPVVideoRecord{
+			{
+				ID:        "old",
+				Status:    model.FPVVideoRecordStatusCompleted,
+				StartedAt: oldStartedAt,
+				EndedAt:   oldStartedAt.Add(time.Second),
+			},
+			{
+				ID:        "recent",
+				Status:    model.FPVVideoRecordStatusCompleted,
+				StartedAt: recentStartedAt,
+				EndedAt:   recentStartedAt.Add(time.Second),
+			},
+		},
+	}
+	server := &Server{
+		translator:   mustTranslator(t),
+		userSettings: &memoryUserSettingsStore{},
+		fpvRecords:   fpvRecords,
+	}
+	server.app = fiber.New()
+	api := server.app.Group("/api/v1")
+	server.registerUserRoutes(api)
+
+	body, err := json.Marshal(model.UserSettings{FPVVideoRetentionDays: &retentionDays})
+	if err != nil {
+		t.Fatalf("Marshal() error = %v", err)
+	}
+	req, err := http.NewRequest(http.MethodPut, "/api/v1/user/settings", bytes.NewReader(body))
+	if err != nil {
+		t.Fatalf("NewRequest() error = %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := server.app.Test(req)
+	if err != nil {
+		t.Fatalf("app.Test() error = %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusOK)
+	}
+	if len(fpvRecords.items) != 1 || fpvRecords.items[0].ID != "recent" {
+		t.Fatalf("fpv records = %#v, want only recent", fpvRecords.items)
+	}
+}
+
 func TestHandleUpdateUserSettingsPreservesWarningZoneSettings(t *testing.T) {
 	enabled := true
 	radius := 1500.0
@@ -349,6 +406,35 @@ func TestHandleUpdateUserSettingsRejectsInvalidWarningZoneRadius(t *testing.T) {
 	}
 }
 
+func TestHandleUpdateUserSettingsRejectsInvalidFPVVideoRetention(t *testing.T) {
+	retentionDays := -1
+	server := &Server{
+		translator:   mustTranslator(t),
+		userSettings: &memoryUserSettingsStore{},
+	}
+	server.app = fiber.New()
+	api := server.app.Group("/api/v1")
+	server.registerUserRoutes(api)
+
+	body, err := json.Marshal(model.UserSettings{FPVVideoRetentionDays: &retentionDays})
+	if err != nil {
+		t.Fatalf("Marshal() error = %v", err)
+	}
+	req, err := http.NewRequest(http.MethodPut, "/api/v1/user/settings", bytes.NewReader(body))
+	if err != nil {
+		t.Fatalf("NewRequest() error = %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := server.app.Test(req)
+	if err != nil {
+		t.Fatalf("app.Test() error = %v", err)
+	}
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusBadRequest)
+	}
+}
+
 func TestHandleUpdateUserSettingsRetentionZeroKeepsIntrusions(t *testing.T) {
 	retentionDays := 0
 	intrusions := &pruningIntrusionStore{
@@ -384,6 +470,50 @@ func TestHandleUpdateUserSettingsRetentionZeroKeepsIntrusions(t *testing.T) {
 	}
 	if len(intrusions.items) != 1 {
 		t.Fatalf("intrusions count = %d, want 1", len(intrusions.items))
+	}
+}
+
+func TestHandleUpdateUserSettingsRetentionZeroKeepsFPVVideoRecords(t *testing.T) {
+	retentionDays := 0
+	startedAt := time.Now().AddDate(0, 0, -100)
+	fpvRecords := &memoryFPVVideoRecordStore{
+		items: []model.FPVVideoRecord{
+			{
+				ID:        "old",
+				Status:    model.FPVVideoRecordStatusCompleted,
+				StartedAt: startedAt,
+				EndedAt:   startedAt.Add(time.Second),
+			},
+		},
+	}
+	server := &Server{
+		translator:   mustTranslator(t),
+		userSettings: &memoryUserSettingsStore{},
+		fpvRecords:   fpvRecords,
+	}
+	server.app = fiber.New()
+	api := server.app.Group("/api/v1")
+	server.registerUserRoutes(api)
+
+	body, err := json.Marshal(model.UserSettings{FPVVideoRetentionDays: &retentionDays})
+	if err != nil {
+		t.Fatalf("Marshal() error = %v", err)
+	}
+	req, err := http.NewRequest(http.MethodPut, "/api/v1/user/settings", bytes.NewReader(body))
+	if err != nil {
+		t.Fatalf("NewRequest() error = %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := server.app.Test(req)
+	if err != nil {
+		t.Fatalf("app.Test() error = %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusOK)
+	}
+	if len(fpvRecords.items) != 1 {
+		t.Fatalf("fpv records count = %d, want 1", len(fpvRecords.items))
 	}
 }
 

@@ -70,6 +70,15 @@ func (s *Server) handleUpdateUserSettings(c *fiber.Ctx) error {
 			"invalid intrusion retention days",
 		)
 	}
+	if !validFPVVideoRetentionDays(req.FPVVideoRetentionDays) {
+		return s.respondError(
+			c,
+			fiber.StatusBadRequest,
+			"invalid_request",
+			s.translator.T(locale, "errors", "invalid_request"),
+			"invalid fpv video retention days",
+		)
+	}
 	if !validWarningZoneRadius(req.WarningZoneRadiusMeters) {
 		return s.respondError(
 			c,
@@ -98,7 +107,7 @@ func (s *Server) handleUpdateUserSettings(c *fiber.Ctx) error {
 		)
 	}
 	saved = model.UserSettingsWithDefaults(saved)
-	if err := s.pruneIntrusionsByUserSettings(saved); err != nil {
+	if err := s.pruneArchiveRecordsByUserSettings(saved); err != nil {
 		return s.respondError(
 			c,
 			fiber.StatusInternalServerError,
@@ -208,6 +217,13 @@ func validIntrusionRetentionDays(days *int) bool {
 	return *days >= 0
 }
 
+func validFPVVideoRetentionDays(days *int) bool {
+	if days == nil {
+		return true
+	}
+	return *days >= 0
+}
+
 func validWarningZoneRadius(radius *float64) bool {
 	if radius == nil {
 		return true
@@ -220,30 +236,70 @@ func validWarningZoneRadius(radius *float64) bool {
 
 const intrusionPruneInterval = time.Minute
 
-func (s *Server) pruneIntrusionsByUserSettings(settings model.UserSettings) error {
-	if s.intrusions == nil {
+func (s *Server) pruneArchiveRecordsByUserSettings(settings model.UserSettings) error {
+	now := time.Now()
+	if err := s.pruneIntrusionsByUserSettings(settings, now); err != nil {
+		return err
+	}
+	if err := s.pruneFPVVideoRecordsByUserSettings(settings, now); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (s *Server) pruneIntrusionsByUserSettings(settings model.UserSettings, now time.Time) error {
+	if s == nil || s.intrusions == nil {
 		return nil
 	}
 	days := model.UserSettingsIntrusionRetentionDays(settings)
-	_, err := s.intrusions.PruneRetention(days, time.Now())
+	_, err := s.intrusions.PruneRetention(days, now)
 	return err
+}
+
+func (s *Server) pruneFPVVideoRecordsByUserSettings(settings model.UserSettings, now time.Time) error {
+	if s == nil || s.fpvRecords == nil {
+		return nil
+	}
+	days := model.UserSettingsFPVVideoRetentionDays(settings)
+	_, err := s.fpvRecords.PruneRetention(days, now)
+	return err
+}
+
+func (s *Server) currentUserSettingsWithDefaults() (model.UserSettings, error) {
+	settings := model.UserSettings{}
+	if s == nil || s.userSettings == nil {
+		return model.UserSettingsWithDefaults(settings), nil
+	}
+	loaded, ok, err := s.userSettings.LoadUser()
+	if err != nil {
+		return model.UserSettings{}, err
+	}
+	if ok {
+		settings = loaded
+	}
+	return model.UserSettingsWithDefaults(settings), nil
 }
 
 func (s *Server) pruneIntrusionsByCurrentUserSettings() error {
 	if s == nil || s.intrusions == nil {
 		return nil
 	}
-	settings := model.UserSettings{}
-	if s.userSettings != nil {
-		loaded, ok, err := s.userSettings.LoadUser()
-		if err != nil {
-			return err
-		}
-		if ok {
-			settings = loaded
-		}
+	settings, err := s.currentUserSettingsWithDefaults()
+	if err != nil {
+		return err
 	}
-	return s.pruneIntrusionsByUserSettings(model.UserSettingsWithDefaults(settings))
+	return s.pruneIntrusionsByUserSettings(settings, time.Now())
+}
+
+func (s *Server) pruneFPVVideoRecordsByCurrentUserSettings() error {
+	if s == nil || s.fpvRecords == nil {
+		return nil
+	}
+	settings, err := s.currentUserSettingsWithDefaults()
+	if err != nil {
+		return err
+	}
+	return s.pruneFPVVideoRecordsByUserSettings(settings, time.Now())
 }
 
 func (s *Server) maybePruneIntrusionsByCurrentUserSettings() error {

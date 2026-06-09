@@ -103,6 +103,7 @@ type UserSettings struct {
 	ManualDeviceLocation      *GeoPoint            `json:"manualDeviceLocation,omitempty"`
 	ScreenStrikeChannelLabels []string             `json:"screenStrikeChannelLabels,omitempty"`
 	IntrusionRetentionDays    *int                 `json:"intrusionRetentionDays,omitempty"`
+	FPVVideoRetentionDays     *int                 `json:"fpvVideoRetentionDays,omitempty"`
 	WarningZoneEnabled        *bool                `json:"warningZoneEnabled,omitempty"`
 	WarningZoneRadiusMeters   *float64             `json:"warningZoneRadiusMeters,omitempty"`
 	Whitelist                 []WhitelistItem      `json:"whitelist,omitempty"`
@@ -127,6 +128,7 @@ type ScreenAlarmSettings struct {
 
 const (
 	DefaultIntrusionRetentionDays  = 90
+	DefaultFPVVideoRetentionDays   = 90
 	DefaultWarningZoneRadiusMeters = 500.0
 	MinWarningZoneRadiusMeters     = 10.0
 	MaxWarningZoneRadiusMeters     = 50000.0
@@ -137,6 +139,10 @@ func UserSettingsWithDefaults(settings UserSettings) UserSettings {
 	if settings.IntrusionRetentionDays == nil {
 		days := DefaultIntrusionRetentionDays
 		settings.IntrusionRetentionDays = &days
+	}
+	if settings.FPVVideoRetentionDays == nil {
+		days := DefaultFPVVideoRetentionDays
+		settings.FPVVideoRetentionDays = &days
 	}
 	if settings.ScreenAlarmSettings == nil {
 		settings.ScreenAlarmSettings = DefaultScreenAlarmSettings()
@@ -170,6 +176,14 @@ func UserSettingsIntrusionRetentionDays(settings UserSettings) int {
 		return DefaultIntrusionRetentionDays
 	}
 	return *settings.IntrusionRetentionDays
+}
+
+// UserSettingsFPVVideoRetentionDays returns the effective FPV video record retention setting.
+func UserSettingsFPVVideoRetentionDays(settings UserSettings) int {
+	if settings.FPVVideoRetentionDays == nil {
+		return DefaultFPVVideoRetentionDays
+	}
+	return *settings.FPVVideoRetentionDays
 }
 
 // IntrusionDeleteRequest deletes selected intrusion records.
