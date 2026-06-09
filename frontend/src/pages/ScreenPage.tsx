@@ -924,6 +924,10 @@ function DetectionTargetCard({
   const timeToneTitle = getTargetTimeToneTitle(timeTone, t);
   const remainingSeconds = targetDisappearRemainingSeconds(target.lastSeen, now);
   const showCountdown = shouldShowDisappearCountdown(timeTone);
+  const countdownText = remainingSeconds === null ? "--:--" : formatCountdown(remainingSeconds);
+  const timeLabel = showCountdown
+    ? `${timeToneTitle}，${t("targetDisappearCountdown", { ns: "screen" })} ${countdownText}`
+    : timeToneTitle;
   const [freshnessOpen, setFreshnessOpen] = useState(false);
 
   return (
@@ -952,16 +956,26 @@ function DetectionTargetCard({
         <span className="screen-detection-card__title">
           <strong>{title}</strong>
           <button
-            className={`screen-detection-card__time screen-detection-card__time--${timeTone}`}
+            className={cx(
+              "screen-detection-card__time",
+              showCountdown && "screen-detection-card__time--countdown",
+              `screen-detection-card__time--${timeTone}`,
+            )}
             type="button"
             aria-expanded={freshnessOpen}
-            aria-label={timeToneTitle}
+            aria-label={timeLabel}
             onClick={(event) => {
               event.stopPropagation();
               setFreshnessOpen((value) => !value);
             }}
           >
-            {formatTargetTime(target.lastSeen)}
+            <span className="screen-target-time-main">{formatTargetTime(target.lastSeen)}</span>
+            {showCountdown ? (
+              <span className="screen-target-time-countdown">
+                <TimerReset size={9} aria-hidden="true" />
+                <span className="screen-target-time-countdown-value">{countdownText}</span>
+              </span>
+            ) : null}
           </button>
         </span>
 
@@ -975,14 +989,6 @@ function DetectionTargetCard({
             <strong>{formatRSSI(target.rssi)}</strong>
           </span>
         </div>
-
-        {showCountdown ? (
-          <span className={`screen-target-countdown screen-target-countdown--${timeTone}`}>
-            <TimerReset size={12} aria-hidden="true" />
-            <em>{t("targetDisappearCountdown", { ns: "screen" })}</em>
-            <strong>{remainingSeconds === null ? "--:--" : formatCountdown(remainingSeconds)}</strong>
-          </span>
-        ) : null}
 
         {freshnessOpen ? (
           <span className={`screen-detection-card__freshness screen-detection-card__freshness--${timeTone}`}>
@@ -1269,6 +1275,10 @@ function PositionTargetCard({
   const allowWhitelist = !isUncrackedDJIDroneTarget(target);
   const remainingSeconds = targetDisappearRemainingSeconds(target.lastSeen, now);
   const showCountdown = shouldShowDisappearCountdown(timeTone);
+  const countdownText = remainingSeconds === null ? "--:--" : formatCountdown(remainingSeconds);
+  const timeLabel = showCountdown
+    ? `${timeToneTitle}，${t("targetDisappearCountdown", { ns: "screen" })} ${countdownText}`
+    : timeToneTitle;
 
   return (
     <article
@@ -1296,13 +1306,24 @@ function PositionTargetCard({
         </span>
         <span className="screen-position-card__actions">
           <button
-            className={`screen-detection-card__time screen-detection-card__time--${timeTone}`}
+            className={cx(
+              "screen-detection-card__time",
+              "screen-position-card__time",
+              showCountdown && "screen-detection-card__time--countdown",
+              `screen-detection-card__time--${timeTone}`,
+            )}
             type="button"
-            title={timeToneTitle}
-            aria-label={timeToneTitle}
+            title={timeLabel}
+            aria-label={timeLabel}
             onClick={(event) => event.stopPropagation()}
           >
-            {formatTargetTime(target.lastSeen)}
+            <span className="screen-target-time-main">{formatTargetTime(target.lastSeen)}</span>
+            {showCountdown ? (
+              <span className="screen-target-time-countdown">
+                <TimerReset size={9} aria-hidden="true" />
+                <span className="screen-target-time-countdown-value">{countdownText}</span>
+              </span>
+            ) : null}
           </button>
           {allowWhitelist ? (
             <button
@@ -1315,20 +1336,12 @@ function PositionTargetCard({
                 onToggleWhitelist(target);
               }}
             >
-              {whitelisted ? <ShieldMinus size={12} aria-hidden="true" /> : <ShieldPlus size={12} aria-hidden="true" />}
+              {whitelisted ? <ShieldMinus size={11} aria-hidden="true" /> : <ShieldPlus size={11} aria-hidden="true" />}
               <span>{whitelisted ? t("removeFromWhitelistShort", { ns: "screen" }) : t("addToWhitelist", { ns: "screen" })}</span>
             </button>
           ) : null}
         </span>
       </div>
-
-      {showCountdown ? (
-        <span className={`screen-target-countdown screen-target-countdown--${timeTone}`}>
-          <TimerReset size={12} aria-hidden="true" />
-          <em>{t("targetDisappearCountdown", { ns: "screen" })}</em>
-          <strong>{remainingSeconds === null ? "--:--" : formatCountdown(remainingSeconds)}</strong>
-        </span>
-      ) : null}
 
       {pendingEncrypted ? (
         <div className="screen-position-card__metrics screen-position-card__metrics--pending screen-target-readouts">
@@ -1379,18 +1392,15 @@ function PositionTargetCard({
             </div>
           </div>
 
-          <div className="screen-position-card__relations screen-target-readouts">
-            <span className="screen-target-readout">
+          <div className="screen-position-card__readouts screen-target-readouts">
+            <span className="screen-target-readout screen-target-readout--relation">
               <em>{t("positionPilotDistance", { ns: "screen" })}</em>
               <strong>{formatPositionDistance(target.pilotDistanceM)}</strong>
             </span>
-            <span className="screen-target-readout">
+            <span className="screen-target-readout screen-target-readout--relation">
               <em>{t("positionDroneDistance", { ns: "screen" })}</em>
               <strong>{formatPositionDistance(target.droneDistanceM)}</strong>
             </span>
-          </div>
-
-          <div className="screen-position-card__metrics screen-target-readouts">
             <span className="screen-target-readout">
               <em>{t("frequency", { ns: "screen" })}</em>
               <strong>{formatOptionalNumber(target.frequency, "MHz", 1)}</strong>
@@ -2836,7 +2846,7 @@ function RightList({
               aria-expanded={alarmSettingsOpen}
               onClick={() => setAlarmSettingsOpen((value) => !value)}
             >
-              <Settings2 size={13} aria-hidden="true" />
+              <Settings2 size={12} aria-hidden="true" />
             </button>
             <strong className="screen-info-list__count">{activeCount}</strong>
           </span>
@@ -2900,6 +2910,7 @@ function RightList({
         <div className="screen-tabs" role="tablist">
           {availableTabs.map((item) => {
             const TabIcon = item === "detection" ? Radar : item === "position" ? MapPin : Radio;
+            const itemCount = getTabCount(item);
             const itemAlarmCount = alarmCounts.find((count) => count.kind === item)?.count ?? 0;
             return (
               <button
@@ -2913,7 +2924,7 @@ function RightList({
                 <TabIcon className="screen-tab__icon" size={13} aria-hidden="true" />
                 <span>{t(`tabs.${item}`, { ns: "screen" })}</span>
                 <strong className={cx(itemAlarmCount > 0 && "screen-tab__count--alarm")}>
-                  <span>{getTabCount(item)}</span>
+                  <span>{itemCount}</span>
                 </strong>
               </button>
             );

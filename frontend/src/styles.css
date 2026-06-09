@@ -3161,8 +3161,8 @@ body.virtual-keyboard-open .app-loading-overlay {
 
 .screen-alarm-settings-toggle {
   display: grid;
-  width: var(--screen-touch-target-sm);
-  height: var(--screen-touch-target-sm);
+  width: clamp(36px, 2.12em, 42px);
+  height: clamp(36px, 2.12em, 42px);
   place-items: center;
   border: 1px solid rgba(125, 211, 252, 0.26);
   border-radius: var(--screen-panel-radius-xs);
@@ -3452,11 +3452,10 @@ body.virtual-keyboard-open .app-loading-overlay {
   transform: translateY(0.04em);
 }
 
-.screen-tab__count--alarm {
-  border-color: rgba(244, 63, 94, 0.42);
+.screen-tab strong.screen-tab__count--alarm {
   color: #fff;
-  background: rgba(244, 63, 94, 0.92);
-  box-shadow: 0 0 0.6em rgba(244, 63, 94, 0.3);
+  background: #f43f5e;
+  box-shadow: 0 0 0.5em rgba(244, 63, 94, 0.34);
 }
 
 .screen-tab--active {
@@ -3473,10 +3472,10 @@ body.virtual-keyboard-open .app-loading-overlay {
   transform: none;
 }
 
-.screen-tab--active .screen-tab__count--alarm {
+.screen-tab--active strong.screen-tab__count--alarm {
   color: #fff;
-  background: rgba(244, 63, 94, 0.96);
-  box-shadow: 0 0 0.6em rgba(244, 63, 94, 0.35);
+  background: #f43f5e;
+  box-shadow: 0 0 0.5em rgba(244, 63, 94, 0.34);
 }
 
 .screen-list {
@@ -3720,7 +3719,7 @@ body.virtual-keyboard-open .app-loading-overlay {
   gap: 0.5em;
   border: 1px solid var(--screen-line);
   border-left: 3px solid rgba(38, 201, 255, 0.62);
-  border-radius: var(--screen-panel-radius-sm);
+  border-radius: var(--screen-panel-radius);
   padding: 0.42em 0.46em 0.4em 0.42em;
   color: #f5fbff;
   text-align: left;
@@ -3864,6 +3863,42 @@ body.virtual-keyboard-open .app-loading-overlay {
     box-shadow 0.18s ease;
 }
 
+.screen-detection-card__time--countdown {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.34em;
+  min-height: 2.12em;
+  padding: 0 0.62em;
+  line-height: 1;
+}
+
+.screen-target-time-main,
+.screen-target-time-countdown-value {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0;
+}
+
+.screen-target-time-countdown {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.12em;
+  border-left: 1px solid rgba(255, 255, 255, 0.18);
+  padding-left: 0.34em;
+  color: currentColor;
+  font-size: 0.95em;
+  font-weight: 800;
+  opacity: 0.9;
+}
+
+.screen-target-time-countdown svg {
+  flex: none;
+  width: 0.86em;
+  height: 0.86em;
+}
+
 .screen-detection-card__time--fresh {
   border-color: rgba(38, 201, 255, 0.38);
   color: #b9f4ff;
@@ -3988,7 +4023,7 @@ body.virtual-keyboard-open .app-loading-overlay {
 .screen-target-readouts {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 0.2em;
+  gap: 0.16em;
 }
 
 .screen-target-readout {
@@ -3996,7 +4031,7 @@ body.virtual-keyboard-open .app-loading-overlay {
   min-width: 0;
   gap: 0.05em;
   border-radius: var(--screen-panel-radius-xs);
-  padding: 0.3em;
+  padding: 0.22em 0.26em;
   background: var(--screen-control-bg);
 }
 
@@ -4027,11 +4062,11 @@ body.virtual-keyboard-open .app-loading-overlay {
 .screen-position-card {
   display: grid;
   width: 100%;
-  gap: 0.34em;
+  gap: 0.2em;
   border: 1px solid var(--screen-line);
   border-left: 3px solid rgba(216, 226, 232, 0.62);
   border-radius: var(--screen-panel-radius);
-  padding: 0.44em 0.46em 0.42em 0.42em;
+  padding: 0.5em 0.5em 0.5em 0.5em;
   color: #f5fbff;
   text-align: left;
   background: var(--screen-card-bg);
@@ -4062,10 +4097,10 @@ body.virtual-keyboard-open .app-loading-overlay {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: start;
-  gap: 0.44em;
+  gap: 0.36em;
 }
 
-.screen-position-card__head span {
+.screen-position-card__head > span {
   display: grid;
   min-width: 0;
   gap: 0.06em;
@@ -4127,9 +4162,14 @@ body.virtual-keyboard-open .app-loading-overlay {
 }
 
 .screen-position-card__head .screen-position-card__actions {
-  display: inline-grid;
+  display: inline-flex;
+  align-items: center;
   justify-items: end;
-  gap: 0.26em;
+  gap: 0.24em;
+}
+
+.screen-position-card__head .screen-position-card__time {
+  line-height: 1;
 }
 
 .screen-position-card__head .screen-position-card__whitelist-badge {
@@ -4154,15 +4194,16 @@ body.virtual-keyboard-open .app-loading-overlay {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 0.22em;
-  min-height: 2.34em;
+  gap: 0.18em;
+  min-width: 0;
+  min-height: 2.12em;
   border: 1px solid rgba(248, 113, 113, 0.38);
   border-radius: 999px;
-  padding: 0 0.68em;
+  padding: 0 0.62em;
   color: #fecdd3;
   background: rgba(244, 63, 94, 0.12);
   font: inherit;
-  font-size: 0.58em;
+  font-size: 0.62em;
   font-weight: 800;
   line-height: 1;
   white-space: nowrap;
@@ -4218,10 +4259,10 @@ body.virtual-keyboard-open .app-loading-overlay {
 
 .screen-position-card__location {
   display: grid;
-  grid-template-columns: 4.78em minmax(0, 1fr);
-  gap: 0.36em;
-  border-radius: var(--screen-panel-radius);
-  padding: 0.5em;
+  grid-template-columns: 3.55em minmax(0, 1fr);
+  gap: 0.2em;
+  border-radius: var(--screen-panel-radius-xs);
+  padding: 0.2em;
   background: var(--screen-control-bg);
 }
 
@@ -4229,7 +4270,7 @@ body.virtual-keyboard-open .app-loading-overlay {
   position: relative;
   display: grid;
   min-width: 0;
-  height: 3.86em;
+  height: 2.74em;
   place-items: center;
   align-self: stretch;
   border-radius: var(--screen-panel-radius-xs);
@@ -4269,7 +4310,7 @@ body.virtual-keyboard-open .app-loading-overlay {
   transition:
     filter 0.18s ease,
     transform 0.18s ease;
-  padding: 0.5em;
+  padding: 0.24em;
 }
 
 .screen-position-card:hover .screen-position-card__image img {
@@ -4295,7 +4336,7 @@ body.virtual-keyboard-open .app-loading-overlay {
   display: grid;
   grid-template-columns: 1fr;
   align-content: center;
-  gap: 0.18em;
+  gap: 0.04em;
   min-width: 0;
 }
 
@@ -4303,7 +4344,7 @@ body.virtual-keyboard-open .app-loading-overlay {
   display: grid;
   grid-template-columns: 2.9em minmax(0, 1fr) minmax(0, 1fr);
   align-items: baseline;
-  gap: 0.26em;
+  gap: 0.16em;
   min-width: 0;
 }
 
@@ -4311,7 +4352,7 @@ body.virtual-keyboard-open .app-loading-overlay {
   grid-template-columns: 2.9em minmax(0, 1fr) minmax(0, 1fr) auto;
   align-items: center;
   width: 100%;
-  min-height: 2.22em;
+  min-height: 1.02em;
   border: 0;
   padding: 0;
   color: inherit;
@@ -4334,8 +4375,9 @@ body.virtual-keyboard-open .app-loading-overlay {
 
 .screen-position-card__point > em {
   color: rgba(202, 225, 230, 0.56);
-  font-size: 0.64em;
+  font-size: 0.58em;
   font-style: normal;
+  line-height: 1.08;
 }
 
 .screen-position-card__point > strong {
@@ -4343,24 +4385,25 @@ body.virtual-keyboard-open .app-loading-overlay {
   overflow: hidden;
   color: #f9fcfd;
   font-family: var(--font-mono);
-  font-size: 0.68em;
+  font-size: 0.62em;
   font-weight: 800;
+  line-height: 1.08;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .screen-position-card__point small {
-  margin-right: 0.32em;
+  margin-right: 0.18em;
   color: rgba(202, 225, 230, 0.46);
   font-family: inherit;
-  font-size: 0.72em;
+  font-size: 0.66em;
   font-weight: 700;
 }
 
 .screen-position-card__point-action {
   display: grid;
-  width: 1.42em;
-  height: 1.42em;
+  width: 1em;
+  height: 1em;
   place-items: center;
   border-radius: 999px;
   color: color-mix(in oklab, var(--screen-primary) 82%, white);
@@ -4386,12 +4429,32 @@ body.virtual-keyboard-open .app-loading-overlay {
 
 .screen-position-card__metrics {
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 0.2em;
+  gap: 0.16em;
+}
+
+.screen-position-card__readouts {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.12em;
+}
+
+.screen-position-card__readouts .screen-target-readout {
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: baseline;
+  gap: 0.14em;
+  padding: 0.13em 0.16em;
+}
+
+.screen-position-card__readouts .screen-target-readout em,
+.screen-position-card__readouts .screen-target-readout strong {
+  overflow: hidden;
+  line-height: 1;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .screen-position-card__relations {
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 0.2em;
+  gap: 0.16em;
 }
 
 .screen-position-card__relations .screen-target-readout em,
@@ -5261,7 +5324,7 @@ body.virtual-keyboard-open .app-loading-overlay {
   display: grid;
   width: 100%;
   border: 1px solid var(--screen-line);
-  border-radius: var(--screen-panel-radius-sm);
+  border-radius: var(--screen-panel-radius);
   color: #f5fbff;
   background: var(--screen-card-bg);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.045);
@@ -5417,20 +5480,20 @@ body.virtual-keyboard-open .app-loading-overlay {
   gap: 0.2em;
 }
 
-.screen-fpv-row__view-button {
+.screen-fpv-row__action .screen-fpv-row__view-button {
   display: inline-flex;
   min-width: 0;
   max-width: 100%;
-  min-height: var(--screen-touch-target-sm);
+  min-height: clamp(30px, 2.08em, 34px);
   align-items: center;
   justify-content: center;
   gap: 0.24em;
   border: 1px solid rgba(38, 201, 255, 0.32);
   border-radius: 999px;
-  padding: 0 0.68em;
+  padding: 0 0.56em;
   color: #dff8ff;
   font: inherit;
-  font-size: 0.86em;
+  font-size: 0.8em;
   font-weight: 800;
   line-height: 1;
   background: rgba(38, 201, 255, 0.11);
@@ -5441,27 +5504,32 @@ body.virtual-keyboard-open .app-loading-overlay {
     color 0.16s ease;
 }
 
-.screen-fpv-row__view-button:hover,
-.screen-fpv-row__view-button--active {
+.screen-fpv-row__action .screen-fpv-row__view-button:hover {
   border-color: rgba(244, 201, 93, 0.72);
   color: #fff8df;
   background: rgba(244, 201, 93, 0.16);
 }
 
-.screen-fpv-row__view-button:disabled {
+.screen-fpv-row__action .screen-fpv-row__view-button--active {
+  border-color: rgba(244, 201, 93, 0.72);
+  color: #fff8df;
+  background: rgba(244, 201, 93, 0.16);
+}
+
+.screen-fpv-row__action .screen-fpv-row__view-button:disabled {
   border-color: rgba(148, 163, 184, 0.18);
   color: rgba(194, 214, 220, 0.36);
   background: rgba(148, 163, 184, 0.06);
   cursor: not-allowed;
 }
 
-.screen-fpv-row__view-button:disabled:hover {
+.screen-fpv-row__action .screen-fpv-row__view-button:disabled:hover {
   border-color: rgba(148, 163, 184, 0.18);
   color: rgba(194, 214, 220, 0.36);
   background: rgba(148, 163, 184, 0.06);
 }
 
-.screen-fpv-row__view-button span {
+.screen-fpv-row__action .screen-fpv-row__view-button span {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -6111,11 +6179,11 @@ body.virtual-keyboard-open .app-loading-overlay {
   }
 
   .screen-target-readouts {
-    gap: 0.2em;
+    gap: 0.14em;
   }
 
   .screen-target-readout {
-    padding: 0.14em 0.2em;
+    padding: 0.12em 0.18em;
   }
 
   .screen-target-readout strong {
@@ -6123,8 +6191,8 @@ body.virtual-keyboard-open .app-loading-overlay {
   }
 
   .screen-position-card {
-    gap: 0.36em;
-    padding: 0.46em;
+    gap: 0.18em;
+    padding: 0.26em 0.3em;
   }
 
   .screen-position-card__head strong {
@@ -6132,18 +6200,18 @@ body.virtual-keyboard-open .app-loading-overlay {
   }
 
   .screen-position-card__location {
-    grid-template-columns: 4.35em minmax(0, 1fr);
-    gap: 0.32em;
-    padding: 0.26em 0.28em;
+    grid-template-columns: 3.4em minmax(0, 1fr);
+    gap: 0.18em;
+    padding: 0.18em 0.2em;
   }
 
   .screen-position-card__image {
-    height: 3.8em;
+    height: 2.56em;
   }
 
   .screen-position-card__point {
     grid-template-columns: 2.9em minmax(0, 1fr) minmax(0, 1fr);
-    gap: 0.22em;
+    gap: 0.16em;
   }
 
   .screen-position-card__point--clickable {
@@ -6151,12 +6219,23 @@ body.virtual-keyboard-open .app-loading-overlay {
   }
 
   .screen-position-card__point > strong {
-    font-size: 0.64em;
+    font-size: 0.6em;
   }
 
   .screen-position-card__metrics {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 0.22em;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 0.14em;
+  }
+
+  .screen-position-card__readouts {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 0.12em;
+  }
+
+  .screen-whitelist-button {
+    min-width: 0;
+    min-height: 2.12em;
+    font-size: 0.62em;
   }
 
   .screen-fpv-table__head,

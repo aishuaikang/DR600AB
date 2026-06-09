@@ -562,6 +562,10 @@ function App() {
     if (currentKey === lastAppliedSerialRef.current) {
       return;
     }
+    if (!receivePort && sendPort) {
+      setBanner({ kind: "idle", message: t("selectDetectionReceivePort", { ns: "settings" }) });
+      return;
+    }
 
     const timer = window.setTimeout(() => {
       void (async () => {
