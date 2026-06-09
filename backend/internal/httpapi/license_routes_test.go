@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"mime/multipart"
 	"net/http"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -94,6 +95,44 @@ func TestLicenseStatusReturnsCurrentDeviceSNWhenMissing(t *testing.T) {
 	}
 	if body.Valid || body.DeviceSN != deviceSN || body.Code != "license_not_found" {
 		t.Fatalf("body = %#v, want missing license status with device SN", body)
+	}
+}
+
+func TestLicenseStatusLocalizesInvalidMessage(t *testing.T) {
+	deviceSN := "SL67CB3FC848FA0E795P"
+	path := filepath.Join(t.TempDir(), "license.lic")
+	server := newLicenseTestServer(t, path, deviceSN)
+	server.registerLicenseRoutes(server.app.Group("/api/v1"))
+
+	raw, err := server.license.Generate("SLOTHERDEVICE000000000P", 24*time.Hour, "test", time.Now())
+	if err != nil {
+		t.Fatalf("Generate() error = %v", err)
+	}
+	if err := os.WriteFile(path, raw, 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	req, err := http.NewRequest(http.MethodGet, "/api/v1/license/status", nil)
+	if err != nil {
+		t.Fatalf("NewRequest() error = %v", err)
+	}
+	req.Header.Set("X-Locale", "zh-CN")
+	resp, err := server.app.Test(req)
+	if err != nil {
+		t.Fatalf("app.Test() error = %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusOK)
+	}
+	var body model.LicenseInfo
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("Decode() error = %v", err)
+	}
+	if body.Valid || body.Code != "license_sn_mismatch" {
+		t.Fatalf("body = %#v, want license_sn_mismatch status", body)
+	}
+	if body.Message != "License 与当前设备 SN 不匹配" {
+		t.Fatalf("Message = %q, want localized mismatch message", body.Message)
 	}
 }
 

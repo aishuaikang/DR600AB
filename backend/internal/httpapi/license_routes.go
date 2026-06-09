@@ -20,7 +20,14 @@ func (s *Server) handleLicenseStatus(c *fiber.Ctx) error {
 	if s.license == nil {
 		return s.respondError(c, fiber.StatusServiceUnavailable, "license_unavailable", s.translator.T(locale, "errors", "license_unavailable"), nil)
 	}
-	status, _ := s.license.Status()
+	status, err := s.license.Status()
+	if err != nil || status.Code != "" {
+		code := status.Code
+		if code == "" {
+			code = licenseErrorCode(err)
+		}
+		status.Message = s.licenseErrorMessage(locale, code, status)
+	}
 	return c.JSON(status)
 }
 
