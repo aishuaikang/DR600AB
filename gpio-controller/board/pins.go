@@ -16,6 +16,9 @@ var interferenceBands = [][]string{
 
 var interferencePinOrder = []int{2, 3, 1}
 var reservedPinOrder = []int{4, 0, 5}
+var fallbackPinNumbers = []int{2, 3, 1, 4, 0, 5}
+
+var listExternalPins = gpio.ListExternalPins
 
 // PinDefinition 描述板卡对外暴露的一路外部 IO。
 type PinDefinition struct {
@@ -27,8 +30,13 @@ type PinDefinition struct {
 }
 
 // DefaultPins 返回当前系统 /sys/external_gpio 中实际可控制的外部 IO 映射。
+// 当系统目录暂不可读或尚未初始化时，回退到当前板卡的固定外部 IO 映射。
 func DefaultPins() []PinDefinition {
-	return PinsFromNumbers(gpio.ListExternalPins())
+	numbers := listExternalPins()
+	if len(numbers) == 0 {
+		numbers = fallbackPinNumbers
+	}
+	return PinsFromNumbers(numbers)
 }
 
 // PinsFromNumbers 根据外部 IO 序号生成稳定的通道定义。IO2、IO3、IO1 为干扰通道，IO4、IO0、IO5 为预留通道。
