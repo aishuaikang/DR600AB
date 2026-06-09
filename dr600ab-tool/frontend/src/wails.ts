@@ -26,6 +26,7 @@ type AppBridge = {
   GetSSHStatus(): Promise<SSHStatus>;
   ProbeRemote(installDir: string): Promise<RemoteProbe>;
   BrowseRemoteDir(path: string): Promise<RemoteEntry[]>;
+  StopAllServices(installDir: string): Promise<string>;
   SelectFirmwarePackage(): Promise<string>;
   DeployDR600AB(request: DeployRequest): Promise<{ installDir: string; message: string }>;
   ListIntrusions(query: IntrusionQuery): Promise<IntrusionRecord[]>;
@@ -73,6 +74,7 @@ export const api = {
   getSSHStatus: () => bridge().GetSSHStatus(),
   probeRemote: (installDir: string) => bridge().ProbeRemote(installDir),
   browseRemoteDir: (path: string) => bridge().BrowseRemoteDir(path),
+  stopAllServices: (installDir: string) => bridge().StopAllServices(installDir),
   selectFirmwarePackage: () => bridge().SelectFirmwarePackage(),
   deployDR600AB: (request: DeployRequest) => bridge().DeployDR600AB(request),
   listIntrusions: (query: IntrusionQuery) => bridge().ListIntrusions(query),

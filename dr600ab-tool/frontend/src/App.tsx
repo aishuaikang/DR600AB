@@ -8,6 +8,7 @@ import {
   FolderOpen,
   HardDriveUpload,
   Map,
+  Power,
   RefreshCw,
   Server,
   ShieldAlert,
@@ -572,6 +573,20 @@ export function App() {
     }
   };
 
+  const stopAllServices = async () => {
+    setBusy("stop-services");
+    setNotice({ tone: "loading", message: "正在关闭设备端服务" });
+    try {
+      const message = await api.stopAllServices(installDir);
+      setNotice({ tone: "success", message });
+      await runProbe();
+    } catch (error) {
+      setNotice({ tone: "error", message: messageOf(error) });
+    } finally {
+      setBusy("");
+    }
+  };
+
   const loadIntrusions = async () => {
     setBusy("intrusions");
     setDBProgress([]);
@@ -803,6 +818,7 @@ export function App() {
                 }}
                 onOpenDirPicker={openRemoteDirPicker}
                 onProbe={runProbe}
+                onStopAllServices={stopAllServices}
               />
             ) : null}
             {page === "intrusions" ? (
@@ -921,6 +937,7 @@ function DeployPage({
   onInstallDirChange,
   onOpenDirPicker,
   onProbe,
+  onStopAllServices,
 }: {
   busy: string;
   connected: boolean;
@@ -935,6 +952,7 @@ function DeployPage({
   onInstallDirChange: (value: string) => void;
   onOpenDirPicker: () => void;
   onProbe: () => void;
+  onStopAllServices: () => void;
 }) {
   return (
     <div className="page-grid two">
@@ -968,6 +986,10 @@ function DeployPage({
           <button type="button" disabled={!connected || busy === "probe"} onClick={() => void onProbe()}>
             <RefreshCw size={16} />
             探测环境
+          </button>
+          <button type="button" disabled={!connected || busy === "stop-services"} onClick={() => void onStopAllServices()}>
+            <Power size={16} />
+            {busy === "stop-services" ? "关闭中" : "一键关闭所有服务"}
           </button>
           <button className="primary" type="button" disabled={!connected || !firmwarePath || busy === "deploy"} onClick={() => void onDeploy()}>
             <UploadCloud size={16} />
