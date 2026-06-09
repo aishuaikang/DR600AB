@@ -8,12 +8,12 @@ export const debugPageItems: NavItem[] = [
   { id: "parsed-records", icon: MESSAGE_PAGE_CONFIG["parsed-records"].icon, labelKey: MESSAGE_PAGE_CONFIG["parsed-records"].navLabelKey },
   { id: "gps-records", icon: Satellite, labelKey: "gpsRecords" },
   { id: "interference", icon: Zap, labelKey: "interference" },
-  { id: "network-settings", icon: Network, labelKey: "networkSettings" },
   { id: "developer-settings", icon: Settings2, labelKey: "developerSettings" },
 ];
 
 export const userPageItems: NavItem[] = [
   { id: "settings", icon: Settings2, labelKey: "settings" },
+  { id: "network-settings", icon: Network, labelKey: "networkSettings" },
   { id: "whitelist", icon: ShieldCheck, labelKey: "whitelist" },
   { id: "intrusions", icon: ListTree, labelKey: "intrusions" },
   { id: "fpv-records", icon: FileVideo, labelKey: "fpvRecords" },

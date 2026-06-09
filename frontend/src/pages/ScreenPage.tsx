@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, ReactNode } from "react";
 import type { TFunction } from "i18next";
 import type L from "leaflet";
-import { Activity, BellRing, ChevronDown, ChevronLeft, ChevronRight, Cpu, Eye, Globe2, Inbox, Loader2, MapPin, Orbit, QrCode, Radar, Radio, RadioTower, RefreshCw, Route, SatelliteDish, ScanSearch, Settings2, Shield, ShieldCheck, ShieldMinus, ShieldPlus, Square, Thermometer, TimerReset, Volume2, X, Zap } from "lucide-react";
+import { Activity, BellRing, ChevronDown, ChevronLeft, ChevronRight, Cpu, Eye, Globe2, Inbox, Loader2, MapPin, Orbit, QrCode, Radar, Radio, RadioTower, RefreshCw, Route, SatelliteDish, ScanSearch, Settings2, Shield, ShieldCheck, ShieldMinus, ShieldPlus, Square, Thermometer, TimerReset, Volume2, VolumeX, X, Zap } from "lucide-react";
 import * as QRCode from "qrcode";
 
 import {
@@ -51,6 +51,7 @@ import { resolveDisplayModel } from "../utils/models";
 import { extractErrorMessage } from "../utils/session";
 import {
   isSerialWhitelisted,
+  isUncrackedDJIDroneTarget,
   removeWhitelistSerial,
   resolveActiveWarningZone,
   resolveScreenAlarmSettings,
@@ -772,6 +773,20 @@ function mergeScreenPosition(
   return sortScreenPositions([...items, target]).slice(0, limit);
 }
 
+function removeScreenPosition(items: ScreenPositionTarget[], target: ScreenPositionTarget) {
+  const correlationId = target.correlationId?.trim();
+  return items.filter((item) => {
+    if (item.id === target.id) {
+      return false;
+    }
+    return !(
+      correlationId &&
+      item.correlationId?.trim() === correlationId &&
+      isUncrackedDJIDroneTarget(item)
+    );
+  });
+}
+
 function getScreenLocale() {
   return i18n.language.startsWith("zh") ? "zh-CN" : "en-US";
 }
@@ -789,7 +804,12 @@ function ScreenHeader({
   now,
   locale,
   localeOptions,
+  soundActive,
+  alarmSaving,
+  soundBlocked,
   onLocaleChange,
+  onToggleSoundAlarm,
+  onEnableSound,
   onEnterAdmin,
 }: {
   appTitle: string;
@@ -797,7 +817,12 @@ function ScreenHeader({
   now: Date;
   locale: string;
   localeOptions: string[];
+  soundActive: boolean;
+  alarmSaving: boolean;
+  soundBlocked: boolean;
   onLocaleChange: (locale: string) => void;
+  onToggleSoundAlarm: (value: boolean) => void;
+  onEnableSound: () => void;
   onEnterAdmin: () => void;
 }) {
   const [languageOpen, setLanguageOpen] = useState(false);
@@ -817,6 +842,14 @@ function ScreenHeader({
 
       <div className="screen-header__right">
         <ScreenMapLegend t={t} />
+        <ScreenAlarmSoundToggle
+          t={t}
+          active={soundActive}
+          saving={alarmSaving}
+          soundBlocked={soundBlocked}
+          onToggle={onToggleSoundAlarm}
+          onEnableSound={onEnableSound}
+        />
         <div
           className={cx("screen-language-switch", languageOpen && "screen-language-switch--open")}
           onBlur={(event) => {
@@ -1233,6 +1266,7 @@ function PositionTargetCard({
   const timeToneTitle = getTargetTimeToneTitle(timeTone, t);
   const imageUrl = getPositionDroneImageUrl(target.model);
   const pendingEncrypted = target.source === "did_encrypted" && target.model === "DJI-Drone" && !target.cracked;
+  const allowWhitelist = !isUncrackedDJIDroneTarget(target);
   const remainingSeconds = targetDisappearRemainingSeconds(target.lastSeen, now);
   const showCountdown = shouldShowDisappearCountdown(timeTone);
 
@@ -1270,19 +1304,21 @@ function PositionTargetCard({
           >
             {formatTargetTime(target.lastSeen)}
           </button>
-          <button
-            className={cx("screen-whitelist-button", whitelisted && "screen-whitelist-button--active")}
-            type="button"
-            disabled={whitelistBusy || !target.serial.trim()}
-            title={whitelisted ? t("removeFromWhitelist", { ns: "screen" }) : t("addToWhitelist", { ns: "screen" })}
-            onClick={(event) => {
-              event.stopPropagation();
-              onToggleWhitelist(target);
-            }}
-          >
-            {whitelisted ? <ShieldMinus size={12} aria-hidden="true" /> : <ShieldPlus size={12} aria-hidden="true" />}
-            <span>{whitelisted ? t("removeFromWhitelistShort", { ns: "screen" }) : t("addToWhitelist", { ns: "screen" })}</span>
-          </button>
+          {allowWhitelist ? (
+            <button
+              className={cx("screen-whitelist-button", whitelisted && "screen-whitelist-button--active")}
+              type="button"
+              disabled={whitelistBusy || !target.serial.trim()}
+              title={whitelisted ? t("removeFromWhitelist", { ns: "screen" }) : t("addToWhitelist", { ns: "screen" })}
+              onClick={(event) => {
+                event.stopPropagation();
+                onToggleWhitelist(target);
+              }}
+            >
+              {whitelisted ? <ShieldMinus size={12} aria-hidden="true" /> : <ShieldPlus size={12} aria-hidden="true" />}
+              <span>{whitelisted ? t("removeFromWhitelistShort", { ns: "screen" }) : t("addToWhitelist", { ns: "screen" })}</span>
+            </button>
+          ) : null}
         </span>
       </div>
 
@@ -2590,7 +2626,6 @@ const screenAlarmOptionSpecs: Array<{
   { key: "detection", labelKey: "screenAlarmDetection", Icon: BellRing },
   { key: "position", labelKey: "screenAlarmPosition", Icon: ShieldCheck },
   { key: "fpv", labelKey: "screenAlarmFpv", Icon: Radio },
-  { key: "sound", labelKey: "screenAlarmSound", Icon: Volume2 },
 ];
 
 function ScreenAlarmSettingsPanel({
@@ -2598,17 +2633,13 @@ function ScreenAlarmSettingsPanel({
   settings,
   saving,
   message,
-  soundBlocked,
   onToggle,
-  onEnableSound,
 }: {
   t: TFunction;
   settings: ScreenAlarmSettings;
   saving: boolean;
   message: ScreenAlarmSettingsMessage;
-  soundBlocked: boolean;
   onToggle: (key: ScreenAlarmSettingKey, value: boolean) => void;
-  onEnableSound: () => void;
 }) {
   return (
     <div className="screen-alarm-settings-panel">
@@ -2634,22 +2665,56 @@ function ScreenAlarmSettingsPanel({
           );
         })}
       </div>
-      {soundBlocked ? (
-        <button
-          className="screen-alarm-settings-panel__sound"
-          type="button"
-          onClick={onEnableSound}
-        >
-          <Volume2 size={13} aria-hidden="true" />
-          {t("enableSoundAlarm", { ns: "screen" })}
-        </button>
-      ) : null}
       {message.text ? (
         <p className={cx("screen-alarm-settings-panel__message", message.kind === "error" && "screen-alarm-settings-panel__message--error")}>
           {message.text}
         </p>
       ) : null}
     </div>
+  );
+}
+
+function ScreenAlarmSoundToggle({
+  t,
+  active,
+  saving,
+  soundBlocked,
+  onToggle,
+  onEnableSound,
+}: {
+  t: TFunction;
+  active: boolean;
+  saving: boolean;
+  soundBlocked: boolean;
+  onToggle: (value: boolean) => void;
+  onEnableSound: () => void;
+}) {
+  const Icon = active && !soundBlocked ? Volume2 : VolumeX;
+  const label = t("screenAlarmSound", { ns: "settings" });
+  const actionLabel = soundBlocked ? t("enableSoundAlarm", { ns: "screen" }) : label;
+
+  return (
+    <button
+      className={cx(
+        "screen-alarm-sound-toggle",
+        active && !soundBlocked && "screen-alarm-sound-toggle--active",
+        soundBlocked && "screen-alarm-sound-toggle--blocked",
+      )}
+      type="button"
+      aria-label={actionLabel}
+      aria-pressed={active}
+      title={actionLabel}
+      disabled={saving}
+      onClick={() => {
+        if (soundBlocked) {
+          onEnableSound();
+          return;
+        }
+        onToggle(!active);
+      }}
+    >
+      <Icon size={18} aria-hidden="true" />
+    </button>
   );
 }
 
@@ -2665,7 +2730,6 @@ function RightList({
   alarmSettings,
   alarmSaving,
   alarmMessage,
-  soundBlocked,
   now,
   collapsed,
   activeVideoTargetId,
@@ -2674,7 +2738,6 @@ function RightList({
   onOpenFpvVideo,
   onToggleWhitelist,
   onToggleAlarmSetting,
-  onEnableSound,
   onOpenNavigationQRCode,
   onToggleCollapsed,
 }: {
@@ -2689,7 +2752,6 @@ function RightList({
   alarmSettings: ScreenAlarmSettings;
   alarmSaving: boolean;
   alarmMessage: ScreenAlarmSettingsMessage;
-  soundBlocked: boolean;
   now: Date;
   collapsed: boolean;
   activeVideoTargetId: string;
@@ -2698,7 +2760,6 @@ function RightList({
   onOpenFpvVideo: (target: ScreenDetectionTarget) => void;
   onToggleWhitelist: (target: ScreenPositionTarget) => void;
   onToggleAlarmSetting: (key: ScreenAlarmSettingKey, value: boolean) => void;
-  onEnableSound: () => void;
   onOpenNavigationQRCode: (label: string, point: ScreenPositionPoint) => void;
   onToggleCollapsed: () => void;
 }) {
@@ -2787,9 +2848,7 @@ function RightList({
             settings={alarmSettings}
             saving={alarmSaving}
             message={alarmMessage}
-            soundBlocked={soundBlocked}
             onToggle={onToggleAlarmSetting}
-            onEnableSound={onEnableSound}
           />
         ) : null}
 
@@ -2841,6 +2900,7 @@ function RightList({
         <div className="screen-tabs" role="tablist">
           {availableTabs.map((item) => {
             const TabIcon = item === "detection" ? Radar : item === "position" ? MapPin : Radio;
+            const itemAlarmCount = alarmCounts.find((count) => count.kind === item)?.count ?? 0;
             return (
               <button
                 key={item}
@@ -2852,11 +2912,8 @@ function RightList({
               >
                 <TabIcon className="screen-tab__icon" size={13} aria-hidden="true" />
                 <span>{t(`tabs.${item}`, { ns: "screen" })}</span>
-                <strong>
+                <strong className={cx(itemAlarmCount > 0 && "screen-tab__count--alarm")}>
                   <span>{getTabCount(item)}</span>
-                  {(alarmCounts.find((count) => count.kind === item)?.count ?? 0) > 0 ? (
-                    <em>{alarmCounts.find((count) => count.kind === item)?.count}</em>
-                  ) : null}
                 </strong>
               </button>
             );
@@ -3056,6 +3113,9 @@ export function ScreenPage({
   }, []);
 
   const handleToggleWhitelist = useCallback(async (target: ScreenPositionTarget) => {
+    if (isUncrackedDJIDroneTarget(target)) {
+      return;
+    }
     const serial = target.serial.trim();
     if (!serial) {
       return;
@@ -3212,6 +3272,13 @@ export function ScreenPage({
         }
         const payload = event.payload;
         setPositions((items) => mergeScreenPosition(items, payload, screenPositionLimit));
+      },
+      onPositionRemoved: (event) => {
+        if (!event.payload) {
+          return;
+        }
+        const payload = event.payload;
+        setPositions((items) => removeScreenPosition(items, payload));
       },
       onStrikeUpdated: (event) => {
         if (!event.payload) {
@@ -3547,7 +3614,12 @@ export function ScreenPage({
         now={now}
         locale={locale}
         localeOptions={localeOptions}
+        soundActive={alarmSettings.sound}
+        alarmSaving={alarmSaving}
+        soundBlocked={alarmSound.blocked}
         onLocaleChange={onLocaleChange}
+        onToggleSoundAlarm={(value) => void handleToggleAlarmSetting("sound", value)}
+        onEnableSound={() => void alarmSound.enable()}
         onEnterAdmin={enterAdmin}
       />
 
@@ -3583,7 +3655,6 @@ export function ScreenPage({
         alarmSettings={alarmSettings}
         alarmSaving={alarmSaving}
         alarmMessage={alarmMessage}
-        soundBlocked={alarmSound.blocked}
         now={now}
         collapsed={rightCollapsed}
         activeVideoTargetId={fpvVideoTarget?.id || ""}
@@ -3592,7 +3663,6 @@ export function ScreenPage({
         onOpenFpvVideo={handleOpenFpvVideo}
         onToggleWhitelist={handleToggleWhitelist}
         onToggleAlarmSetting={(key, value) => void handleToggleAlarmSetting(key, value)}
-        onEnableSound={() => void alarmSound.enable()}
         onOpenNavigationQRCode={handleOpenNavigationQRCode}
         onToggleCollapsed={() => setRightCollapsed((value) => !value)}
       />

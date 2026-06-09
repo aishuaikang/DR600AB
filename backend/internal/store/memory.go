@@ -17,11 +17,12 @@ import (
 )
 
 const (
-	screenDetectionTTL       = 60 * time.Second
-	screenPositionTTL        = 60 * time.Second
-	screenDetectionEventType = "screen.detection.updated"
-	screenPositionEventType  = "screen.position.updated"
-	uncrackedDJIDroneModel   = "DJI-Drone"
+	screenDetectionTTL        = 60 * time.Second
+	screenPositionTTL         = 60 * time.Second
+	screenDetectionEventType  = "screen.detection.updated"
+	screenPositionEventType   = "screen.position.updated"
+	screenPositionRemovedType = "screen.position.removed"
+	uncrackedDJIDroneModel    = "DJI-Drone"
 )
 
 // MemoryStore 在内存中保存有上限的记录，并广播运行时事件。
@@ -117,6 +118,49 @@ func (s *MemoryStore) AddScreenPosition(target model.ScreenPositionTarget) (mode
 		s.Publish(model.Event{Type: screenPositionEventType, Time: merged.LastSeen, Payload: merged})
 	}
 	return merged, updated
+}
+
+// RemoveUncrackedDIDScreenPositionByCorrelationID 删除 DID 加密解密成功后对应的临时定位目标。
+func (s *MemoryStore) RemoveUncrackedDIDScreenPositionByCorrelationID(correlationID string) (model.ScreenPositionTarget, bool) {
+	correlationID = stringsTrim(correlationID)
+	if correlationID == "" {
+		return model.ScreenPositionTarget{}, false
+	}
+
+	s.mu.Lock()
+	removed, ok := s.removeUncrackedDIDScreenPositionByCorrelationIDLocked(correlationID)
+	deviceLocation := s.currentDeviceLocationLocked()
+	s.mu.Unlock()
+	if !ok {
+		return model.ScreenPositionTarget{}, false
+	}
+
+	removed = withPositionRelations(removed, deviceLocation)
+	s.Publish(model.Event{Type: screenPositionRemovedType, Time: removed.LastSeen, Payload: removed})
+	return removed, true
+}
+
+// HasCrackedScreenPositionByCorrelationID 判断指定关联 ID 是否已有解密成功的定位目标。
+func (s *MemoryStore) HasCrackedScreenPositionByCorrelationID(correlationID string) bool {
+	correlationID = stringsTrim(correlationID)
+	if correlationID == "" {
+		return false
+	}
+
+	s.mu.Lock()
+	s.pruneExpiredScreenPositionsLocked(time.Now())
+	found := false
+	for _, target := range s.positions {
+		if stringsTrim(target.CorrelationID) == correlationID && target.Cracked {
+			found = true
+			break
+		}
+	}
+	archiver := s.archiver
+	s.mu.Unlock()
+
+	s.archiveExpiredScreenTargets(archiver)
+	return found
 }
 
 // AddGPS 追加 GPS 记录，并发布 GPS 事件。
@@ -406,9 +450,6 @@ func (s *MemoryStore) addScreenPositionLocked(target model.ScreenPositionTarget)
 	target.Model = normalizeScreenTargetModel(target.Model)
 	target.Source = stringsTrim(target.Source)
 	target.Sources = appendScreenTargetSources(target.Sources, target.Source)
-	if isUncrackedDJIDroneTarget(target) {
-		return model.ScreenPositionTarget{}, false
-	}
 	if target.Serial == "" || target.Model == "" {
 		return model.ScreenPositionTarget{}, false
 	}
@@ -446,9 +487,13 @@ func (s *MemoryStore) addScreenPositionLocked(target model.ScreenPositionTarget)
 	}
 
 	if len(matches) == 0 {
-		s.positionSeq++
-		target.ID = fmt.Sprintf("screen-position-%d-%d", target.LastSeen.UnixNano(), s.positionSeq)
-		target.HitCount = 1
+		if target.ID == "" {
+			s.positionSeq++
+			target.ID = fmt.Sprintf("screen-position-%d-%d", target.LastSeen.UnixNano(), s.positionSeq)
+		}
+		if target.HitCount <= 0 {
+			target.HitCount = 1
+		}
 		s.positions = appendBounded(s.positions, target, s.maxDetections)
 		return cloneScreenPositionTarget(target), true
 	}
@@ -526,6 +571,20 @@ func (s *MemoryStore) addScreenPositionLocked(target model.ScreenPositionTarget)
 	return cloneScreenPositionTarget(merged), true
 }
 
+func (s *MemoryStore) removeUncrackedDIDScreenPositionByCorrelationIDLocked(correlationID string) (model.ScreenPositionTarget, bool) {
+	for index, target := range s.positions {
+		if stringsTrim(target.CorrelationID) != correlationID || !isUncrackedDIDScreenPosition(target) {
+			continue
+		}
+		removed := cloneScreenPositionTarget(target)
+		copy(s.positions[index:], s.positions[index+1:])
+		clear(s.positions[len(s.positions)-1:])
+		s.positions = s.positions[:len(s.positions)-1]
+		return removed, true
+	}
+	return model.ScreenPositionTarget{}, false
+}
+
 func appendScreenPositionTrajectory(
 	trajectory []model.ScreenPositionTrackPoint,
 	point *model.ScreenPositionPoint,
@@ -580,14 +639,19 @@ func (s *MemoryStore) pruneExpiredScreenPositionsLocked(now time.Time) {
 }
 
 func screenPositionTargetMatches(existing, incoming model.ScreenPositionTarget) bool {
+	if isUncrackedDIDScreenPosition(existing) != isUncrackedDIDScreenPosition(incoming) {
+		return false
+	}
 	return protocolmerge.PositionMatches(
 		screenPositionTargetToProtocol(existing),
 		screenPositionTargetToProtocol(incoming),
 	)
 }
 
-func isUncrackedDJIDroneTarget(target model.ScreenPositionTarget) bool {
-	return !target.Cracked && target.Model == uncrackedDJIDroneModel
+func isUncrackedDIDScreenPosition(target model.ScreenPositionTarget) bool {
+	return !target.Cracked &&
+		strings.HasPrefix(strings.ToLower(stringsTrim(target.CorrelationID)), "did_encrypted:") &&
+		normalizeScreenTargetModel(target.Model) == uncrackedDJIDroneModel
 }
 
 func normalizeScreenTargetModel(modelName string) string {

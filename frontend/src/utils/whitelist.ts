@@ -23,6 +23,14 @@ export function normalizeWhitelistSerial(serial: string | undefined | null) {
   return (serial ?? "").trim().toLowerCase();
 }
 
+export function isUncrackedDJIDroneModel(model: string | undefined | null) {
+  return (model ?? "").trim().toLowerCase() === "dji-drone";
+}
+
+export function isUncrackedDJIDroneTarget(target: Pick<ScreenPositionTarget, "model" | "cracked"> | null | undefined) {
+  return Boolean(target && !target.cracked && isUncrackedDJIDroneModel(target.model));
+}
+
 export function resolveScreenAlarmSettings(settings?: Partial<ScreenAlarmSettings>): ScreenAlarmSettings {
   return {
     ...defaultScreenAlarmSettings,
@@ -127,6 +135,9 @@ export function upsertWhitelistItem(
   if (!key) {
     return whitelist ?? [];
   }
+  if (isUncrackedDJIDroneModel(item.model)) {
+    return whitelist ?? [];
+  }
 
   const nextItem: WhitelistItem = {
     serial,
@@ -166,6 +177,9 @@ export function updateWhitelistItem(
   const serial = item.serial.trim();
   const nextKey = normalizeWhitelistSerial(serial);
   if (!currentKey || !nextKey) {
+    return whitelist ?? [];
+  }
+  if (isUncrackedDJIDroneModel(item.model)) {
     return whitelist ?? [];
   }
 

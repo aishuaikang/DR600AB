@@ -1,5 +1,7 @@
 import type {
   ApiErrorPayload,
+  CellularConnectRequest,
+  CellularConnectResponse,
   ChannelsResponse,
   CompassRecord,
   CompassSessionRequest,
@@ -557,6 +559,18 @@ export function connectWiFi(
   }, locale);
 }
 
+export function connectCellular(
+  payload: CellularConnectRequest,
+  locale: string,
+  developerToken: string,
+): Promise<CellularConnectResponse> {
+  return requestJson<CellularConnectResponse>("/network/cellular/connect", {
+    method: "POST",
+    headers: developerHeaders(developerToken),
+    body: JSON.stringify(payload),
+  }, locale);
+}
+
 export function createDeveloperSessionRequest(
   payload: DeveloperLoginRequest,
   locale: string,
@@ -718,6 +732,13 @@ export function openScreenStream(handlers: ScreenStreamHandlers): () => void {
     const event = parseStreamEvent<ScreenPositionTarget>((message as MessageEvent<string>).data);
     if (event) {
       handlers.onPositionUpdated?.(event);
+    }
+  });
+
+  source.addEventListener("screen.position.removed", (message) => {
+    const event = parseStreamEvent<ScreenPositionTarget>((message as MessageEvent<string>).data);
+    if (event) {
+      handlers.onPositionRemoved?.(event);
     }
   });
 

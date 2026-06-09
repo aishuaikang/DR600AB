@@ -317,6 +317,92 @@ func TestStoreArchivesZeroHomePointForDisplay(t *testing.T) {
 	}
 }
 
+func TestStoreSkipsUncrackedDJIDronePosition(t *testing.T) {
+	store := newTestStore(t)
+	base := time.Now().UTC()
+
+	if err := store.ArchivePosition(model.ScreenPositionTarget{
+		ID:        "encrypted-dji-drone",
+		Serial:    "86ca8046",
+		Model:     "DJI-Drone",
+		Source:    "did_encrypted",
+		FirstSeen: base,
+		LastSeen:  base.Add(10 * time.Second),
+		HitCount:  2,
+		Cracked:   false,
+	}); err != nil {
+		t.Fatalf("ArchivePosition() uncracked error = %v", err)
+	}
+	if err := store.ArchivePosition(model.ScreenPositionTarget{
+		ID:        "encrypted-dji-drone",
+		Serial:    "real-sn",
+		Model:     "Mini 4 Pro",
+		Source:    "did_encrypted",
+		FirstSeen: base,
+		LastSeen:  base.Add(20 * time.Second),
+		HitCount:  3,
+		Cracked:   true,
+	}); err != nil {
+		t.Fatalf("ArchivePosition() decoded error = %v", err)
+	}
+
+	items, err := store.List(QueryOptions{Limit: 10, TargetType: model.IntrusionTargetTypePosition})
+	if err != nil {
+		t.Fatalf("List() error = %v", err)
+	}
+	if len(items) != 1 || items[0].Serial != "real-sn" {
+		t.Fatalf("records = %#v, want decoded target only", items)
+	}
+}
+
+func TestStoreListHidesExistingUncrackedDJIDroneRecords(t *testing.T) {
+	store := newTestStore(t)
+	base := time.Now().UTC()
+
+	if err := store.insert(model.IntrusionRecord{
+		ID:         "old-uncracked",
+		TargetID:   "old-uncracked-target",
+		TargetType: model.IntrusionTargetTypePosition,
+		Model:      "DJI-Drone",
+		Serial:     "447e5681",
+		FirstSeen:  base,
+		LastSeen:   base,
+		ArchivedAt: base,
+		Cracked:    false,
+	}); err != nil {
+		t.Fatalf("insert uncracked record: %v", err)
+	}
+	if err := store.insert(model.IntrusionRecord{
+		ID:         "decoded",
+		TargetID:   "decoded-target",
+		TargetType: model.IntrusionTargetTypePosition,
+		Model:      "Mini 4 Pro",
+		Serial:     "real-sn",
+		FirstSeen:  base,
+		LastSeen:   base.Add(time.Second),
+		ArchivedAt: base,
+		Cracked:    true,
+	}); err != nil {
+		t.Fatalf("insert decoded record: %v", err)
+	}
+
+	items, err := store.List(QueryOptions{Limit: 10})
+	if err != nil {
+		t.Fatalf("List() error = %v", err)
+	}
+	if len(items) != 1 || items[0].ID != "decoded" {
+		t.Fatalf("records = %#v, want decoded record only", items)
+	}
+
+	positions, err := store.List(QueryOptions{Limit: 10, TargetType: model.IntrusionTargetTypePosition})
+	if err != nil {
+		t.Fatalf("List(position) error = %v", err)
+	}
+	if len(positions) != 1 || positions[0].ID != "decoded" {
+		t.Fatalf("position records = %#v, want decoded record only", positions)
+	}
+}
+
 func TestStoreDeletesRecordsByID(t *testing.T) {
 	store := newTestStore(t)
 	base := time.Now().UTC()

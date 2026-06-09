@@ -85,11 +85,12 @@ func (d *mqttO3PlusO4Decoder) ParseO3PlusO4PacketMQTT(
 		return model.ScreenPositionTarget{}, false
 	}
 	out := d.didDecoder().Decode(ctx, packet, deviceSN, receivedAt)
-	if out.Err != nil || !out.HasTarget {
+	if out.Err != nil || !out.HasTarget || !out.Target.Cracked {
 		return model.ScreenPositionTarget{}, false
 	}
 	target := screenPositionFromProtocolTarget(out.Target)
-	return target, screenPositionHasCoordinate(target)
+	clearUncrackedDIDFallbackCoordinates(&target)
+	return target, true
 }
 
 func (d *mqttO3PlusO4Decoder) didDecoder() *diddecrypt.Decoder {
@@ -299,6 +300,19 @@ func screenPositionFromProtocolTarget(target protocolmodel.PositionTarget) model
 			Cracked:    target.Cracked,
 		},
 	}
+}
+
+func clearUncrackedDIDFallbackCoordinates(target *model.ScreenPositionTarget) {
+	if target == nil || target.Cracked || target.Model != diddecrypt.FallbackModel {
+		return
+	}
+	target.Drone = nil
+	target.Pilot = nil
+	target.Home = nil
+	target.DroneTrajectory = nil
+	target.PilotTrajectory = nil
+	target.TrajectorySpeed = nil
+	target.TrajectoryHeight = nil
 }
 
 func screenPointFromProtocolPoint(point *protocolmodel.Point) *model.ScreenPositionPoint {

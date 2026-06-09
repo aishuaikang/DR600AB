@@ -16,6 +16,7 @@
   "clear": "Clear",
   "close": "Close",
   "notConfigured": "Not configured",
+  "optional": "Optional",
   "empty": "No data",
   "unexpectedError": "Unexpected error",
   "requestFailed": "Request failed",

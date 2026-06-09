@@ -6,7 +6,7 @@ import { Panel, PanelBody } from "../components/Panel";
 import { SectionHeader } from "../components/SectionHeader";
 import type { UserSettings } from "../types";
 import { extractErrorMessage } from "../utils/session";
-import { removeWhitelistSerial, updateWhitelistItem, upsertWhitelistItem } from "../utils/whitelist";
+import { isUncrackedDJIDroneModel, removeWhitelistSerial, updateWhitelistItem, upsertWhitelistItem } from "../utils/whitelist";
 
 const whitelistPageSize = 50;
 
@@ -64,6 +64,10 @@ export function WhitelistPage({
       setMessage({ kind: "error", text: t("whitelistSerialRequired", { ns: "settings" }) });
       return;
     }
+    if (isUncrackedDJIDroneModel(modelDraft)) {
+      setMessage({ kind: "error", text: t("whitelistDJIDroneForbidden", { ns: "settings" }) });
+      return;
+    }
     setSaving(true);
     setMessage({ kind: "idle", text: "" });
     try {
@@ -102,6 +106,10 @@ export function WhitelistPage({
     const nextSerial = editSerialDraft.trim();
     if (!nextSerial) {
       setMessage({ kind: "error", text: t("whitelistSerialRequired", { ns: "settings" }) });
+      return;
+    }
+    if (isUncrackedDJIDroneModel(editModelDraft)) {
+      setMessage({ kind: "error", text: t("whitelistDJIDroneForbidden", { ns: "settings" }) });
       return;
     }
     setSaving(true);

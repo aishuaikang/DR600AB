@@ -230,6 +230,9 @@ func (s *Store) ArchivePosition(target model.ScreenPositionTarget) error {
 	if s == nil || s.db == nil || strings.TrimSpace(target.ID) == "" {
 		return nil
 	}
+	if model.IsUncrackedDJIDronePosition(target) {
+		return nil
+	}
 	deviceLocation := s.currentDeviceLocation()
 	relations := protocolmerge.PositionRelations(
 		deviceLocationToProtocolPoint(deviceLocation),
@@ -341,10 +344,15 @@ func (s *Store) List(options QueryOptions) ([]model.IntrusionRecord, error) {
 		pilot_distance_m, drone_distance_m, drone_direction_deg, device_direction_deg,
 		height, altitude, speed, last_record_json, archived_at
 		FROM intrusion_records`
+	conditions := []string{
+		`NOT (target_type = ? AND cracked = 0 AND lower(trim(model)) = ?)`,
+	}
+	args = append(args, string(model.IntrusionTargetTypePosition), "dji-drone")
 	if options.TargetType != "" {
-		query += ` WHERE target_type = ?`
+		conditions = append(conditions, `target_type = ?`)
 		args = append(args, string(options.TargetType))
 	}
+	query += ` WHERE ` + strings.Join(conditions, ` AND `)
 	query += ` ORDER BY last_seen DESC, archived_at DESC LIMIT ? OFFSET ?`
 	args = append(args, limit, offset)
 

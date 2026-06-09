@@ -6,8 +6,10 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"os"
 	"os/exec"
 	"runtime"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -33,6 +35,10 @@ var (
 	ErrInvalidConfig = errors.New("invalid network configuration")
 	// ErrInvalidWiFiConfig 表示无线网络配置不合法。
 	ErrInvalidWiFiConfig = errors.New("invalid wifi configuration")
+	// ErrCellularUnavailable 表示当前系统没有可用移动网络模块。
+	ErrCellularUnavailable = errors.New("cellular modem unavailable")
+	// ErrInvalidCellularConfig 表示移动网络配置不合法。
+	ErrInvalidCellularConfig = errors.New("invalid cellular configuration")
 )
 
 // CommandRunner 执行受控系统命令，便于测试替换。
@@ -72,7 +78,7 @@ func NewService(runner CommandRunner, settingsStore SettingsStore) *Service {
 	}
 }
 
-// ListInterfaces 返回 NetworkManager 管理到的设备和当前地址信息。
+// ListInterfaces 返回系统网络接口状态，并合并 NetworkManager、内核网卡和 ModemManager 信息。
 func (s *Service) ListInterfaces(ctx context.Context) ([]model.NetworkInterface, error) {
 	if err := s.checkBackend(ctx); err != nil {
 		return nil, err
@@ -99,6 +105,11 @@ func (s *Service) ListInterfaces(ctx context.Context) ([]model.NetworkInterface,
 
 	interfaces := parseDeviceStatus(deviceRows)
 	applyDeviceDetails(interfaces, detailRows)
+	if err := applyKernelInterfaces(interfaces); err != nil {
+		return nil, err
+	}
+	modems, _ := s.listCellularModems(ctx)
+	applyCellularModems(interfaces, modems)
 
 	result := make([]model.NetworkInterface, 0, len(interfaces))
 	for _, item := range interfaces {
@@ -116,9 +127,11 @@ func (s *Service) ListInterfaces(ctx context.Context) ([]model.NetworkInterface,
 		if item.IPv4Method == "" {
 			item.IPv4Method = "unknown"
 		}
-		item.Managed = item.ConnectionName != "" && item.ConnectionName != "--"
+		item.Managed = item.ConnectionName != "" && item.ConnectionName != "--" && !item.ReadOnly
+		item.Capabilities = interfaceCapabilities(item)
 		result = append(result, item)
 	}
+	sortNetworkInterfaces(result)
 
 	return result, nil
 }
@@ -345,6 +358,90 @@ func (s *Service) ConnectWiFi(ctx context.Context, req model.WiFiConnectRequest)
 	return nil
 }
 
+// ConnectCellular 创建或更新 4G/移动网络连接并尝试拨号。
+func (s *Service) ConnectCellular(ctx context.Context, req model.CellularConnectRequest) ([]model.NetworkInterface, error) {
+	if err := s.checkBackend(ctx); err != nil {
+		return nil, err
+	}
+	if err := validateCellularRequest(req); err != nil {
+		return nil, err
+	}
+
+	modems, err := s.listCellularModems(ctx)
+	if err != nil {
+		return nil, ErrCellularUnavailable
+	}
+	modem, ok := selectCellularModem(modems, req)
+	if !ok || strings.TrimSpace(modem.PrimaryPort) == "" {
+		return nil, ErrCellularUnavailable
+	}
+
+	connectionName := strings.TrimSpace(req.ConnectionName)
+	if connectionName == "" {
+		connectionName = defaultCellularConnectionName(modem)
+	}
+	if err := s.configureCellularConnection(ctx, modem, req, connectionName); err != nil {
+		return nil, err
+	}
+
+	if req.RouteMetric != nil {
+		if err := s.saveNetworkPriority(model.NetworkInterface{
+			Name:           modem.PrimaryPort,
+			ConnectionName: connectionName,
+		}, *req.RouteMetric); err != nil {
+			return nil, err
+		}
+	}
+	if _, err := s.nmcli(ctx, "connection", "up", connectionName); err != nil {
+		return nil, err
+	}
+	return s.ListInterfaces(ctx)
+}
+
+func (s *Service) configureCellularConnection(ctx context.Context, modem model.CellularModem, req model.CellularConnectRequest, connectionName string) error {
+	if connectionType, ok := s.connectionType(ctx, connectionName); ok {
+		if connectionType != "gsm" {
+			return ErrInvalidCellularConfig
+		}
+		args := []string{
+			"connection", "modify", connectionName,
+			"connection.interface-name", modem.PrimaryPort,
+			"gsm.apn", strings.TrimSpace(req.APN),
+			"gsm.username", strings.TrimSpace(req.Username),
+			"gsm.password", strings.TrimSpace(req.Password),
+			"ipv4.method", "auto",
+			"ipv6.method", "auto",
+		}
+		args = appendRouteMetricArgs(args, req.RouteMetric)
+		if _, err := s.nmcli(ctx, args...); err != nil {
+			return err
+		}
+	} else {
+		args := []string{
+			"connection", "add",
+			"type", "gsm",
+			"ifname", modem.PrimaryPort,
+			"con-name", connectionName,
+			"apn", strings.TrimSpace(req.APN),
+		}
+		if _, err := s.nmcli(ctx, args...); err != nil {
+			return err
+		}
+		modArgs := []string{
+			"connection", "modify", connectionName,
+			"gsm.username", strings.TrimSpace(req.Username),
+			"gsm.password", strings.TrimSpace(req.Password),
+			"ipv4.method", "auto",
+			"ipv6.method", "auto",
+		}
+		modArgs = appendRouteMetricArgs(modArgs, req.RouteMetric)
+		if _, err := s.nmcli(ctx, modArgs...); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (s *Service) checkBackend(ctx context.Context) error {
 	if runtime.GOOS != "linux" {
 		return ErrBackendUnavailable
@@ -411,6 +508,49 @@ func (s *Service) connectionRouteMetric(ctx context.Context, connectionName stri
 	return &metric, nil
 }
 
+func (s *Service) connectionType(ctx context.Context, connectionName string) (string, bool) {
+	output, err := s.nmcli(ctx, "-g", "connection.type", "connection", "show", connectionName)
+	if err != nil {
+		return "", false
+	}
+	return strings.TrimSpace(output), true
+}
+
+func (s *Service) listCellularModems(ctx context.Context) ([]model.CellularModem, error) {
+	if _, err := exec.LookPath("mmcli"); err != nil {
+		return []model.CellularModem{}, err
+	}
+	output, err := s.mmcli(ctx, "-L", "-K")
+	if err != nil {
+		return []model.CellularModem{}, err
+	}
+	ids := parseModemList(output)
+	modems := make([]model.CellularModem, 0, len(ids))
+	for _, id := range ids {
+		detail, err := s.mmcli(ctx, "-m", id, "-K")
+		if err != nil {
+			continue
+		}
+		modem := parseModemDetail(detail)
+		if modem.ID == "" {
+			modem.ID = id
+		}
+		modems = append(modems, modem)
+	}
+	return modems, nil
+}
+
+func (s *Service) mmcli(ctx context.Context, args ...string) (string, error) {
+	ctx, cancel := context.WithTimeout(ctx, commandTimeout)
+	defer cancel()
+
+	output, err := s.runner.Run(ctx, "mmcli", args...)
+	if err != nil {
+		return "", commandError("mmcli", args, output, err)
+	}
+	return strings.TrimSpace(string(output)), nil
+}
+
 func (s *Service) saveNetworkPriority(target model.NetworkInterface, routeMetric int) error {
 	if s.settings == nil {
 		return nil
@@ -464,6 +604,7 @@ func parseDeviceStatus(output string) map[string]model.NetworkInterface {
 		result[name] = model.NetworkInterface{
 			Name:           name,
 			Type:           strings.TrimSpace(parts[1]),
+			Kind:           normalizeInterfaceKind(strings.TrimSpace(parts[1]), name),
 			State:          strings.TrimSpace(parts[2]),
 			ConnectionName: strings.TrimSpace(parts[3]),
 			IPv4:           []model.NetworkAddress{},
@@ -471,6 +612,167 @@ func parseDeviceStatus(output string) map[string]model.NetworkInterface {
 			DNS4:           []string{},
 			DNS6:           []string{},
 		}
+	}
+	return result
+}
+
+func applyKernelInterfaces(interfaces map[string]model.NetworkInterface) error {
+	entries, err := os.ReadDir("/sys/class/net")
+	if err != nil {
+		return err
+	}
+	for _, entry := range entries {
+		name := strings.TrimSpace(entry.Name())
+		if name == "" {
+			continue
+		}
+		if _, ok := interfaces[name]; ok {
+			continue
+		}
+		if name == "lo" {
+			continue
+		}
+
+		item := model.NetworkInterface{
+			Name:            name,
+			Type:            kernelInterfaceType(name),
+			Kind:            normalizeInterfaceKind(kernelInterfaceType(name), name),
+			State:           kernelOperState(name),
+			HardwareAddress: readSysfsNetValue(name, "address"),
+			IPv4:            []model.NetworkAddress{},
+			IPv6:            []model.NetworkAddress{},
+			DNS4:            []string{},
+			DNS6:            []string{},
+			IPv4Method:      "unknown",
+			Managed:         false,
+			ReadOnly:        true,
+			Source:          "kernel",
+		}
+		if mtu, err := strconv.Atoi(readSysfsNetValue(name, "mtu")); err == nil {
+			item.MTU = mtu
+		}
+		applyKernelAddresses(&item)
+		interfaces[name] = item
+	}
+	return nil
+}
+
+func applyKernelAddresses(item *model.NetworkInterface) {
+	iface, err := net.InterfaceByName(item.Name)
+	if err != nil {
+		return
+	}
+	addresses, err := iface.Addrs()
+	if err != nil {
+		return
+	}
+	for _, address := range addresses {
+		ipNet, ok := address.(*net.IPNet)
+		if !ok {
+			continue
+		}
+		ones, _ := ipNet.Mask.Size()
+		if ipv4 := ipNet.IP.To4(); ipv4 != nil {
+			item.IPv4 = append(item.IPv4, model.NetworkAddress{
+				Address: ipv4.String(),
+				Prefix:  ones,
+			})
+			continue
+		}
+		item.IPv6 = append(item.IPv6, model.NetworkAddress{
+			Address: ipNet.IP.String(),
+			Prefix:  ones,
+		})
+	}
+}
+
+func readSysfsNetValue(name string, property string) string {
+	data, err := os.ReadFile("/sys/class/net/" + name + "/" + property)
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(data))
+}
+
+func kernelOperState(name string) string {
+	state := readSysfsNetValue(name, "operstate")
+	if state == "" {
+		return "unknown"
+	}
+	return state
+}
+
+func kernelInterfaceType(name string) string {
+	switch {
+	case strings.HasPrefix(name, "wl"):
+		return "wifi"
+	case strings.HasPrefix(name, "wwan"), strings.HasPrefix(name, "wwp"):
+		return "gsm"
+	case strings.HasPrefix(name, "usb"):
+		return "ethernet"
+	case strings.HasPrefix(name, "can"):
+		return "can"
+	default:
+		return "ethernet"
+	}
+}
+
+func normalizeInterfaceKind(deviceType string, name string) string {
+	value := strings.ToLower(strings.TrimSpace(deviceType))
+	switch {
+	case strings.Contains(value, "wifi"), strings.Contains(value, "wireless"), strings.HasPrefix(name, "wl"):
+		return "wifi"
+	case strings.Contains(value, "gsm"), strings.Contains(value, "wwan"), strings.HasPrefix(name, "wwan"), strings.HasPrefix(name, "wwp"), strings.HasPrefix(name, "ttyUSB"):
+		return "cellular"
+	case strings.Contains(value, "ethernet"), strings.HasPrefix(name, "eth"), strings.HasPrefix(name, "en"), strings.HasPrefix(name, "usb"):
+		return "ethernet"
+	case strings.Contains(value, "can"), strings.HasPrefix(name, "can"):
+		return "can"
+	default:
+		return value
+	}
+}
+
+func interfaceCapabilities(item model.NetworkInterface) []string {
+	capabilities := []string{"status"}
+	if item.Managed && !item.ReadOnly {
+		capabilities = append(capabilities, "priority")
+	}
+	switch item.Kind {
+	case "wifi":
+		capabilities = append(capabilities, "wifi")
+		if item.Managed && !item.ReadOnly {
+			capabilities = append(capabilities, "ipv4")
+		}
+	case "ethernet":
+		if item.Managed && !item.ReadOnly {
+			capabilities = append(capabilities, "ipv4")
+		}
+	case "cellular":
+		capabilities = append(capabilities, "cellular")
+		if item.Modem != nil && item.Modem.PrimaryPort != "" {
+			capabilities = append(capabilities, "cellular-connect")
+		}
+		if strings.TrimSpace(item.ConnectionName) != "" && strings.TrimSpace(item.ConnectionName) != "--" {
+			capabilities = append(capabilities, "priority")
+		}
+	}
+	return dedupeStrings(capabilities)
+}
+
+func dedupeStrings(values []string) []string {
+	seen := map[string]struct{}{}
+	result := make([]string, 0, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		result = append(result, value)
 	}
 	return result
 }
@@ -515,6 +817,200 @@ func parseWiFiList(output string) []model.WiFiNetwork {
 		result = append(result, seen[ssid])
 	}
 	return result
+}
+
+func parseModemList(output string) []string {
+	ids := []string{}
+	for _, line := range strings.Split(output, "\n") {
+		key, value, ok := strings.Cut(line, ":")
+		if !ok || !strings.HasPrefix(strings.TrimSpace(key), "modem-list.value[") {
+			continue
+		}
+		value = strings.TrimSpace(value)
+		if value == "" || value == "--" {
+			continue
+		}
+		if id := modemIDFromPath(value); id != "" {
+			ids = append(ids, id)
+		}
+	}
+	return ids
+}
+
+func parseModemDetail(output string) model.CellularModem {
+	fields := map[string]string{}
+	ports := []string{}
+	for _, line := range strings.Split(output, "\n") {
+		key, value, ok := strings.Cut(line, ":")
+		if !ok {
+			continue
+		}
+		key = strings.TrimSpace(key)
+		value = strings.TrimSpace(value)
+		if value == "--" {
+			value = ""
+		}
+		fields[key] = value
+		if strings.HasPrefix(key, "modem.generic.ports.value[") && value != "" {
+			ports = append(ports, value)
+		}
+	}
+
+	modem := model.CellularModem{
+		ID:                 modemIDFromPath(fields["modem.dbus-path"]),
+		DBusPath:           fields["modem.dbus-path"],
+		Manufacturer:       fields["modem.generic.manufacturer"],
+		Model:              fields["modem.generic.model"],
+		Revision:           fields["modem.generic.revision"],
+		EquipmentID:        fields["modem.generic.equipment-identifier"],
+		PrimaryPort:        fields["modem.generic.primary-port"],
+		State:              fields["modem.generic.state"],
+		FailedReason:       fields["modem.generic.state-failed-reason"],
+		PowerState:         fields["modem.generic.power-state"],
+		AccessTechnologies: fields["modem.generic.access-technologies"],
+		OperatorName:       fields["modem.3gpp.operator-name"],
+		OperatorCode:       fields["modem.3gpp.operator-code"],
+		RegistrationState:  fields["modem.3gpp.registration-state"],
+		PacketServiceState: fields["modem.3gpp.packet-service-state"],
+		SIMPath:            fields["modem.generic.sim"],
+		Ports:              ports,
+	}
+	if signal, err := strconv.Atoi(fields["modem.generic.signal-quality.value"]); err == nil {
+		modem.SignalQuality = signal
+	}
+	modem.DataInterface = modemDataInterface(ports)
+	return modem
+}
+
+func modemIDFromPath(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return ""
+	}
+	_, id, ok := strings.Cut(value, "/Modem/")
+	if ok {
+		return strings.TrimSpace(id)
+	}
+	parts := strings.Split(strings.Trim(value, "/"), "/")
+	if len(parts) == 0 {
+		return ""
+	}
+	last := parts[len(parts)-1]
+	if _, err := strconv.Atoi(last); err == nil {
+		return last
+	}
+	return ""
+}
+
+func modemDataInterface(ports []string) string {
+	for _, port := range ports {
+		name, portType := splitModemPort(port)
+		if portType == "net" {
+			return name
+		}
+	}
+	return ""
+}
+
+func splitModemPort(value string) (string, string) {
+	name := strings.TrimSpace(value)
+	portType := ""
+	if before, after, ok := strings.Cut(name, "("); ok {
+		name = strings.TrimSpace(before)
+		portType = strings.TrimSuffix(strings.TrimSpace(after), ")")
+	}
+	return name, portType
+}
+
+func applyCellularModems(interfaces map[string]model.NetworkInterface, modems []model.CellularModem) {
+	for _, modem := range modems {
+		if modem.PrimaryPort == "" && modem.DataInterface == "" {
+			continue
+		}
+		if modem.DataInterface != "" {
+			item := ensureInterface(interfaces, modem.DataInterface, "gsm")
+			item.Kind = "cellular"
+			item.Type = "gsm"
+			item.Source = mergeSource(item.Source, "modemmanager")
+			item.ReadOnly = true
+			item.Modem = cloneCellularModem(modem)
+			if item.State == "" || item.State == "unknown" || item.State == "down" {
+				item.State = cellularInterfaceState(item, modem)
+			}
+			interfaces[item.Name] = item
+		}
+		if modem.PrimaryPort != "" {
+			item := ensureInterface(interfaces, modem.PrimaryPort, "gsm")
+			item.Kind = "cellular"
+			item.Type = "gsm"
+			item.Source = mergeSource(item.Source, "modemmanager")
+			item.ReadOnly = false
+			item.Modem = cloneCellularModem(modem)
+			if item.State == "" || item.State == "unknown" {
+				item.State = cellularModemState(modem)
+			}
+			interfaces[item.Name] = item
+		}
+	}
+}
+
+func ensureInterface(interfaces map[string]model.NetworkInterface, name string, deviceType string) model.NetworkInterface {
+	if item, ok := interfaces[name]; ok {
+		return item
+	}
+	return model.NetworkInterface{
+		Name:       name,
+		Type:       deviceType,
+		Kind:       normalizeInterfaceKind(deviceType, name),
+		State:      "unknown",
+		IPv4:       []model.NetworkAddress{},
+		IPv6:       []model.NetworkAddress{},
+		DNS4:       []string{},
+		DNS6:       []string{},
+		IPv4Method: "unknown",
+		Source:     "modemmanager",
+	}
+}
+
+func cloneCellularModem(modem model.CellularModem) *model.CellularModem {
+	clone := modem
+	clone.Ports = append([]string{}, modem.Ports...)
+	return &clone
+}
+
+func mergeSource(current string, next string) string {
+	if current == "" {
+		return next
+	}
+	for _, part := range strings.Split(current, "+") {
+		if part == next {
+			return current
+		}
+	}
+	return current + "+" + next
+}
+
+func cellularInterfaceState(item model.NetworkInterface, modem model.CellularModem) string {
+	if modem.State == "connected" {
+		return "connected"
+	}
+	if modem.FailedReason != "" {
+		return "unavailable"
+	}
+	if item.State != "" && item.State != "unknown" {
+		return item.State
+	}
+	return cellularModemState(modem)
+}
+
+func cellularModemState(modem model.CellularModem) string {
+	if modem.FailedReason != "" {
+		return "unavailable"
+	}
+	if modem.State != "" {
+		return modem.State
+	}
+	return "unknown"
 }
 
 type priorityIndex struct {
@@ -582,7 +1078,7 @@ func resolvePriorityTargets(items []model.NetworkInterface, priorities []model.N
 		if !ok {
 			return nil, ErrInterfaceNotFound
 		}
-		if !item.Managed || item.ConnectionName == "" || item.ConnectionName == "--" {
+		if !isPriorityConfigurable(item) {
 			return nil, ErrInterfaceUnmanaged
 		}
 		targets = append(targets, priorityTarget{
@@ -592,6 +1088,56 @@ func resolvePriorityTargets(items []model.NetworkInterface, priorities []model.N
 	}
 
 	return targets, nil
+}
+
+func isPriorityConfigurable(item model.NetworkInterface) bool {
+	connectionName := strings.TrimSpace(item.ConnectionName)
+	if connectionName == "" || connectionName == "--" {
+		return false
+	}
+	if item.Managed && !item.ReadOnly {
+		return true
+	}
+	return item.Kind == "cellular" && hasCapability(item, "cellular-connect")
+}
+
+func hasCapability(item model.NetworkInterface, capability string) bool {
+	for _, itemCapability := range item.Capabilities {
+		if itemCapability == capability {
+			return true
+		}
+	}
+	return false
+}
+
+func sortNetworkInterfaces(items []model.NetworkInterface) {
+	sort.SliceStable(items, func(i, j int) bool {
+		left := interfaceKindSortScore(items[i])
+		right := interfaceKindSortScore(items[j])
+		if left != right {
+			return left < right
+		}
+		if items[i].State == "connected" && items[j].State != "connected" {
+			return true
+		}
+		if items[i].State != "connected" && items[j].State == "connected" {
+			return false
+		}
+		return items[i].Name < items[j].Name
+	})
+}
+
+func interfaceKindSortScore(item model.NetworkInterface) int {
+	switch item.Kind {
+	case "ethernet":
+		return 0
+	case "wifi":
+		return 1
+	case "cellular":
+		return 2
+	default:
+		return 3
+	}
 }
 
 func applyDeviceDetails(interfaces map[string]model.NetworkInterface, output string) {
@@ -754,6 +1300,92 @@ func validateWiFiRequest(req model.WiFiConnectRequest) error {
 		return fmt.Errorf("%w: invalid password", ErrInvalidWiFiConfig)
 	}
 	return nil
+}
+
+func validateCellularRequest(req model.CellularConnectRequest) error {
+	if err := validateRouteMetric(req.RouteMetric, ErrInvalidCellularConfig); err != nil {
+		return err
+	}
+	apn := strings.TrimSpace(req.APN)
+	if apn == "" || len(apn) > 100 {
+		return fmt.Errorf("%w: invalid apn", ErrInvalidCellularConfig)
+	}
+	if strings.TrimSpace(req.InterfaceName) != "" {
+		if err := validateInterfaceName(strings.TrimSpace(req.InterfaceName)); err != nil {
+			return fmt.Errorf("%w: invalid interface name", ErrInvalidCellularConfig)
+		}
+	}
+	if len(strings.TrimSpace(req.Username)) > 128 || len(strings.TrimSpace(req.Password)) > 128 {
+		return fmt.Errorf("%w: invalid credentials", ErrInvalidCellularConfig)
+	}
+	if len(strings.TrimSpace(req.ConnectionName)) > 128 {
+		return fmt.Errorf("%w: invalid connection name", ErrInvalidCellularConfig)
+	}
+	return nil
+}
+
+func selectCellularModem(modems []model.CellularModem, req model.CellularConnectRequest) (model.CellularModem, bool) {
+	modemID := strings.TrimSpace(req.ModemID)
+	interfaceName := strings.TrimSpace(req.InterfaceName)
+	for _, modem := range modems {
+		if modemID != "" && modem.ID == modemID {
+			return modem, true
+		}
+		if interfaceName != "" && modemMatchesInterface(modem, interfaceName) {
+			return modem, true
+		}
+	}
+	if len(modems) == 1 && modemID == "" && interfaceName == "" {
+		return modems[0], true
+	}
+	return model.CellularModem{}, false
+}
+
+func modemMatchesInterface(modem model.CellularModem, name string) bool {
+	if modem.PrimaryPort == name || modem.DataInterface == name {
+		return true
+	}
+	for _, port := range modem.Ports {
+		portName, _ := splitModemPort(port)
+		if portName == name {
+			return true
+		}
+	}
+	return false
+}
+
+func defaultCellularConnectionName(modem model.CellularModem) string {
+	if modem.Model != "" {
+		return "4g-" + sanitizeConnectionSuffix(modem.Model)
+	}
+	if modem.PrimaryPort != "" {
+		return "4g-" + sanitizeConnectionSuffix(modem.PrimaryPort)
+	}
+	if modem.ID != "" {
+		return "4g-" + sanitizeConnectionSuffix(modem.ID)
+	}
+	return "4g"
+}
+
+func sanitizeConnectionSuffix(value string) string {
+	var builder strings.Builder
+	for _, r := range strings.ToLower(value) {
+		switch {
+		case r >= 'a' && r <= 'z':
+			builder.WriteRune(r)
+		case r >= '0' && r <= '9':
+			builder.WriteRune(r)
+		case r == '-' || r == '_':
+			builder.WriteRune(r)
+		case r == ' ' || r == '/':
+			builder.WriteRune('-')
+		}
+	}
+	out := strings.Trim(builder.String(), "-_")
+	if out == "" {
+		return "modem"
+	}
+	return out
 }
 
 func validateRouteMetric(value *int, wrap error) error {

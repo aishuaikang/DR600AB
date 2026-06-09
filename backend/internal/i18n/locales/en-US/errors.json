@@ -20,6 +20,8 @@
   "network_interface_unmanaged": "This interface is not managed by NetworkManager",
   "wifi_unavailable": "No available Wi-Fi device was detected, so the feature is disabled",
   "wifi_invalid_config": "Wi-Fi configuration is invalid",
+  "cellular_unavailable": "No available 4G modem was detected, or the modem cannot dial now",
+  "cellular_invalid_config": "4G connection configuration is invalid",
   "license_unavailable": "License service is unavailable",
   "device_sn_missing": "Device SN is missing. Connect the detection device first",
   "license_not_found": "License file was not found. Upload a license",

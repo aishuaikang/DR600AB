@@ -856,6 +856,7 @@ export interface NetworkAddress {
 export interface NetworkInterface {
   name: string;
   type: string;
+  kind?: "ethernet" | "wifi" | "cellular" | "can" | string;
   state: string;
   connectionName?: string;
   hardwareAddress?: string;
@@ -869,6 +870,32 @@ export interface NetworkInterface {
   ipv4Method: string;
   routeMetric?: number;
   managed: boolean;
+  readOnly?: boolean;
+  source?: string;
+  capabilities?: string[];
+  modem?: CellularModem;
+}
+
+export interface CellularModem {
+  id?: string;
+  dbusPath?: string;
+  manufacturer?: string;
+  model?: string;
+  revision?: string;
+  equipmentId?: string;
+  primaryPort?: string;
+  dataInterface?: string;
+  state?: string;
+  failedReason?: string;
+  powerState?: string;
+  accessTechnologies?: string;
+  operatorName?: string;
+  operatorCode?: string;
+  registrationState?: string;
+  packetServiceState?: string;
+  simPath?: string;
+  signalQuality?: number;
+  ports?: string[];
 }
 
 export interface NetworkInterfacesResponse {
@@ -939,6 +966,21 @@ export interface WiFiConnectResponse {
   message: string;
 }
 
+export interface CellularConnectRequest {
+  interfaceName?: string;
+  modemId?: string;
+  apn: string;
+  username?: string;
+  password?: string;
+  connectionName?: string;
+  routeMetric?: number;
+}
+
+export interface CellularConnectResponse {
+  interfaces: NetworkInterface[];
+  message: string;
+}
+
 export interface ApiErrorPayload {
   code: string;
   message: string;
@@ -975,6 +1017,7 @@ export interface StreamHandlers {
 export interface ScreenStreamHandlers {
   onDetectionUpdated?: (event: EventMessage<ScreenDetectionTarget>) => void;
   onPositionUpdated?: (event: EventMessage<ScreenPositionTarget>) => void;
+  onPositionRemoved?: (event: EventMessage<ScreenPositionTarget>) => void;
   onStrikeUpdated?: (event: EventMessage<ScreenStrikeState>) => void;
   onDeceptionUpdated?: (event: EventMessage<ScreenDeceptionState>) => void;
   onCompassRecord?: (event: EventMessage<CompassRecord>) => void;

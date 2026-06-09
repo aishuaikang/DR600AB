@@ -324,7 +324,7 @@ export function ScreenMapLegend({ t }: { t: TFunction }) {
   return (
     <details className="screen-legend-toggle">
       <summary className="screen-legend-trigger" aria-label={t("mapLegend", { ns: "screen" })} title={t("mapLegend", { ns: "screen" })}>
-        <Info size={13} strokeWidth={2.4} aria-hidden="true" />
+        <Info size={16} strokeWidth={2.4} aria-hidden="true" />
         <span className="sr-only">{t("mapLegend", { ns: "screen" })}</span>
       </summary>
       <div className="screen-legend-panel" role="note" aria-label={t("mapLegend", { ns: "screen" })}>

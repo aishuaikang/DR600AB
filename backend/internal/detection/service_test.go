@@ -159,7 +159,7 @@ func TestIngestLineStoresDIDPlainLongitudeLatitudeGPS(t *testing.T) {
 	}
 }
 
-func TestIngestLineSkipsDIDEncryptedScreenPositionWithoutDecoder(t *testing.T) {
+func TestIngestLineStoresDIDEncryptedFallbackWithoutDecoder(t *testing.T) {
 	tr, err := i18n.New("zh-CN")
 	if err != nil {
 		t.Fatalf("i18n.New() error = %v", err)
@@ -170,8 +170,11 @@ func TestIngestLineSkipsDIDEncryptedScreenPositionWithoutDecoder(t *testing.T) {
 	svc.IngestLine("session-1", "/dev/ttyUSB0", "#=632/3/1, device=10125, Encypted Mavic_O4_ID=875bb45f, freq=2429.5, rssi=-64, byte,15,1b,9b,58,f0,d9")
 
 	items := svc.ScreenPositions(10)
-	if len(items) != 0 {
-		t.Fatalf("screen positions count = %d, want 0 for uncracked DID encrypted", len(items))
+	if len(items) != 1 {
+		t.Fatalf("screen positions count = %d, want fallback target", len(items))
+	}
+	if items[0].Serial != "875bb45f" || items[0].Model != "DJI-Drone" || items[0].Cracked {
+		t.Fatalf("fallback target = %#v", items[0])
 	}
 }
 
@@ -183,6 +186,8 @@ func TestIngestLineStoresScreenPositionFromDIDEncryptedDecoder(t *testing.T) {
 	st := store.NewMemoryStore(10, 10)
 	svc := NewService(st, tr, settings.NewStore(filepath.Join(t.TempDir(), "settings.json")), Options{})
 	svc.SetO3PlusO4Decoder(fakeO3Decoder{})
+	events, unsubscribe := svc.Subscribe(10)
+	defer unsubscribe()
 
 	svc.IngestLine("session-1", "/dev/ttyUSB0", "#=632/3/1, device=10125, Encypted Mavic_O4_ID=875bb45f, freq=2429.5, rssi=-64, byte,15,1b,9b,58,f0,d9")
 
@@ -204,13 +209,90 @@ func TestIngestLineStoresScreenPositionFromDIDEncryptedDecoder(t *testing.T) {
 		t.Fatalf("expected decoded target to be marked cracked")
 	}
 	if items[0].HitCount != 1 {
-		t.Fatalf("hit count = %d, want decoded update only", items[0].HitCount)
+		t.Fatalf("hit count = %d, want decoded target after fallback removal", items[0].HitCount)
 	}
 	if items[0].LastRecord.Device != "10125" {
 		t.Fatalf("last record device = %q, want 10125", items[0].LastRecord.Device)
 	}
 	if records := svc.Records(10); len(records) != 0 {
 		t.Fatalf("detection records count = %d, want 0 for DID encrypted", len(records))
+	}
+	removed := false
+	waitUntil(t, time.Second, func() bool {
+		for {
+			select {
+			case evt := <-events:
+				if evt.Type != "screen.position.removed" {
+					continue
+				}
+				target, ok := evt.Payload.(model.ScreenPositionTarget)
+				if ok && target.CorrelationID == "did_encrypted:875bb45f" && target.Model == "DJI-Drone" && !target.Cracked {
+					removed = true
+				}
+			default:
+				return removed
+			}
+		}
+	})
+}
+
+func TestIngestLineSkipsDIDEncryptedFallbackAfterCorrelationCracked(t *testing.T) {
+	tr, err := i18n.New("zh-CN")
+	if err != nil {
+		t.Fatalf("i18n.New() error = %v", err)
+	}
+	st := store.NewMemoryStore(10, 10)
+	svc := NewService(st, tr, settings.NewStore(filepath.Join(t.TempDir(), "settings.json")), Options{})
+	decoder := &oneShotO3Decoder{}
+	svc.SetO3PlusO4Decoder(decoder)
+	line := "#=632/3/1, device=10125, Encypted Mavic_O4_ID=875bb45f, freq=2429.5, rssi=-64, byte,15,1b,9b,58,f0,d9"
+
+	svc.IngestLine("session-1", "/dev/ttyUSB0", line)
+	var items []model.ScreenPositionTarget
+	waitUntil(t, time.Second, func() bool {
+		items = svc.ScreenPositions(10)
+		return len(items) == 1 && items[0].Serial == "o3-sn"
+	})
+
+	svc.IngestLine("session-1", "/dev/ttyUSB0", line)
+	waitUntil(t, time.Second, func() bool {
+		return decoder.Calls() >= 2
+	})
+
+	items = svc.ScreenPositions(10)
+	if len(items) != 1 {
+		t.Fatalf("screen positions count = %d, want only cracked target after repeated DID encrypted", len(items))
+	}
+	if items[0].Serial != "o3-sn" || items[0].Model == "DJI-Drone" || !items[0].Cracked {
+		t.Fatalf("target after repeated DID encrypted = %#v", items[0])
+	}
+}
+
+func TestIngestLineStoresFallbackScreenPositionFromDIDEncrypted(t *testing.T) {
+	tr, err := i18n.New("zh-CN")
+	if err != nil {
+		t.Fatalf("i18n.New() error = %v", err)
+	}
+	st := store.NewMemoryStore(10, 10)
+	svc := NewService(st, tr, settings.NewStore(filepath.Join(t.TempDir(), "settings.json")), Options{})
+
+	svc.IngestLine("session-1", "/dev/ttyUSB0", "#=632/3/1, device=10125, Encypted Mavic_O4_ID=875bb45f, freq=2429.5, rssi=-64, byte,15,1b,9b,58,f0,d9")
+
+	items := svc.ScreenPositions(10)
+	if len(items) != 1 {
+		t.Fatalf("screen positions count = %d, want fallback target", len(items))
+	}
+	if items[0].Serial != "875bb45f" || items[0].Model != "DJI-Drone" || items[0].Cracked {
+		t.Fatalf("fallback target = %#v", items[0])
+	}
+	if items[0].Drone != nil || items[0].Pilot != nil || items[0].Home != nil {
+		t.Fatalf("fallback coordinates = %#v/%#v/%#v, want nil", items[0].Drone, items[0].Pilot, items[0].Home)
+	}
+	if items[0].Frequency != 2429.5 || items[0].RSSI != -64 {
+		t.Fatalf("fallback radio = %#v", items[0])
+	}
+	if items[0].LastRecord.Type != string(parser.TypeDIDEncrypted) || items[0].LastRecord.Serial != "875bb45f" {
+		t.Fatalf("fallback last record = %#v", items[0].LastRecord)
 	}
 }
 
@@ -262,6 +344,31 @@ func (fakeO3Decoder) ParseO3PlusO4PacketMQTT(_ context.Context, packet parser.DI
 	if deviceSN != "10125" {
 		return model.ScreenPositionTarget{}, false
 	}
+	return fakeO3DecodedTarget(packet, receivedAt), true
+}
+
+type oneShotO3Decoder struct {
+	mu    sync.Mutex
+	calls int
+}
+
+func (d *oneShotO3Decoder) ParseO3PlusO4PacketMQTT(_ context.Context, packet parser.DIDEncrypted, deviceSN string, receivedAt time.Time) (model.ScreenPositionTarget, bool) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.calls++
+	if d.calls > 1 || deviceSN != "10125" {
+		return model.ScreenPositionTarget{}, false
+	}
+	return fakeO3DecodedTarget(packet, receivedAt), true
+}
+
+func (d *oneShotO3Decoder) Calls() int {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.calls
+}
+
+func fakeO3DecodedTarget(packet parser.DIDEncrypted, receivedAt time.Time) model.ScreenPositionTarget {
 	return model.ScreenPositionTarget{
 		Serial:    "o3-sn",
 		Model:     "DJI O4",
@@ -283,7 +390,7 @@ func (fakeO3Decoder) ParseO3PlusO4PacketMQTT(_ context.Context, packet parser.DI
 			RSSI:       packet.RSSI,
 			Cracked:    true,
 		},
-	}, true
+	}
 }
 
 func waitUntil(t *testing.T, timeout time.Duration, condition func() bool) {

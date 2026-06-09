@@ -20,7 +20,13 @@ import { cx } from "../utils/classnames";
 import { formatNumber, formatTime } from "../utils/format";
 import { resolveDisplayModel } from "../utils/models";
 import { extractErrorMessage } from "../utils/session";
-import { isSerialWhitelisted, normalizeWhitelistSerial, removeWhitelistSerial, upsertWhitelistItem } from "../utils/whitelist";
+import {
+  isSerialWhitelisted,
+  isUncrackedDJIDroneModel,
+  normalizeWhitelistSerial,
+  removeWhitelistSerial,
+  upsertWhitelistItem,
+} from "../utils/whitelist";
 import { PositionMap } from "./ScreenMap";
 import { referenceMapLayers } from "./screenData";
 
@@ -295,20 +301,13 @@ function OverflowCell({
 
 function CoordinateMapCell({
   label,
-  mapLabel,
   value,
-  record,
-  onOpenMap,
 }: {
   label: string;
-  mapLabel: string;
   value: string;
-  record: IntrusionRecord;
-  onOpenMap: (record: IntrusionRecord) => void;
 }) {
   const displayValue = value || "-";
   const lines = displayValue === "-" ? [displayValue] : displayValue.split(" / ");
-  const hasMapData = hasIntrusionMapData(record);
 
   return (
     <div className="intrusion-coordinate-cell font-mono text-xs tabular-nums text-base-content/80">
@@ -317,18 +316,34 @@ function CoordinateMapCell({
           <span key={`${index}-${line}`}>{line}</span>
         ))}
       </div>
-      {hasMapData ? (
-        <button
-          className="intrusion-coordinate-cell__map-button"
-          type="button"
-          title={mapLabel}
-          aria-label={mapLabel}
-          onClick={() => onOpenMap(record)}
-        >
-          <MapPinned size={14} aria-hidden="true" />
-        </button>
-      ) : null}
     </div>
+  );
+}
+
+function TrackReplayButton({
+  label,
+  record,
+  onOpenMap,
+}: {
+  label: string;
+  record: IntrusionRecord;
+  onOpenMap: (record: IntrusionRecord) => void;
+}) {
+  if (!hasIntrusionMapData(record)) {
+    return <span className="text-base-content/40">-</span>;
+  }
+
+  return (
+    <button
+      className="intrusion-track-replay-button"
+      type="button"
+      title={label}
+      aria-label={label}
+      onClick={() => onOpenMap(record)}
+    >
+      <MapPinned size={14} aria-hidden="true" />
+      <span>{label}</span>
+    </button>
   );
 }
 
@@ -347,7 +362,7 @@ function WhitelistActionButton({
   t: TFunction;
   onToggle: (record: IntrusionRecord) => void;
 }) {
-  if (record.targetType !== "position") {
+  if (record.targetType !== "position" || (!record.cracked && isUncrackedDJIDroneModel(record.model))) {
     return null;
   }
 
@@ -690,7 +705,7 @@ export function IntrusionsPage({
   };
 
   const toggleRecordWhitelist = useCallback(async (record: IntrusionRecord) => {
-    if (record.targetType !== "position") {
+    if (record.targetType !== "position" || (!record.cracked && isUncrackedDJIDroneModel(record.model))) {
       return;
     }
     const serial = record.serial?.trim() ?? "";
@@ -821,7 +836,7 @@ export function IntrusionsPage({
           ) : null}
 
           <div className="min-h-0 min-w-0 flex-1 overflow-auto rounded-2xl border border-base-300 bg-base-100/70">
-            <table className="table table-zebra table-sm w-full min-w-[115rem] table-fixed whitespace-nowrap">
+            <table className="table table-zebra table-sm w-full min-w-[124rem] table-fixed whitespace-nowrap">
               <thead className="sticky top-0 z-10 bg-base-200">
                 <tr>
                   <th className="w-[4rem]">
@@ -848,6 +863,7 @@ export function IntrusionsPage({
                   <th className="w-[13rem]">{t("intrusionLastSeen", { ns: "settings" })}</th>
                   <th className="w-[8rem]">{t("intrusionDuration", { ns: "settings" })}</th>
                   <th className="w-[22rem]">{t("intrusionCoordinates", { ns: "settings" })}</th>
+                  <th className="w-[9rem]">{t("intrusionMapTitle", { ns: "settings" })}</th>
                   <th className="w-[10rem]">{t("intrusionPilotDistance", { ns: "settings" })}</th>
                   <th className="w-[10rem]">{t("intrusionDroneDistance", { ns: "settings" })}</th>
                   <th className="w-[9rem]">{t("intrusionSpeed", { ns: "settings" })}</th>
@@ -857,7 +873,7 @@ export function IntrusionsPage({
               <tbody>
                 {visibleRecords.length === 0 ? (
                   <tr>
-                    <td colSpan={14} className="p-3">
+                    <td colSpan={15} className="p-3">
                       <div className="admin-empty-state admin-empty-state--table">
                         {loading
                           ? t("loading", { ns: "common" })
@@ -931,8 +947,12 @@ export function IntrusionsPage({
                       <td>
                         <CoordinateMapCell
                           label={t("intrusionCoordinates", { ns: "settings" })}
-                          mapLabel={t("intrusionMapTitle", { ns: "settings" })}
                           value={coordinateSummary(record, t)}
+                        />
+                      </td>
+                      <td>
+                        <TrackReplayButton
+                          label={t("intrusionMapTitle", { ns: "settings" })}
                           record={record}
                           onOpenMap={setMapRecord}
                         />

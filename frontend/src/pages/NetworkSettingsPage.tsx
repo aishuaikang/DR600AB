@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
 import type { TFunction } from "i18next";
-import { ArrowDown, ArrowUp, Cable, CircleAlert, Eye, EyeOff, Plus, RefreshCw, Save, Trash2, Wifi } from "lucide-react";
+import { ArrowDown, ArrowUp, Cable, CircleAlert, Eye, EyeOff, Plus, RadioTower, RefreshCw, Save, Trash2, Wifi } from "lucide-react";
 
 import {
+  connectCellular,
   connectWiFi,
   getNetworkInterfaces,
   getWiFiNetworks,
@@ -23,6 +24,14 @@ type Draft = {
   ipv4: Array<{ address: string; prefix: string }>;
   gateway4: string;
   dns4: string;
+  routeMetric: string;
+};
+
+type CellularDraft = {
+  apn: string;
+  username: string;
+  password: string;
+  connectionName: string;
   routeMetric: string;
 };
 
@@ -184,6 +193,7 @@ function removeDraftAddress(draft: Draft, index: number): Draft {
 function pickDefaultInterface(items: NetworkInterface[]) {
   return (
     items.find((item) => item.managed && item.state === "connected" && item.type === "wifi") ??
+    items.find((item) => isCellularInterface(item)) ??
     items.find((item) => item.managed && item.state === "connected") ??
     items.find((item) => item.managed) ??
     items[0]
@@ -195,11 +205,92 @@ function getPriorityMetric(index: number) {
 }
 
 function isWiFiInterface(item: NetworkInterface) {
-  return item.type.toLowerCase().includes("wifi") || item.type.toLowerCase().includes("wireless");
+  return item.kind === "wifi" || item.type.toLowerCase().includes("wifi") || item.type.toLowerCase().includes("wireless");
 }
 
 function isWiredInterface(item: NetworkInterface) {
-  return item.type.toLowerCase().includes("ethernet") || item.name.toLowerCase().startsWith("eth");
+  return item.kind === "ethernet" || item.type.toLowerCase().includes("ethernet") || item.name.toLowerCase().startsWith("eth");
+}
+
+function isCellularInterface(item: NetworkInterface) {
+  return item.kind === "cellular" || item.type.toLowerCase().includes("gsm") || item.type.toLowerCase().includes("wwan");
+}
+
+function hasCapability(item: NetworkInterface, capability: string) {
+  return item.capabilities?.includes(capability) ?? false;
+}
+
+function canEditIPv4(item: NetworkInterface) {
+  return item.managed && hasCapability(item, "ipv4");
+}
+
+function canConnectCellular(item: NetworkInterface) {
+  return hasCapability(item, "cellular-connect") && Boolean(item.modem?.primaryPort) && item.modem?.failedReason !== "sim-missing";
+}
+
+function toCellularDraft(item?: NetworkInterface): CellularDraft {
+  return {
+    apn: "",
+    username: "",
+    password: "",
+    connectionName: item?.connectionName && item.connectionName !== "--" ? item.connectionName : "",
+    routeMetric: typeof item?.routeMetric === "number" ? String(item.routeMetric) : "",
+  };
+}
+
+function validateCellularDraft(draft: CellularDraft, t: TFunction) {
+  if (!draft.apn.trim()) {
+    return t("cellularInvalidAPN", { ns: "settings" });
+  }
+  if (draft.routeMetric.trim() && !isRouteMetric(draft.routeMetric)) {
+    return t("networkInvalidRouteMetric", { ns: "settings" });
+  }
+  return "";
+}
+
+function interfaceIcon(item: NetworkInterface, size = 19) {
+  if (isCellularInterface(item)) {
+    return <RadioTower size={size} />;
+  }
+  if (isWiFiInterface(item)) {
+    return <Wifi size={size} />;
+  }
+  return <Cable size={size} />;
+}
+
+function interfaceTypeLabel(item: NetworkInterface, t: TFunction) {
+  if (isCellularInterface(item)) {
+    return t("networkTypeCellular", { ns: "settings" });
+  }
+  if (isWiFiInterface(item)) {
+    return t("networkTypeWifi", { ns: "settings" });
+  }
+  if (isWiredInterface(item)) {
+    return t("networkTypeWired", { ns: "settings" });
+  }
+  return item.type || "-";
+}
+
+function cellularStateLabel(item: NetworkInterface, t: TFunction) {
+  const state = item.modem?.state || item.state || "-";
+  const failedReason = item.modem?.failedReason;
+  if (failedReason === "sim-missing") {
+    return t("cellularStateSimMissing", { ns: "settings" });
+  }
+  if (failedReason) {
+    return `${state} / ${failedReason}`;
+  }
+  return state;
+}
+
+function cellularSIMLabel(item: NetworkInterface, t: TFunction) {
+  if (item.modem?.failedReason === "sim-missing") {
+    return t("cellularSIMMissing", { ns: "settings" });
+  }
+  if (item.modem?.simPath) {
+    return t("cellularSIMReady", { ns: "settings" });
+  }
+  return "-";
 }
 
 function interfaceSortScore(item: NetworkInterface) {
@@ -229,7 +320,7 @@ function sortedInterfacePickerItems(items: NetworkInterface[]) {
 
 function sortedPriorityInterfaces(items: NetworkInterface[]) {
   return [...items]
-    .filter((item) => item.managed)
+    .filter((item) => hasCapability(item, "priority") && item.connectionName && item.connectionName !== "--")
     .sort((a, b) => {
       const left = typeof a.routeMetric === "number" ? a.routeMetric : Number.MAX_SAFE_INTEGER;
       const right = typeof b.routeMetric === "number" ? b.routeMetric : Number.MAX_SAFE_INTEGER;
@@ -249,22 +340,32 @@ function sortedPriorityInterfaces(items: NetworkInterface[]) {
 function InterfaceCard({
   item,
   draft,
+  cellularDraft,
   busy,
+  cellularBusy,
   t,
   onDraftChange,
+  onCellularDraftChange,
   onSave,
+  onCellularConnect,
 }: {
   item: NetworkInterface;
   draft: Draft;
+  cellularDraft: CellularDraft;
   busy: boolean;
+  cellularBusy: boolean;
   t: TFunction;
   onDraftChange: (draft: Draft) => void;
+  onCellularDraftChange: (draft: CellularDraft) => void;
   onSave: () => void;
+  onCellularConnect: () => void;
 }) {
   const validation = validateDraft(draft, t);
-  const editable = item.managed;
+  const cellularValidation = validateCellularDraft(cellularDraft, t);
+  const editable = canEditIPv4(item);
+  const cellularEditable = canConnectCellular(item);
 
-  const statusLabel = item.managed ? item.state || "-" : t("networkUnmanaged", { ns: "settings" });
+  const statusLabel = item.managed || isCellularInterface(item) ? item.state || "-" : t("networkUnmanaged", { ns: "settings" });
 
   return (
     <div className="grid gap-3 2xl:grid-cols-[minmax(0,1fr)_minmax(20rem,24rem)]">
@@ -273,12 +374,12 @@ function InterfaceCard({
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="flex min-w-0 items-center gap-3">
               <div className="grid size-10 shrink-0 place-items-center rounded-xl border border-primary/25 bg-primary/10 text-primary">
-                {isWiFiInterface(item) ? <Wifi size={19} /> : <Cable size={19} />}
+                {interfaceIcon(item, 19)}
               </div>
               <div className="min-w-0">
                 <h3 className="truncate text-base font-semibold text-base-content">{item.name}</h3>
                 <p className="mt-0.5 truncate text-xs leading-5 text-base-content/55">
-                  {item.type || "-"} · {item.connectionName || t("networkUnmanaged", { ns: "settings" })}
+                  {interfaceTypeLabel(item, t)} · {item.connectionName || item.modem?.primaryPort || t("networkUnmanaged", { ns: "settings" })}
                 </p>
               </div>
             </div>
@@ -299,6 +400,14 @@ function InterfaceCard({
               <DetailItem label={t("networkRouteMetric", { ns: "settings" })} value={formatRouteMetric(item.routeMetric)} />
             </div>
             <DetailItem label={t("networkDNS", { ns: "settings" })} value={item.dns4.length ? item.dns4.join(", ") : "-"} mono />
+            {item.modem ? (
+              <div className="grid gap-2 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+                <DetailItem label={t("cellularModel", { ns: "settings" })} value={[item.modem.manufacturer, item.modem.model].filter(Boolean).join(" ") || "-"} />
+                <DetailItem label={t("cellularSIM", { ns: "settings" })} value={cellularSIMLabel(item, t)} />
+                <DetailItem label={t("cellularSignal", { ns: "settings" })} value={typeof item.modem.signalQuality === "number" ? `${item.modem.signalQuality}%` : "-"} />
+                <DetailItem label={t("cellularPrimaryPort", { ns: "settings" })} value={item.modem.primaryPort || "-"} mono />
+              </div>
+            ) : null}
           </div>
         </div>
 
@@ -311,11 +420,103 @@ function InterfaceCard({
             <DetailItem label={t("networkMAC", { ns: "settings" })} value={item.hardwareAddress || "-"} mono />
             <DetailItem label={t("networkMTU", { ns: "settings" })} value={item.mtu ? String(item.mtu) : "-"} />
             <DetailItem label={t("networkMethod", { ns: "settings" })} value={item.ipv4Method || "-"} />
+            <DetailItem label={t("networkSource", { ns: "settings" })} value={item.source || "NetworkManager"} />
+            <DetailItem label={t("networkCapabilities", { ns: "settings" })} value={item.capabilities?.join(", ") || "-"} />
+            {item.modem ? (
+              <>
+                <DetailItem label={t("cellularState", { ns: "settings" })} value={cellularStateLabel(item, t)} />
+                <DetailItem label={t("cellularDataInterface", { ns: "settings" })} value={item.modem.dataInterface || "-"} mono />
+                <DetailItem label={t("cellularEquipmentID", { ns: "settings" })} value={item.modem.equipmentId || "-"} mono />
+                <DetailItem label={t("cellularPorts", { ns: "settings" })} value={item.modem.ports?.join(", ") || "-"} />
+              </>
+            ) : null}
           </div>
         </details>
       </div>
 
       <div className="grid content-start gap-3 rounded-2xl border border-base-300 bg-base-100/45 p-3">
+        {isCellularInterface(item) ? (
+          <div className="grid gap-3 rounded-xl border border-base-300/80 bg-base-100/45 p-3">
+            <div>
+              <h4 className="text-sm font-semibold text-base-content">{t("cellularConfiguration", { ns: "settings" })}</h4>
+              <p className="mt-1 text-xs leading-5 text-base-content/55">{t("cellularConfigurationHint", { ns: "settings" })}</p>
+            </div>
+            <label className="grid gap-1.5">
+              <span className="text-xs font-medium text-base-content/60">{t("cellularAPN", { ns: "settings" })}</span>
+              <input
+                className="input input-sm input-bordered w-full bg-base-100"
+                value={cellularDraft.apn}
+                disabled={!cellularEditable || cellularBusy}
+                onChange={(event) => onCellularDraftChange({ ...cellularDraft, apn: event.target.value })}
+                placeholder="cmnet"
+              />
+            </label>
+            <div className="grid gap-2 sm:grid-cols-2">
+              <label className="grid gap-1.5">
+                <span className="text-xs font-medium text-base-content/60">{t("cellularUsername", { ns: "settings" })}</span>
+                <input
+                  className="input input-sm input-bordered w-full bg-base-100"
+                  value={cellularDraft.username}
+                  disabled={!cellularEditable || cellularBusy}
+                  onChange={(event) => onCellularDraftChange({ ...cellularDraft, username: event.target.value })}
+                  placeholder={t("optional", { ns: "common" })}
+                />
+              </label>
+              <label className="grid gap-1.5">
+                <span className="text-xs font-medium text-base-content/60">{t("cellularPassword", { ns: "settings" })}</span>
+                <input
+                  className="input input-sm input-bordered w-full bg-base-100"
+                  value={cellularDraft.password}
+                  type="password"
+                  disabled={!cellularEditable || cellularBusy}
+                  onChange={(event) => onCellularDraftChange({ ...cellularDraft, password: event.target.value })}
+                  placeholder={t("optional", { ns: "common" })}
+                />
+              </label>
+            </div>
+            <div className="grid gap-2 sm:grid-cols-2">
+              <label className="grid gap-1.5">
+                <span className="text-xs font-medium text-base-content/60">{t("networkConnection", { ns: "settings" })}</span>
+                <input
+                  className="input input-sm input-bordered w-full bg-base-100"
+                  value={cellularDraft.connectionName}
+                  disabled={!cellularEditable || cellularBusy}
+                  onChange={(event) => onCellularDraftChange({ ...cellularDraft, connectionName: event.target.value })}
+                  placeholder="4g"
+                />
+              </label>
+              <label className="grid gap-1.5">
+                <span className="text-xs font-medium text-base-content/60">{t("networkRouteMetric", { ns: "settings" })}</span>
+                <input
+                  className="input input-sm input-bordered w-full bg-base-100"
+                  value={cellularDraft.routeMetric}
+                  inputMode="numeric"
+                  disabled={!cellularEditable || cellularBusy}
+                  onChange={(event) => onCellularDraftChange({ ...cellularDraft, routeMetric: event.target.value.replace(/\D/g, "").slice(0, 4) })}
+                  placeholder={t("networkPriorityAuto", { ns: "settings" })}
+                />
+              </label>
+            </div>
+            {!cellularEditable ? (
+              <p className="flex items-start gap-2 rounded-xl bg-warning/10 px-3 py-2 text-xs leading-5 text-warning">
+                <CircleAlert size={14} className="mt-0.5 shrink-0" />
+                {t("cellularUnavailableHint", { ns: "settings" })}
+              </p>
+            ) : cellularValidation ? (
+              <p className="rounded-xl bg-error/10 px-3 py-2 text-xs leading-5 text-error">{cellularValidation}</p>
+            ) : null}
+            <button
+              className={cx("btn btn-primary btn-sm", cellularBusy && "app-busy-button")}
+              type="button"
+              disabled={!cellularEditable || Boolean(cellularValidation) || cellularBusy}
+              onClick={onCellularConnect}
+            >
+              {cellularBusy ? <LoadingSpinner size={15} /> : <RadioTower size={15} />}
+              {cellularBusy ? t("loading", { ns: "common" }) : t("cellularConnect", { ns: "settings" })}
+            </button>
+          </div>
+        ) : null}
+
         <div>
           <h4 className="text-sm font-semibold text-base-content">{t("networkConfiguration", { ns: "settings" })}</h4>
           <p className="mt-1 text-xs leading-5 text-base-content/55">{t("networkConfigurationHint", { ns: "settings" })}</p>
@@ -433,7 +634,7 @@ function InterfaceCard({
         {!editable ? (
           <p className="flex items-start gap-2 rounded-xl bg-warning/10 px-3 py-2 text-xs leading-5 text-warning">
             <CircleAlert size={14} className="mt-0.5 shrink-0" />
-            {t("networkUnmanagedHint", { ns: "settings" })}
+            {isCellularInterface(item) ? t("cellularIPv4ManagedHint", { ns: "settings" }) : t("networkUnmanagedHint", { ns: "settings" })}
           </p>
         ) : validation ? (
           <p className="rounded-xl bg-error/10 px-3 py-2 text-xs leading-5 text-error">{validation}</p>
@@ -485,7 +686,7 @@ function InterfacePicker({
                 item.name === selectedName ? "border-primary/25 bg-primary/15" : "border-base-300 bg-base-100/45 text-base-content/60",
               )}
             >
-              {isWiFiInterface(item) ? <Wifi size={15} /> : <Cable size={15} />}
+              {interfaceIcon(item, 15)}
             </span>
             <span className="min-w-0 flex-1">
               <span className="flex min-w-0 items-center justify-between gap-2">
@@ -496,11 +697,11 @@ function InterfacePicker({
                     item.state === "connected" ? "badge-success" : item.managed ? "badge-warning" : "badge-error",
                   )}
                 >
-                  {item.managed ? item.state || "-" : t("networkUnmanaged", { ns: "settings" })}
+                  {item.managed || isCellularInterface(item) ? item.state || "-" : t("networkUnmanaged", { ns: "settings" })}
                 </span>
               </span>
               <span className="mt-0.5 block truncate text-xs text-base-content/55">
-                {item.type || "-"} · {formatAddresses(item.ipv4)}
+                {interfaceTypeLabel(item, t)} · {formatAddresses(item.ipv4)}
               </span>
             </span>
           </span>
@@ -527,6 +728,7 @@ function NetworkPriorityPanel({
   t,
   onPreferWired,
   onPreferWiFi,
+  onPreferCellular,
   onAuto,
   onMove,
 }: {
@@ -535,6 +737,7 @@ function NetworkPriorityPanel({
   t: TFunction;
   onPreferWired: () => void;
   onPreferWiFi: () => void;
+  onPreferCellular: () => void;
   onAuto: () => void;
   onMove: (fromIndex: number, toIndex: number) => void;
 }) {
@@ -559,6 +762,10 @@ function NetworkPriorityPanel({
               {busy ? <LoadingSpinner size={15} /> : <Wifi size={15} />}
               {t("networkPreferWifi", { ns: "settings" })}
             </button>
+            <button className={cx("btn btn-sm btn-outline justify-start", busy && "app-busy-button")} type="button" disabled={busy} onClick={onPreferCellular}>
+              {busy ? <LoadingSpinner size={15} /> : <RadioTower size={15} />}
+              {t("networkPreferCellular", { ns: "settings" })}
+            </button>
             <button className={cx("btn btn-sm btn-ghost justify-start", busy && "app-busy-button")} type="button" disabled={busy} onClick={onAuto}>
               {busy ? <LoadingSpinner size={15} /> : <RefreshCw size={15} />}
               {t("networkPriorityAutoAction", { ns: "settings" })}
@@ -576,7 +783,7 @@ function NetworkPriorityPanel({
                 <div className="min-w-0 self-center">
                   <div className="flex min-w-0 flex-wrap items-center gap-2">
                     <strong className="truncate text-sm font-semibold text-base-content">{item.name}</strong>
-                    <span className="badge badge-xs border-0 bg-base-300 text-base-content/70">{item.type || "-"}</span>
+                    <span className="badge badge-xs border-0 bg-base-300 text-base-content/70">{interfaceTypeLabel(item, t)}</span>
                     {item.state === "connected" ? <span className="badge badge-success badge-xs">{t("active", { ns: "common" })}</span> : null}
                   </div>
                   <p className="mt-1 truncate text-xs text-base-content/50">
@@ -871,8 +1078,10 @@ export function NetworkSettingsPage({
   const [selectedSSID, setSelectedSSID] = useState("");
   const [wifiPassword, setWifiPassword] = useState("");
   const [selectedInterfaceName, setSelectedInterfaceName] = useState("");
+  const [cellularDrafts, setCellularDrafts] = useState<Record<string, CellularDraft>>({});
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState("");
+  const [cellularSaving, setCellularSaving] = useState("");
   const [prioritySaving, setPrioritySaving] = useState(false);
   const [wifiBusy, setWifiBusy] = useState(false);
 
@@ -885,6 +1094,9 @@ export function NetworkSettingsPage({
       const response = await getNetworkInterfaces(locale, developerToken);
       setInterfaces(response.interfaces);
       setDrafts(Object.fromEntries(response.interfaces.map((item) => [item.name, toDraft(item)])));
+      setCellularDrafts((items) => ({
+        ...Object.fromEntries(response.interfaces.filter(isCellularInterface).map((item) => [item.name, items[item.name] ?? toCellularDraft(item)])),
+      }));
       setSelectedInterfaceName((current) => {
         if (current && response.interfaces.some((item) => item.name === current)) {
           return current;
@@ -935,6 +1147,7 @@ export function NetworkSettingsPage({
   }, [locale, developerToken]);
 
   const managedCount = useMemo(() => interfaces.filter((item) => item.managed).length, [interfaces]);
+  const cellularCount = useMemo(() => interfaces.filter(isCellularInterface).length, [interfaces]);
   const pickerInterfaces = useMemo(() => sortedInterfacePickerItems(interfaces), [interfaces]);
   const priorityInterfaces = useMemo(() => sortedPriorityInterfaces(interfaces), [interfaces]);
   const selectedInterface = useMemo(
@@ -1020,10 +1233,11 @@ export function NetworkSettingsPage({
               </button>
             }
           />
-          <div className="grid gap-2 sm:grid-cols-3">
+          <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
             <Info label={t("networkInterfaceCount", { ns: "settings" })} value={String(interfaces.length)} />
             <Info label={t("networkManagedCount", { ns: "settings" })} value={String(managedCount)} />
-            <Info label={t("networkBackend", { ns: "settings" })} value="NetworkManager" />
+            <Info label={t("cellularCount", { ns: "settings" })} value={String(cellularCount)} />
+            <Info label={t("networkBackend", { ns: "settings" })} value="NetworkManager + ModemManager" />
           </div>
           {!backendState.available || backendState.readOnly ? (
             <div className="alert alert-soft alert-warning py-3 text-sm" role="status">
@@ -1085,14 +1299,23 @@ export function NetworkSettingsPage({
         onPreferWired={() => {
           const wired = priorityInterfaces.filter(isWiredInterface);
           const wifi = priorityInterfaces.filter(isWiFiInterface);
-          const other = priorityInterfaces.filter((item) => !isWiredInterface(item) && !isWiFiInterface(item));
-          void applyPriorityOrder([...wired, ...wifi, ...other]);
+          const cellular = priorityInterfaces.filter(isCellularInterface);
+          const other = priorityInterfaces.filter((item) => !isWiredInterface(item) && !isWiFiInterface(item) && !isCellularInterface(item));
+          void applyPriorityOrder([...wired, ...wifi, ...cellular, ...other]);
         }}
         onPreferWiFi={() => {
           const wifi = priorityInterfaces.filter(isWiFiInterface);
           const wired = priorityInterfaces.filter(isWiredInterface);
-          const other = priorityInterfaces.filter((item) => !isWiredInterface(item) && !isWiFiInterface(item));
-          void applyPriorityOrder([...wifi, ...wired, ...other]);
+          const cellular = priorityInterfaces.filter(isCellularInterface);
+          const other = priorityInterfaces.filter((item) => !isWiredInterface(item) && !isWiFiInterface(item) && !isCellularInterface(item));
+          void applyPriorityOrder([...wifi, ...wired, ...cellular, ...other]);
+        }}
+        onPreferCellular={() => {
+          const cellular = priorityInterfaces.filter(isCellularInterface);
+          const wired = priorityInterfaces.filter(isWiredInterface);
+          const wifi = priorityInterfaces.filter(isWiFiInterface);
+          const other = priorityInterfaces.filter((item) => !isWiredInterface(item) && !isWiFiInterface(item) && !isCellularInterface(item));
+          void applyPriorityOrder([...cellular, ...wired, ...wifi, ...other]);
         }}
         onAuto={() => void applyAutomaticPriority()}
         onMove={(fromIndex, toIndex) => {
@@ -1125,9 +1348,12 @@ export function NetworkSettingsPage({
               <InterfaceCard
                 item={selectedInterface}
                 draft={drafts[selectedInterface.name] ?? toDraft(selectedInterface)}
+                cellularDraft={cellularDrafts[selectedInterface.name] ?? toCellularDraft(selectedInterface)}
                 busy={saving === selectedInterface.name}
+                cellularBusy={cellularSaving === selectedInterface.name}
                 t={t}
                 onDraftChange={(draft) => setDrafts((items) => ({ ...items, [selectedInterface.name]: draft }))}
+                onCellularDraftChange={(draft) => setCellularDrafts((items) => ({ ...items, [selectedInterface.name]: draft }))}
                 onSave={() => {
                   void (async () => {
                     const draft = drafts[selectedInterface.name] ?? toDraft(selectedInterface);
@@ -1142,6 +1368,40 @@ export function NetworkSettingsPage({
                       setBanner({ kind: "error", message: extractErrorMessage(error, t("unexpectedError", { ns: "common" })) });
                     } finally {
                       setSaving("");
+                    }
+                  })();
+                }}
+                onCellularConnect={() => {
+                  void (async () => {
+                    const draft = cellularDrafts[selectedInterface.name] ?? toCellularDraft(selectedInterface);
+                    setCellularSaving(selectedInterface.name);
+                    setBanner({ kind: "loading", message: t("loading", { ns: "common" }) });
+                    try {
+                      const routeMetric = parseRouteMetric(draft.routeMetric);
+                      const response = await connectCellular(
+                        {
+                          interfaceName: selectedInterface.name,
+                          modemId: selectedInterface.modem?.id,
+                          apn: draft.apn.trim(),
+                          username: draft.username.trim(),
+                          password: draft.password,
+                          connectionName: draft.connectionName.trim(),
+                          routeMetric,
+                        },
+                        locale,
+                        developerToken,
+                      );
+                      setInterfaces(response.interfaces);
+                      setDrafts((items) => ({
+                        ...items,
+                        ...Object.fromEntries(response.interfaces.map((item) => [item.name, toDraft(item)])),
+                      }));
+                      setBanner({ kind: "success", message: response.message });
+                      await load({ silent: true });
+                    } catch (error) {
+                      setBanner({ kind: "error", message: extractErrorMessage(error, t("unexpectedError", { ns: "common" })) });
+                    } finally {
+                      setCellularSaving("");
                     }
                   })();
                 }}

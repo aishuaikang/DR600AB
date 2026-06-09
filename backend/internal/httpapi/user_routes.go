@@ -177,6 +177,10 @@ func normalizeUserWhitelist(items []model.WhitelistItem, now time.Time) []model.
 		if serial == "" {
 			continue
 		}
+		modelName := truncateRunes(strings.TrimSpace(item.Model), 64)
+		if model.IsUncrackedDJIDroneModel(modelName) {
+			continue
+		}
 		key := strings.ToLower(serial)
 		if _, ok := seen[key]; ok {
 			continue
@@ -188,7 +192,7 @@ func normalizeUserWhitelist(items []model.WhitelistItem, now time.Time) []model.
 		}
 		normalized = append(normalized, model.WhitelistItem{
 			Serial:    serial,
-			Model:     truncateRunes(strings.TrimSpace(item.Model), 64),
+			Model:     modelName,
 			Source:    truncateRunes(strings.TrimSpace(item.Source), 32),
 			CreatedAt: createdAt,
 		})

@@ -54,6 +54,14 @@ body,
   min-height: 0;
 }
 
+html,
+body {
+  overscroll-behavior: none;
+  touch-action: pan-x pan-y;
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
 body {
   margin: 0;
   overflow: hidden;
@@ -140,6 +148,10 @@ html {
     opacity 0.16s ease,
     box-shadow 0.16s ease,
     transform 0.16s ease;
+}
+
+.admin-shell :where(button, a, summary, .btn) {
+  touch-action: manipulation;
 }
 
 .admin-shell
@@ -374,7 +386,7 @@ body.virtual-keyboard-open .app-loading-overlay {
   justify-content: center;
   gap: 0.3rem;
   border: 1px solid color-mix(in oklab, var(--color-success) 38%, transparent);
-  border-radius: 0.6rem;
+  border-radius: 999px;
   padding: 0 0.45rem;
   color: color-mix(in oklab, var(--color-success) 86%, var(--color-base-content));
   background: color-mix(in oklab, var(--color-success) 10%, transparent);
@@ -414,11 +426,7 @@ body.virtual-keyboard-open .app-loading-overlay {
 }
 
 .intrusion-coordinate-cell {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
   min-width: 0;
-  align-items: start;
-  gap: 0.45rem;
 }
 
 .intrusion-coordinate-cell__values {
@@ -434,24 +442,38 @@ body.virtual-keyboard-open .app-loading-overlay {
   line-height: 1.35;
 }
 
-.intrusion-coordinate-cell__map-button {
-  display: inline-grid;
-  width: 1.75rem;
+.intrusion-track-replay-button {
+  display: inline-flex;
+  width: 7rem;
   height: 1.75rem;
   flex: none;
-  place-items: center;
+  align-items: center;
+  justify-content: center;
+  gap: 0.3rem;
   border: 1px solid color-mix(in oklab, var(--color-primary) 26%, transparent);
-  border-radius: 0.6rem;
+  border-radius: 999px;
+  padding: 0 0.5rem;
   color: var(--color-primary);
   background: color-mix(in oklab, var(--color-primary) 9%, transparent);
+  font-size: 0.72rem;
+  font-weight: 650;
+  line-height: 1;
 }
 
-.intrusion-coordinate-cell__map-button svg {
+.intrusion-track-replay-button svg {
+  flex: none;
   opacity: 0.78;
 }
 
-.intrusion-coordinate-cell__map-button:hover,
-.intrusion-coordinate-cell__map-button:focus-visible {
+.intrusion-track-replay-button span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.intrusion-track-replay-button:hover,
+.intrusion-track-replay-button:focus-visible {
   border-color: color-mix(in oklab, var(--color-primary) 52%, transparent);
   background: color-mix(in oklab, var(--color-primary) 16%, transparent);
 }
@@ -552,8 +574,8 @@ body.virtual-keyboard-open .app-loading-overlay {
 
 .screen-legend-trigger {
   display: grid;
-  width: 1.9rem;
-  height: 1.9rem;
+  width: var(--screen-touch-target-sm);
+  height: var(--screen-touch-target-sm);
   place-items: center;
   border: 1px solid rgba(186, 211, 222, 0.2);
   border-radius: 999px;
@@ -591,11 +613,11 @@ body.virtual-keyboard-open .app-loading-overlay {
   right: 0;
   z-index: 23;
   display: grid;
-  min-width: 9.8rem;
-  gap: 0.45rem;
+  min-width: 11.2rem;
+  gap: 0.56rem;
   border: 1px solid rgba(186, 211, 222, 0.18);
   border-radius: 0.95rem;
-  padding: 0.62rem 0.72rem;
+  padding: 0.72rem 0.82rem;
   color: rgba(245, 251, 255, 0.92);
   background: rgba(5, 12, 24, 0.92);
   box-shadow:
@@ -632,30 +654,31 @@ body.virtual-keyboard-open .app-loading-overlay {
 
 .screen-legend-panel__items {
   display: grid;
-  gap: 0.36rem;
+  gap: 0.46rem;
 }
 
 .screen-legend-panel__item {
   display: flex;
   min-width: 0;
   align-items: center;
-  gap: 0.48rem;
-  font-size: 0.67rem;
+  min-height: 2.05rem;
+  gap: 0.62rem;
+  font-size: 0.7rem;
   line-height: 1.15;
   color: rgba(226, 252, 255, 0.84);
 }
 
 .screen-legend-panel__item--line {
-  gap: 0.56rem;
+  gap: 0.64rem;
 }
 
 .screen-legend-panel__item--circle {
-  gap: 0.56rem;
+  gap: 0.64rem;
 }
 
 .screen-legend-panel__icon {
-  width: 1.12rem;
-  height: 1.6rem;
+  width: 1.54rem;
+  height: 2.08rem;
   flex: none;
   object-fit: contain;
 }
@@ -672,16 +695,16 @@ body.virtual-keyboard-open .app-loading-overlay {
 }
 
 .screen-legend-panel__line {
-  width: 1.2rem;
-  height: 0.2rem;
+  width: 1.62rem;
+  height: 0.26rem;
   flex: none;
   border-radius: 999px;
   box-shadow: 0 0 0.45rem rgba(0, 0, 0, 0.22);
 }
 
 .screen-legend-panel__circle {
-  width: 1.16rem;
-  height: 1.16rem;
+  width: 1.52rem;
+  height: 1.52rem;
   flex: none;
   border: 2px solid #f97316;
   border-radius: 999px;
@@ -691,8 +714,8 @@ body.virtual-keyboard-open .app-loading-overlay {
 
 @media (max-width: 1279px) {
   .screen-legend-panel {
-    min-width: 7.6rem;
-    padding: 0.52rem 0.62rem;
+    min-width: 10rem;
+    padding: 0.62rem 0.72rem;
   }
 
   .screen-legend-panel__title {
@@ -700,7 +723,22 @@ body.virtual-keyboard-open .app-loading-overlay {
   }
 
   .screen-legend-panel__item {
-    font-size: 0.6rem;
+    min-height: 1.92rem;
+    font-size: 0.64rem;
+  }
+
+  .screen-legend-panel__icon {
+    width: 1.4rem;
+    height: 1.9rem;
+  }
+
+  .screen-legend-panel__line {
+    width: 1.5rem;
+  }
+
+  .screen-legend-panel__circle {
+    width: 1.4rem;
+    height: 1.4rem;
   }
 }
 
@@ -760,6 +798,38 @@ body.virtual-keyboard-open .app-loading-overlay {
 
 .app-modal-card {
   animation: app-pop-in 0.16s ease-out both;
+}
+
+@media (max-width: 1366px), (pointer: coarse) {
+  .admin-shell {
+    --app-touch-target: 2.75rem;
+  }
+
+  .admin-shell :where(.btn-sm, .btn-xs, .btn-square) {
+    min-width: var(--app-touch-target);
+    min-height: var(--app-touch-target);
+    border-radius: 999px;
+  }
+
+  .admin-shell :where(.input-sm, .select-sm) {
+    min-height: var(--app-touch-target);
+  }
+
+  .admin-shell :where(.app-modal-card button[aria-label]) {
+    min-width: var(--app-touch-target);
+    min-height: var(--app-touch-target);
+    border-radius: 999px;
+  }
+
+  .admin-sidebar :where(a, button, summary) {
+    min-height: var(--app-touch-target);
+    border-radius: 999px;
+  }
+
+  .admin-sidebar__header :where(a, button),
+  .admin-sidebar__footer :where(button) {
+    min-width: var(--app-touch-target);
+  }
 }
 
 .admin-sidebar__scrim {
@@ -1443,12 +1513,15 @@ body.virtual-keyboard-open .app-loading-overlay {
   --screen-panel-border: rgba(255, 255, 255, 0.14);
   --screen-panel-border-strong: rgba(38, 201, 255, 0.42);
   --screen-panel-radius: 1.62em;
-  --screen-panel-radius-sm: 1.24em;
+  --screen-panel-radius-sm: 999px;
   --screen-panel-radius-xs: 1em;
   --screen-panel-gap: 0.75em;
   --screen-panel-padding: 0.75em;
   --screen-panel-shadow: 0 1em 2em rgba(0, 0, 0, 0.24);
   --screen-panel-shadow-soft: 0 0.5em 1.25em rgba(0, 0, 0, 0.18);
+  --screen-touch-target: clamp(48px, 2.75em, 60px);
+  --screen-touch-target-sm: clamp(44px, 2.44em, 52px);
+  --screen-side-toggle-width: clamp(44px, 2.35em, 56px);
   --screen-content-top: 5.4em;
   --screen-left-edge: 1%;
   --screen-right-edge: 1%;
@@ -1636,21 +1709,22 @@ body.virtual-keyboard-open .app-loading-overlay {
   left: 50%;
   bottom: 2.4em;
   z-index: 12;
-  max-width: min(28rem, calc(100% - 2rem));
+  max-width: min(34rem, calc(100% - 2rem));
   transform: translateX(-50%);
   border: 1px solid rgba(251, 146, 60, 0.42);
   border-radius: 999px;
-  padding: 0.54em 0.92em;
+  padding: 0.72em 1.32em;
   color: rgba(255, 247, 237, 0.94);
   background: rgba(24, 14, 6, 0.78);
   box-shadow:
     0 0.65em 1.35em rgba(0, 0, 0, 0.26),
     inset 0 1px 0 rgba(255, 255, 255, 0.06);
   backdrop-filter: blur(10px);
-  font-size: 0.72em;
-  font-weight: 650;
-  line-height: 1.35;
+  font-size: clamp(14px, 0.84em, 17px);
+  font-weight: 750;
+  line-height: 1.3;
   text-align: center;
+  white-space: normal;
   pointer-events: none;
 }
 
@@ -1773,19 +1847,21 @@ body.virtual-keyboard-open .app-loading-overlay {
 
 .screen-admin-link {
   display: inline-grid;
-  width: 1.9em;
-  height: 1.9em;
+  width: var(--screen-touch-target-sm);
+  height: var(--screen-touch-target-sm);
   place-items: center;
-  border: 0;
+  border: 1px solid rgba(38, 201, 255, 0.24);
+  border-radius: 999px;
   color: var(--screen-primary);
-  background: transparent;
+  background: rgba(6, 16, 30, 0.42);
+  backdrop-filter: blur(6px);
   cursor: pointer;
 }
 
 .screen-language-switch {
   position: relative;
   display: inline-flex;
-  height: 1.9em;
+  height: var(--screen-touch-target-sm);
   min-width: 0;
   align-items: center;
   color: var(--screen-primary);
@@ -1795,7 +1871,7 @@ body.virtual-keyboard-open .app-loading-overlay {
 .screen-language-switch__button {
   display: inline-flex;
   height: 100%;
-  min-width: 5em;
+  min-width: 6.2em;
   align-items: center;
   justify-content: center;
   gap: 0.32em;
@@ -1855,7 +1931,7 @@ body.virtual-keyboard-open .app-loading-overlay {
 
 .screen-language-menu__item {
   display: flex;
-  height: 2em;
+  min-height: var(--screen-touch-target-sm);
   align-items: center;
   justify-content: center;
   border: 0;
@@ -1903,7 +1979,7 @@ body.virtual-keyboard-open .app-loading-overlay {
 
 .screen-right-panel {
   right: var(--screen-right-edge);
-  width: 25%;
+  width: clamp(28em, 32vw, 36em);
   overflow: visible;
 }
 
@@ -1915,8 +1991,8 @@ body.virtual-keyboard-open .app-loading-overlay {
   position: absolute;
   top: 50%;
   display: flex;
-  width: 1.62em;
-  height: 4.8em;
+  width: var(--screen-side-toggle-width);
+  height: 5.35em;
   transform: translateY(-50%);
   align-items: center;
   justify-content: center;
@@ -1958,15 +2034,13 @@ body.virtual-keyboard-open .app-loading-overlay {
 }
 
 .screen-side-toggle--right {
-  left: -1.3em;
-  border-right: 0;
-  border-radius: var(--screen-panel-radius-sm) 0 0 var(--screen-panel-radius-sm);
+  left: calc(var(--screen-side-toggle-width) * -0.78);
+  border-radius: 999px;
 }
 
 .screen-side-toggle--left {
-  right: -1.3em;
-  border-left: 0;
-  border-radius: 0 var(--screen-panel-radius-sm) var(--screen-panel-radius-sm) 0;
+  right: calc(var(--screen-side-toggle-width) * -0.78);
+  border-radius: 999px;
 }
 
 .screen-side-toggle--right::before {
@@ -2209,7 +2283,7 @@ body.virtual-keyboard-open .app-loading-overlay {
 .screen-strike-tab {
   position: relative;
   display: flex;
-  min-height: 2.42em;
+  min-height: var(--screen-touch-target-sm);
   align-items: center;
   justify-content: center;
   gap: 0.42em;
@@ -2283,7 +2357,7 @@ body.virtual-keyboard-open .app-loading-overlay {
   grid-template-columns: auto minmax(0, 1fr);
   align-items: center;
   gap: 0.46em;
-  min-height: 2.26em;
+  min-height: var(--screen-touch-target-sm);
   /* border: 1px solid var(--screen-line); */
   border-radius: var(--screen-panel-radius-sm);
   padding: 0.34em 0.46em;
@@ -2316,8 +2390,8 @@ body.virtual-keyboard-open .app-loading-overlay {
 
 .screen-strike-channel > span {
   display: grid;
-  width: 1.02em;
-  height: 1.02em;
+  width: 1.28em;
+  height: 1.28em;
   place-items: center;
   border: 1px solid rgba(202, 224, 232, 0.58);
   border-radius: 0.58em;
@@ -2391,7 +2465,7 @@ body.virtual-keyboard-open .app-loading-overlay {
 .screen-strike-duration strong {
   display: inline-flex;
   min-width: 0;
-  height: 1.95em;
+  min-height: 2.18em;
   align-items: center;
   justify-content: center;
   gap: 0.24em;
@@ -2421,7 +2495,7 @@ body.virtual-keyboard-open .app-loading-overlay {
   display: inline-flex;
   flex: 1 1 3.2em;
   min-width: 3.2em;
-  min-height: 1.86em;
+  min-height: var(--screen-touch-target-sm);
   align-items: center;
   justify-content: center;
   gap: 0.16em;
@@ -2497,7 +2571,7 @@ body.virtual-keyboard-open .app-loading-overlay {
 .screen-deception-mode {
   display: inline-flex;
   min-width: 0;
-  min-height: 2.26em;
+  min-height: var(--screen-touch-target-sm);
   align-items: center;
   justify-content: center;
   gap: 0.28em;
@@ -2611,7 +2685,7 @@ body.virtual-keyboard-open .app-loading-overlay {
 .screen-deception-field select {
   width: 100%;
   min-width: 0;
-  height: 2.1em;
+  height: var(--screen-touch-target-sm);
   border: 1px solid var(--screen-line);
   border-radius: var(--screen-panel-radius-xs);
   padding: 0 0.48em;
@@ -2641,7 +2715,7 @@ body.virtual-keyboard-open .app-loading-overlay {
 
 .screen-deception-toggle {
   display: flex;
-  min-height: 3.5em;
+  min-height: 3.85em;
   align-items: center;
   gap: 0.52em;
   border-radius: var(--screen-panel-radius-sm);
@@ -2712,7 +2786,7 @@ body.virtual-keyboard-open .app-loading-overlay {
 
 .screen-deception-strength__item {
   min-width: 0;
-  min-height: 2em;
+  min-height: var(--screen-touch-target-sm);
   border: 0;
   border-radius: var(--screen-panel-radius-xs);
   color: rgba(226, 241, 246, 0.76);
@@ -2736,7 +2810,7 @@ body.virtual-keyboard-open .app-loading-overlay {
 
 .screen-deception-advanced-toggle {
   display: flex;
-  min-height: 2.1em;
+  min-height: var(--screen-touch-target-sm);
   align-items: center;
   justify-content: center;
   gap: 0.36em;
@@ -2784,7 +2858,7 @@ body.virtual-keyboard-open .app-loading-overlay {
   grid-template-columns: auto minmax(0, 1fr);
   align-items: center;
   gap: 0.28em;
-  min-height: 2em;
+  min-height: var(--screen-touch-target-sm);
   border-radius: var(--screen-panel-radius-xs);
   padding: 0 0.32em;
   color: rgba(226, 241, 246, 0.74);
@@ -2799,8 +2873,8 @@ body.virtual-keyboard-open .app-loading-overlay {
 }
 
 .screen-deception-check > span {
-  width: 0.78em;
-  height: 0.78em;
+  width: 1.12em;
+  height: 1.12em;
   border: 1px solid rgba(202, 224, 232, 0.52);
   border-radius: 0.32em;
   background: rgba(2, 7, 12, 0.2);
@@ -2829,7 +2903,7 @@ body.virtual-keyboard-open .app-loading-overlay {
   position: relative;
   display: grid;
   grid-template-columns: auto auto minmax(0, 1fr) auto;
-  min-height: 2.48em;
+  min-height: 3em;
   align-items: center;
   gap: 0.36em;
   border: 1px solid var(--screen-line);
@@ -2929,7 +3003,7 @@ body.virtual-keyboard-open .app-loading-overlay {
 
 .screen-strike-action {
   display: inline-flex;
-  min-height: 2.48em;
+  min-height: var(--screen-touch-target);
   align-items: center;
   justify-content: center;
   gap: 0.4em;
@@ -3060,7 +3134,9 @@ body.virtual-keyboard-open .app-loading-overlay {
 
 .screen-info-list__counts {
   display: inline-flex;
+  min-width: 0;
   align-items: center;
+  justify-content: flex-end;
   gap: 0.32em;
 }
 
@@ -3085,8 +3161,8 @@ body.virtual-keyboard-open .app-loading-overlay {
 
 .screen-alarm-settings-toggle {
   display: grid;
-  width: 2em;
-  height: 2em;
+  width: var(--screen-touch-target-sm);
+  height: var(--screen-touch-target-sm);
   place-items: center;
   border: 1px solid rgba(125, 211, 252, 0.26);
   border-radius: var(--screen-panel-radius-xs);
@@ -3111,13 +3187,66 @@ body.virtual-keyboard-open .app-loading-overlay {
   transform: translateY(0.03em);
 }
 
+.screen-alarm-sound-toggle {
+  display: grid;
+  width: var(--screen-touch-target-sm);
+  height: var(--screen-touch-target-sm);
+  place-items: center;
+  border: 1px solid rgba(186, 211, 222, 0.2);
+  border-radius: 999px;
+  padding: 0;
+  color: rgba(245, 251, 255, 0.92);
+  background: rgba(5, 12, 24, 0.76);
+  box-shadow:
+    0 0.55rem 1.2rem rgba(0, 0, 0, 0.24),
+    inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  backdrop-filter: blur(10px);
+  cursor: pointer;
+  transition:
+    border-color 0.16s ease,
+    color 0.16s ease,
+    background-color 0.16s ease,
+    transform 0.16s ease;
+}
+
+.screen-alarm-sound-toggle:hover {
+  border-color: rgba(38, 201, 255, 0.56);
+  color: #ffffff;
+  background: rgba(8, 18, 32, 0.9);
+  box-shadow:
+    0 0.7rem 1.4rem rgba(0, 0, 0, 0.28),
+    0 0 0 1px rgba(38, 201, 255, 0.12),
+    inset 0 1px 0 rgba(255, 255, 255, 0.05);
+}
+
+.screen-alarm-sound-toggle:active {
+  transform: translateY(0.03em);
+}
+
+.screen-alarm-sound-toggle--active {
+  border-color: rgba(38, 201, 255, 0.36);
+  color: #e7fbff;
+  background: rgba(8, 18, 32, 0.86);
+}
+
+.screen-alarm-sound-toggle--blocked {
+  border-color: rgba(251, 191, 36, 0.4);
+  color: #fef3c7;
+  background: rgba(251, 191, 36, 0.12);
+}
+
+.screen-alarm-sound-toggle:disabled {
+  cursor: wait;
+  opacity: 0.62;
+}
+
 .screen-alarm-settings-panel {
   display: grid;
   flex: none;
   gap: 0.44em;
   margin: 0.48em 0.48em 0;
   border: 1px solid rgba(125, 211, 252, 0.24);
-  border-radius: var(--screen-panel-radius-sm);
+  border-radius: var(--screen-panel-radius);
   padding: 0.5em;
   color: #f4fbff;
   background:
@@ -3155,12 +3284,12 @@ body.virtual-keyboard-open .app-loading-overlay {
 .screen-alarm-setting {
   display: flex;
   min-width: 0;
-  min-height: 2.28em;
+  min-height: var(--screen-touch-target-sm);
   align-items: center;
   gap: 0.34em;
   border: 1px solid rgba(148, 163, 184, 0.2);
   border-radius: var(--screen-panel-radius-xs);
-  padding: 0 0.44em;
+  padding: 0 1em;
   color: rgba(226, 241, 246, 0.72);
   background: rgba(148, 163, 184, 0.08);
   font: inherit;
@@ -3205,27 +3334,9 @@ body.virtual-keyboard-open .app-loading-overlay {
   box-shadow: 0 0 0.65em rgba(251, 113, 133, 0.45);
 }
 
-.screen-alarm-setting:disabled,
-.screen-alarm-settings-panel__sound:disabled {
+.screen-alarm-setting:disabled {
   cursor: wait;
   opacity: 0.62;
-}
-
-.screen-alarm-settings-panel__sound {
-  display: inline-flex;
-  width: max-content;
-  max-width: 100%;
-  align-items: center;
-  gap: 0.34em;
-  border: 1px solid rgba(255, 255, 255, 0.18);
-  border-radius: 999px;
-  padding: 0.32em 0.64em;
-  color: #ffffff;
-  background: rgba(255, 255, 255, 0.11);
-  font: inherit;
-  font-size: 0.66em;
-  font-weight: 850;
-  cursor: pointer;
 }
 
 .screen-alarm-settings-panel__message {
@@ -3263,7 +3374,7 @@ body.virtual-keyboard-open .app-loading-overlay {
   position: relative;
   display: flex;
   min-width: 0;
-  min-height: 2.42em;
+  min-height: var(--screen-touch-target-sm);
   align-items: center;
   justify-content: center;
   gap: 0.36em;
@@ -3335,27 +3446,17 @@ body.virtual-keyboard-open .app-loading-overlay {
     transform 0.16s ease;
 }
 
-.screen-tab strong em {
-  position: absolute;
-  top: -0.48em;
-  right: -0.48em;
-  display: grid;
-  min-width: 1.2em;
-  height: 1.2em;
-  place-items: center;
-  border-radius: 999px;
-  color: #fff;
-  background: #f43f5e;
-  font-size: 0.78em;
-  font-style: normal;
-  font-weight: 900;
-  box-shadow: 0 0 0.6em rgba(244, 63, 94, 0.45);
-}
-
 .screen-tab strong > span {
   display: block;
   line-height: 1;
   transform: translateY(0.04em);
+}
+
+.screen-tab__count--alarm {
+  border-color: rgba(244, 63, 94, 0.42);
+  color: #fff;
+  background: rgba(244, 63, 94, 0.92);
+  box-shadow: 0 0 0.6em rgba(244, 63, 94, 0.3);
 }
 
 .screen-tab--active {
@@ -3370,6 +3471,12 @@ body.virtual-keyboard-open .app-loading-overlay {
   color: #062231;
   background: rgba(255, 255, 255, 0.58);
   transform: none;
+}
+
+.screen-tab--active .screen-tab__count--alarm {
+  color: #fff;
+  background: rgba(244, 63, 94, 0.96);
+  box-shadow: 0 0 0.6em rgba(244, 63, 94, 0.35);
 }
 
 .screen-list {
@@ -3658,6 +3765,7 @@ body.virtual-keyboard-open .app-loading-overlay {
   background: rgba(255, 255, 255, 0.045);
   overflow: hidden;
   transform: translateZ(0);
+  align-content: center;
 }
 
 .screen-detection-card__image::before {
@@ -3738,10 +3846,11 @@ body.virtual-keyboard-open .app-loading-overlay {
 
 .screen-detection-card__time {
   display: inline-grid;
+  min-height: 2.12em;
   place-items: center;
   border: 1px solid transparent;
   border-radius: 999px;
-  padding: 0.05em 0.36em;
+  padding: 0 0.62em;
   font-size: 0.62em;
   font-family: inherit;
   font-weight: 600;
@@ -3921,7 +4030,7 @@ body.virtual-keyboard-open .app-loading-overlay {
   gap: 0.34em;
   border: 1px solid var(--screen-line);
   border-left: 3px solid rgba(216, 226, 232, 0.62);
-  border-radius: var(--screen-panel-radius-sm);
+  border-radius: var(--screen-panel-radius);
   padding: 0.44em 0.46em 0.42em 0.42em;
   color: #f5fbff;
   text-align: left;
@@ -4046,10 +4155,10 @@ body.virtual-keyboard-open .app-loading-overlay {
   align-items: center;
   justify-content: center;
   gap: 0.22em;
-  min-height: 1.8em;
+  min-height: 2.34em;
   border: 1px solid rgba(248, 113, 113, 0.38);
   border-radius: 999px;
-  padding: 0 0.48em;
+  padding: 0 0.68em;
   color: #fecdd3;
   background: rgba(244, 63, 94, 0.12);
   font: inherit;
@@ -4111,7 +4220,7 @@ body.virtual-keyboard-open .app-loading-overlay {
   display: grid;
   grid-template-columns: 4.78em minmax(0, 1fr);
   gap: 0.36em;
-  border-radius: var(--screen-panel-radius-sm);
+  border-radius: var(--screen-panel-radius);
   padding: 0.5em;
   background: var(--screen-control-bg);
 }
@@ -4202,6 +4311,7 @@ body.virtual-keyboard-open .app-loading-overlay {
   grid-template-columns: 2.9em minmax(0, 1fr) minmax(0, 1fr) auto;
   align-items: center;
   width: 100%;
+  min-height: 2.22em;
   border: 0;
   padding: 0;
   color: inherit;
@@ -4346,8 +4456,8 @@ body.virtual-keyboard-open .app-loading-overlay {
   right: 0.56em;
   z-index: 2;
   display: grid;
-  width: 1.82em;
-  height: 1.82em;
+  width: var(--screen-touch-target);
+  height: var(--screen-touch-target);
   place-items: center;
   border: 1px solid var(--screen-line);
   border-radius: var(--screen-panel-radius-xs);
@@ -4368,10 +4478,16 @@ body.virtual-keyboard-open .app-loading-overlay {
   transform: translateY(-0.02em);
 }
 
+.screen-navigation-modal__close svg {
+  width: 1.08em;
+  height: 1.08em;
+  stroke-width: 2.6;
+}
+
 .screen-navigation-modal__header {
   display: grid;
   gap: 0.18em;
-  padding-right: 2.1em;
+  padding-right: calc(var(--screen-touch-target) + 0.68em);
 }
 
 .screen-navigation-modal__eyebrow {
@@ -4414,7 +4530,7 @@ body.virtual-keyboard-open .app-loading-overlay {
 
 .screen-navigation-modal__provider {
   display: grid;
-  min-height: 2.22em;
+  min-height: var(--screen-touch-target-sm);
   place-items: center;
   border: 0;
   border-radius: var(--screen-panel-radius-xs);
@@ -4614,8 +4730,8 @@ body.virtual-keyboard-open .app-loading-overlay {
 .screen-device-status-modal .screen-navigation-modal__close {
   top: 0.78em;
   right: 0.78em;
-  width: 2.08em;
-  height: 2.08em;
+  width: var(--screen-touch-target);
+  height: var(--screen-touch-target);
   border-color: rgba(168, 196, 204, 0.24);
   background: rgba(2, 10, 18, 0.54);
 }
@@ -4632,7 +4748,7 @@ body.virtual-keyboard-open .app-loading-overlay {
   gap: 0.16em 0.72em;
   align-items: center;
   border-bottom: 1px solid rgba(122, 203, 255, 0.14);
-  padding: 0.9em 4.16em 0.86em 1.06em;
+  padding: 0.9em calc(var(--screen-touch-target) + 1.7em) 0.86em 1.06em;
   background:
     linear-gradient(90deg, rgba(12, 30, 43, 0.82), rgba(6, 16, 28, 0.56)),
     rgba(4, 13, 23, 0.66);
@@ -4663,7 +4779,7 @@ body.virtual-keyboard-open .app-loading-overlay {
 .screen-device-status-modal__refresh {
   position: static;
   display: inline-flex;
-  min-height: 2.2em;
+  min-height: var(--screen-touch-target-sm);
   grid-area: refresh;
   align-items: center;
   gap: 0.34em;
@@ -5305,13 +5421,13 @@ body.virtual-keyboard-open .app-loading-overlay {
   display: inline-flex;
   min-width: 0;
   max-width: 100%;
-  min-height: 2.1em;
+  min-height: var(--screen-touch-target-sm);
   align-items: center;
   justify-content: center;
   gap: 0.24em;
   border: 1px solid rgba(38, 201, 255, 0.32);
   border-radius: 999px;
-  padding: 0.26em 0.58em;
+  padding: 0 0.68em;
   color: #dff8ff;
   font: inherit;
   font-size: 0.86em;
@@ -5389,7 +5505,7 @@ body.virtual-keyboard-open .app-loading-overlay {
   display: grid;
   min-height: 0;
   gap: 0.12em;
-  padding-right: 3em;
+  padding-right: calc(var(--screen-touch-target) + 0.8em);
 }
 
 .screen-fpv-video-modal__header h2 {
@@ -5491,6 +5607,41 @@ body.virtual-keyboard-open .app-loading-overlay {
   background: rgba(239, 111, 127, 0.12);
   font-size: 0.68em;
   font-weight: 700;
+}
+
+.screen-shell :where(
+  .screen-admin-link,
+  .screen-alarm-settings-toggle,
+  .screen-alarm-sound-toggle,
+  .screen-navigation-modal__close
+) {
+  border-radius: 999px;
+}
+
+.screen-shell :where(
+  .screen-language-switch__button,
+  .screen-language-menu__item,
+  .screen-side-toggle,
+  .screen-strike-tab,
+  .screen-strike-channel,
+  .screen-strike-duration,
+  .screen-strike-duration strong,
+  .screen-strike-duration-preset,
+  .screen-deception-mode,
+  .screen-deception-field input,
+  .screen-deception-field select,
+  .screen-deception-strength__item,
+  .screen-deception-advanced-toggle,
+  .screen-deception-check,
+  .screen-deception-status-button,
+  .screen-strike-action,
+  .screen-alarm-setting,
+  .screen-tab,
+  .screen-whitelist-button,
+  .screen-fpv-row__view-button,
+  .screen-device-status-modal__refresh
+) {
+  border-radius: 999px;
 }
 
 .screen-empty {
@@ -5622,7 +5773,7 @@ body.virtual-keyboard-open .app-loading-overlay {
   }
 
   .screen-right-panel {
-    width: min(30em, 28vw);
+    width: min(34em, 34vw);
     height: calc(100% - 9.4em);
   }
 
@@ -5644,7 +5795,7 @@ body.virtual-keyboard-open .app-loading-overlay {
   }
 
   .screen-right-panel {
-    width: min(29em, 38vw);
+    width: min(32em, 43vw);
     height: calc(100% - 9.8em);
   }
 
@@ -5733,8 +5884,8 @@ body.virtual-keyboard-open .app-loading-overlay {
   }
 
   .screen-admin-link {
-    width: 2em;
-    height: 2em;
+    width: var(--screen-touch-target-sm);
+    height: var(--screen-touch-target-sm);
     border: 1px solid rgba(38, 201, 255, 0.24);
     border-radius: 999px;
     background: rgba(6, 16, 30, 0.42);
@@ -5742,14 +5893,14 @@ body.virtual-keyboard-open .app-loading-overlay {
   }
 
   .screen-language-switch {
-    width: 2em;
-    min-width: 2em;
-    height: 2em;
+    width: var(--screen-touch-target-sm);
+    min-width: var(--screen-touch-target-sm);
+    height: var(--screen-touch-target-sm);
   }
 
   .screen-language-switch__button {
-    width: 2em;
-    min-width: 2em;
+    width: var(--screen-touch-target-sm);
+    min-width: var(--screen-touch-target-sm);
     padding: 0;
   }
 
@@ -5798,11 +5949,11 @@ body.virtual-keyboard-open .app-loading-overlay {
     top: -1.6em;
     right: 2em;
     left: auto;
-    width: 4.2em;
-    height: 1.86em;
+    width: 5.4em;
+    height: var(--screen-touch-target-sm);
     transform: none;
-    border-bottom: 0;
-    border-radius: var(--screen-panel-radius-sm) var(--screen-panel-radius-sm) 0 0;
+    border: 1px solid rgba(168, 196, 204, 0.22);
+    border-radius: 999px;
     opacity: 1;
     pointer-events: auto;
   }
@@ -5818,7 +5969,7 @@ body.virtual-keyboard-open .app-loading-overlay {
   }
 
   .screen-right-panel--show-toggle .screen-side-toggle--right:hover {
-    border-radius: var(--screen-panel-radius-sm) var(--screen-panel-radius-sm) 0 0;
+    border-radius: 999px;
     transform: translateY(-0.04em);
   }
 
@@ -5845,15 +5996,13 @@ body.virtual-keyboard-open .app-loading-overlay {
 
   .screen-strike-panel .screen-side-toggle {
     top: 50%;
-    right: -1.5em;
+    right: calc(var(--screen-side-toggle-width) * -0.78);
     left: auto;
-    width: 1.62em;
-    height: 4.8em;
+    width: var(--screen-side-toggle-width);
+    height: 5.35em;
     transform: translateY(-50%);
-    border-right: 1px solid rgba(168, 196, 204, 0.22);
-    border-left: 0;
-    border-bottom: 1px solid rgba(168, 196, 204, 0.22);
-    border-radius: 0 var(--screen-panel-radius-sm) var(--screen-panel-radius-sm) 0;
+    border: 1px solid rgba(168, 196, 204, 0.22);
+    border-radius: 999px;
   }
 
   .screen-strike-panel .screen-side-toggle svg {
@@ -5891,7 +6040,7 @@ body.virtual-keyboard-open .app-loading-overlay {
   }
 
   .screen-tab {
-    min-height: 2.25em;
+    min-height: var(--screen-touch-target-sm);
     gap: 0.28em;
     font-size: 0.7em;
   }
@@ -6070,8 +6219,8 @@ body.virtual-keyboard-open .app-loading-overlay {
   .screen-device-status-modal .screen-navigation-modal__close {
     top: 0.62em;
     right: 0.62em;
-    width: 1.9em;
-    height: 1.9em;
+    width: var(--screen-touch-target);
+    height: var(--screen-touch-target);
   }
 
   .screen-device-status-modal__header {
@@ -6087,7 +6236,7 @@ body.virtual-keyboard-open .app-loading-overlay {
 
   .screen-device-status-modal__refresh {
     width: fit-content;
-    min-height: 2em;
+    min-height: var(--screen-touch-target-sm);
   }
 
   .screen-device-status-modal__summary {

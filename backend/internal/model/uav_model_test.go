@@ -25,6 +25,43 @@ func TestDisplayModelName(t *testing.T) {
 	}
 }
 
+func TestIsUncrackedDJIDronePosition(t *testing.T) {
+	tests := []struct {
+		name   string
+		target ScreenPositionTarget
+		want   bool
+	}{
+		{
+			name:   "uncracked placeholder",
+			target: ScreenPositionTarget{Model: "DJI-Drone", Cracked: false},
+			want:   true,
+		},
+		{
+			name:   "case and space insensitive",
+			target: ScreenPositionTarget{Model: " dji-drone ", Cracked: false},
+			want:   true,
+		},
+		{
+			name:   "cracked decoded target",
+			target: ScreenPositionTarget{Model: "DJI-Drone", Cracked: true},
+			want:   false,
+		},
+		{
+			name:   "real model",
+			target: ScreenPositionTarget{Model: "DJI O4", Cracked: false},
+			want:   false,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := IsUncrackedDJIDronePosition(tc.target); got != tc.want {
+				t.Fatalf("IsUncrackedDJIDronePosition(%#v) = %v, want %v", tc.target, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestUserSettingsWithDefaultsAddsScreenAlarmSettings(t *testing.T) {
 	settings := UserSettingsWithDefaults(UserSettings{})
 

@@ -39,6 +39,16 @@ func DisplayModelName(modelName string) string {
 	return modelName
 }
 
+// IsUncrackedDJIDroneModel reports whether modelName is the encrypted DID placeholder.
+func IsUncrackedDJIDroneModel(modelName string) bool {
+	return strings.EqualFold(strings.TrimSpace(modelName), "DJI-Drone")
+}
+
+// IsUncrackedDJIDronePosition reports whether target is the encrypted DID placeholder target.
+func IsUncrackedDJIDronePosition(target ScreenPositionTarget) bool {
+	return !target.Cracked && IsUncrackedDJIDroneModel(target.Model)
+}
+
 func normalizeDisplayModelName(modelName string) string {
 	modelName = strings.TrimSpace(modelName)
 	prefix, suffix, ok := strings.Cut(modelName, "-")

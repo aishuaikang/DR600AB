@@ -20,6 +20,7 @@
   "network.updated": "网口配置已更新",
   "network.priority_updated": "网络优先级已更新",
   "wifi.connected": "Wi-Fi 连接请求已提交",
+  "cellular.connected": "4G 连接请求已提交",
   "deception.session.connecting": "诱骗设备串口正在连接",
   "deception.session.started": "诱骗设备串口已连接",
   "deception.session.stopped": "诱骗设备串口已停止",

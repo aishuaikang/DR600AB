@@ -946,10 +946,34 @@ type NetworkAddress struct {
 	Prefix  int    `json:"prefix"`
 }
 
+// CellularModem 描述一个移动网络模块及其 ModemManager 状态。
+type CellularModem struct {
+	ID                 string   `json:"id,omitempty"`
+	DBusPath           string   `json:"dbusPath,omitempty"`
+	Manufacturer       string   `json:"manufacturer,omitempty"`
+	Model              string   `json:"model,omitempty"`
+	Revision           string   `json:"revision,omitempty"`
+	EquipmentID        string   `json:"equipmentId,omitempty"`
+	PrimaryPort        string   `json:"primaryPort,omitempty"`
+	DataInterface      string   `json:"dataInterface,omitempty"`
+	State              string   `json:"state,omitempty"`
+	FailedReason       string   `json:"failedReason,omitempty"`
+	PowerState         string   `json:"powerState,omitempty"`
+	AccessTechnologies string   `json:"accessTechnologies,omitempty"`
+	OperatorName       string   `json:"operatorName,omitempty"`
+	OperatorCode       string   `json:"operatorCode,omitempty"`
+	RegistrationState  string   `json:"registrationState,omitempty"`
+	PacketServiceState string   `json:"packetServiceState,omitempty"`
+	SIMPath            string   `json:"simPath,omitempty"`
+	SignalQuality      int      `json:"signalQuality,omitempty"`
+	Ports              []string `json:"ports,omitempty"`
+}
+
 // NetworkInterface 描述一个系统网络接口的可配置状态。
 type NetworkInterface struct {
 	Name            string           `json:"name"`
 	Type            string           `json:"type"`
+	Kind            string           `json:"kind,omitempty"`
 	State           string           `json:"state"`
 	ConnectionName  string           `json:"connectionName,omitempty"`
 	HardwareAddress string           `json:"hardwareAddress,omitempty"`
@@ -963,6 +987,10 @@ type NetworkInterface struct {
 	IPv4Method      string           `json:"ipv4Method"`
 	RouteMetric     *int             `json:"routeMetric,omitempty"`
 	Managed         bool             `json:"managed"`
+	ReadOnly        bool             `json:"readOnly,omitempty"`
+	Source          string           `json:"source,omitempty"`
+	Capabilities    []string         `json:"capabilities,omitempty"`
+	Modem           *CellularModem   `json:"modem,omitempty"`
 }
 
 // NetworkInterfacesResponse 返回全部网口配置状态。
@@ -1053,6 +1081,23 @@ type WiFiConnectRequest struct {
 // WiFiConnectResponse 返回无线连接操作结果。
 type WiFiConnectResponse struct {
 	Message string `json:"message"`
+}
+
+// CellularConnectRequest 提交 4G/移动网络拨号配置。
+type CellularConnectRequest struct {
+	InterfaceName  string `json:"interfaceName,omitempty"`
+	ModemID        string `json:"modemId,omitempty"`
+	APN            string `json:"apn"`
+	Username       string `json:"username,omitempty"`
+	Password       string `json:"password,omitempty"`
+	ConnectionName string `json:"connectionName,omitempty"`
+	RouteMetric    *int   `json:"routeMetric,omitempty"`
+}
+
+// CellularConnectResponse 返回移动网络连接操作结果。
+type CellularConnectResponse struct {
+	Interfaces []NetworkInterface `json:"interfaces"`
+	Message    string             `json:"message"`
 }
 
 // Event 是发送给服务端事件订阅者的运行时事件。

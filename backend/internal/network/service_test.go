@@ -1,6 +1,7 @@
 package network
 
 import (
+	"context"
 	"errors"
 	"testing"
 
@@ -74,6 +75,94 @@ func TestParseDeviceStatusEscapedConnection(t *testing.T) {
 	}
 }
 
+func TestParseModemList(t *testing.T) {
+	got := parseModemList(stringsJoinLines(
+		`modem-list.length   : 1`,
+		`modem-list.value[1] : /org/freedesktop/ModemManager1/Modem/0`,
+	))
+
+	if len(got) != 1 || got[0] != "0" {
+		t.Fatalf("parseModemList() = %+v, want [0]", got)
+	}
+}
+
+func TestParseModemDetailQuectelEC200U(t *testing.T) {
+	got := parseModemDetail(stringsJoinLines(
+		`modem.dbus-path                                 : /org/freedesktop/ModemManager1/Modem/0`,
+		`modem.generic.manufacturer                      : Quectel`,
+		`modem.generic.model                             : EC200U`,
+		`modem.generic.revision                          : EC200UCNAAR03A17M08`,
+		`modem.generic.equipment-identifier              : 866738087531461`,
+		`modem.generic.primary-port                      : ttyUSB5`,
+		`modem.generic.ports.length                      : 4`,
+		`modem.generic.ports.value[1]                    : ttyUSB0 (at)`,
+		`modem.generic.ports.value[2]                    : ttyUSB5 (at)`,
+		`modem.generic.ports.value[3]                    : ttyUSB6 (at)`,
+		`modem.generic.ports.value[4]                    : usb0 (net)`,
+		`modem.generic.state                             : failed`,
+		`modem.generic.state-failed-reason               : sim-missing`,
+		`modem.generic.power-state                       : on`,
+		`modem.generic.signal-quality.value              : 0`,
+	))
+
+	if got.ID != "0" || got.Manufacturer != "Quectel" || got.Model != "EC200U" {
+		t.Fatalf("modem identity = %+v, want Quectel EC200U id 0", got)
+	}
+	if got.PrimaryPort != "ttyUSB5" || got.DataInterface != "usb0" {
+		t.Fatalf("modem ports = primary %q data %q, want ttyUSB5 usb0", got.PrimaryPort, got.DataInterface)
+	}
+	if got.State != "failed" || got.FailedReason != "sim-missing" {
+		t.Fatalf("modem state = %q/%q, want failed/sim-missing", got.State, got.FailedReason)
+	}
+}
+
+func TestApplyCellularModemsMarksUsbNetPort(t *testing.T) {
+	interfaces := parseDeviceStatus(stringsJoinLines(
+		`wlan0:wifi:connected:Office`,
+		`ttyUSB5:gsm:unavailable:--`,
+	))
+	interfaces["usb0"] = model.NetworkInterface{
+		Name:       "usb0",
+		Type:       "ethernet",
+		Kind:       "ethernet",
+		State:      "down",
+		IPv4:       []model.NetworkAddress{},
+		IPv6:       []model.NetworkAddress{},
+		DNS4:       []string{},
+		DNS6:       []string{},
+		IPv4Method: "unknown",
+		ReadOnly:   true,
+		Source:     "kernel",
+	}
+	modem := model.CellularModem{
+		ID:            "0",
+		Manufacturer:  "Quectel",
+		Model:         "EC200U",
+		PrimaryPort:   "ttyUSB5",
+		DataInterface: "usb0",
+		State:         "failed",
+		FailedReason:  "sim-missing",
+		Ports:         []string{"ttyUSB5 (at)", "usb0 (net)"},
+	}
+
+	applyCellularModems(interfaces, []model.CellularModem{modem})
+
+	usb := interfaces["usb0"]
+	if usb.Kind != "cellular" || usb.Type != "gsm" || !usb.ReadOnly {
+		t.Fatalf("usb0 = %+v, want readonly cellular gsm", usb)
+	}
+	if usb.Modem == nil || usb.Modem.Model != "EC200U" || usb.Modem.FailedReason != "sim-missing" {
+		t.Fatalf("usb0 modem = %+v, want EC200U sim-missing", usb.Modem)
+	}
+	if !hasCapability(model.NetworkInterface{Capabilities: interfaceCapabilities(usb)}, "cellular-connect") {
+		t.Fatalf("usb0 capabilities = %+v, want cellular-connect", interfaceCapabilities(usb))
+	}
+	tty := interfaces["ttyUSB5"]
+	if tty.Kind != "cellular" || tty.Modem == nil || tty.Modem.DataInterface != "usb0" {
+		t.Fatalf("ttyUSB5 = %+v, want cellular control port with usb0 modem", tty)
+	}
+}
+
 func TestApplyDeviceDetailsIndexedFields(t *testing.T) {
 	interfaces := parseDeviceStatus(`eth0:ethernet:connected:Wired connection 1`)
 	applyDeviceDetails(interfaces, stringsJoinLines(
@@ -124,6 +213,78 @@ func TestValidateWiFiRequest(t *testing.T) {
 				t.Fatalf("validateWiFiRequest() error = %v, want %v", err, tt.want)
 			}
 		})
+	}
+}
+
+func TestValidateCellularRequest(t *testing.T) {
+	metric := 50
+	tests := []struct {
+		name string
+		req  model.CellularConnectRequest
+		want error
+	}{
+		{name: "valid apn", req: model.CellularConnectRequest{APN: "cmnet", RouteMetric: &metric}},
+		{name: "empty apn", req: model.CellularConnectRequest{APN: " "}, want: ErrInvalidCellularConfig},
+		{name: "invalid metric", req: model.CellularConnectRequest{APN: "cmnet", RouteMetric: intPtr(-2)}, want: ErrInvalidCellularConfig},
+		{name: "invalid interface", req: model.CellularConnectRequest{APN: "cmnet", InterfaceName: "bad name"}, want: ErrInvalidCellularConfig},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateCellularRequest(tt.req)
+			if !errors.Is(err, tt.want) {
+				t.Fatalf("validateCellularRequest() error = %v, want %v", err, tt.want)
+			}
+		})
+	}
+}
+
+func TestSelectCellularModemByDataInterface(t *testing.T) {
+	modems := []model.CellularModem{
+		{ID: "0", PrimaryPort: "ttyUSB5", DataInterface: "usb0"},
+	}
+
+	got, ok := selectCellularModem(modems, model.CellularConnectRequest{InterfaceName: "usb0", APN: "cmnet"})
+
+	if !ok || got.ID != "0" {
+		t.Fatalf("selectCellularModem() = %+v/%v, want modem 0", got, ok)
+	}
+}
+
+func TestConfigureCellularConnectionRejectsExistingNonGSMConnection(t *testing.T) {
+	runner := newScriptedNetworkRunner()
+	runner.responses["nmcli -g connection.type connection show Office"] = "802-11-wireless"
+	svc := NewService(runner, nil)
+
+	err := svc.configureCellularConnection(context.Background(), model.CellularModem{PrimaryPort: "ttyUSB5"}, model.CellularConnectRequest{
+		APN:            "cmnet",
+		ConnectionName: "Office",
+	}, "Office")
+
+	if !errors.Is(err, ErrInvalidCellularConfig) {
+		t.Fatalf("configureCellularConnection() error = %v, want %v", err, ErrInvalidCellularConfig)
+	}
+	if runner.called("nmcli connection modify Office") {
+		t.Fatalf("configureCellularConnection() modified non-gsm connection")
+	}
+}
+
+func TestConfigureCellularConnectionAllowsExistingGSMConnection(t *testing.T) {
+	runner := newScriptedNetworkRunner()
+	runner.responses["nmcli -g connection.type connection show 4g"] = "gsm"
+	runner.responses["nmcli connection modify 4g connection.interface-name ttyUSB5 gsm.apn cmnet gsm.username  gsm.password  ipv4.method auto ipv6.method auto"] = ""
+	svc := NewService(runner, nil)
+
+	err := svc.configureCellularConnection(context.Background(), model.CellularModem{PrimaryPort: "ttyUSB5"}, model.CellularConnectRequest{
+		APN:            "cmnet",
+		ConnectionName: "4g",
+	}, "4g")
+
+	if err != nil {
+		t.Fatalf("configureCellularConnection() error = %v, want nil", err)
+	}
+	if !runner.called("nmcli connection modify 4g") {
+		t.Fatalf("configureCellularConnection() did not modify existing gsm connection")
 	}
 }
 
@@ -406,6 +567,51 @@ func stringsJoinLines(lines ...string) string {
 			result += "\n"
 		}
 		result += line
+	}
+	return result
+}
+
+func intPtr(value int) *int {
+	return &value
+}
+
+type scriptedNetworkRunner struct {
+	responses map[string]string
+	calls     []string
+}
+
+func newScriptedNetworkRunner() *scriptedNetworkRunner {
+	return &scriptedNetworkRunner{
+		responses: map[string]string{},
+		calls:     []string{},
+	}
+}
+
+func (r *scriptedNetworkRunner) Run(_ context.Context, name string, args ...string) ([]byte, error) {
+	call := stringsJoinFields(append([]string{name}, args...)...)
+	r.calls = append(r.calls, call)
+	if response, ok := r.responses[call]; ok {
+		return []byte(response), nil
+	}
+	return nil, errors.New("unexpected command: " + call)
+}
+
+func (r *scriptedNetworkRunner) called(prefix string) bool {
+	for _, call := range r.calls {
+		if len(call) >= len(prefix) && call[:len(prefix)] == prefix {
+			return true
+		}
+	}
+	return false
+}
+
+func stringsJoinFields(fields ...string) string {
+	result := ""
+	for index, field := range fields {
+		if index > 0 {
+			result += " "
+		}
+		result += field
 	}
 	return result
 }

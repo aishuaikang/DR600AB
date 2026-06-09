@@ -190,6 +190,7 @@ func TestHandleUpdateUserSettingsNormalizesWhitelistAndAlarmSettings(t *testing.
 			{Serial: "  DJI-001  ", Model: "  Mavic 3  ", Source: "  manual  "},
 			{Serial: "dji-001", Model: "duplicate"},
 			{Serial: "   "},
+			{Serial: "86ca8046", Model: "DJI-Drone", Source: "screen_position"},
 			{Serial: "RID-002", Model: "Mini 4 Pro"},
 		},
 		ScreenAlarmSettings: &model.ScreenAlarmSettings{

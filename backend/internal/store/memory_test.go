@@ -557,18 +557,28 @@ func TestMemoryStoreScreenPositionsKeepsNonNumericHyphenModel(t *testing.T) {
 	}
 }
 
-func TestMemoryStoreScreenPositionsSkipsUncrackedDJIDrone(t *testing.T) {
+func TestMemoryStoreScreenPositionsKeepsUncrackedDJIDrone(t *testing.T) {
 	st := NewMemoryStore(10, 10)
 	base := time.Now()
+	target := screenPositionTarget("sn-1", "device-a", "DJI-Drone", base)
+	target.Source = "did_encrypted"
+	target.Cracked = false
+	target.Drone = nil
 
-	_, updated := st.AddScreenPosition(screenPositionTarget("sn-1", "device-a", "DJI-Drone", base))
-	if updated {
-		t.Fatalf("uncracked DJI-Drone should not update screen positions")
+	_, updated := st.AddScreenPosition(target)
+	if !updated {
+		t.Fatalf("uncracked DJI-Drone should update screen positions")
 	}
 
 	items := st.ListScreenPositions(10)
-	if len(items) != 0 {
-		t.Fatalf("screen positions count = %d, want 0", len(items))
+	if len(items) != 1 {
+		t.Fatalf("screen positions count = %d, want 1", len(items))
+	}
+	if items[0].Model != "DJI-Drone" || items[0].Cracked {
+		t.Fatalf("fallback target = %#v", items[0])
+	}
+	if items[0].Drone != nil {
+		t.Fatalf("fallback drone point = %#v, want nil", items[0].Drone)
 	}
 }
 
@@ -694,13 +704,14 @@ func TestMemoryStoreScreenPositionsDoesNotMergeCorruptedSerialMiddle(t *testing.
 	}
 }
 
-func TestMemoryStoreScreenPositionsAddsCrackedDIDEncryptedAfterSkippingFallback(t *testing.T) {
+func TestMemoryStoreScreenPositionsReplacesDIDEncryptedFallbackWithCrackedTarget(t *testing.T) {
 	st := NewMemoryStore(10, 10)
 	base := time.Now()
 
 	fallback := screenPositionTarget("86ca8046", "device-a", "DJI-Drone", base)
 	fallback.CorrelationID = "did_encrypted:86ca8046"
 	fallback.Source = "did_encrypted"
+	fallback.Drone = nil
 	decoded := screenPositionTarget("o3-sn", "device-b", "DJI O4", base.Add(time.Second))
 	decoded.CorrelationID = "did_encrypted:86ca8046"
 	decoded.Source = "did_encrypted"
@@ -716,8 +727,15 @@ func TestMemoryStoreScreenPositionsAddsCrackedDIDEncryptedAfterSkippingFallback(
 		Cracked:    true,
 	}
 
-	if _, updated := st.AddScreenPosition(fallback); updated {
-		t.Fatalf("uncracked DJI-Drone fallback should not update screen positions")
+	if _, updated := st.AddScreenPosition(fallback); !updated {
+		t.Fatalf("uncracked DJI-Drone fallback should update screen positions")
+	}
+	removed, ok := st.RemoveUncrackedDIDScreenPositionByCorrelationID("did_encrypted:86ca8046")
+	if !ok {
+		t.Fatalf("expected DID encrypted fallback to be removed")
+	}
+	if removed.Serial != "86ca8046" || removed.Model != "DJI-Drone" || removed.Cracked {
+		t.Fatalf("removed target = %#v", removed)
 	}
 	if _, updated := st.AddScreenPosition(decoded); !updated {
 		t.Fatalf("decoded DID encrypted target should update screen positions")
@@ -740,14 +758,41 @@ func TestMemoryStoreScreenPositionsAddsCrackedDIDEncryptedAfterSkippingFallback(
 		t.Fatalf("expected cracked target")
 	}
 	if items[0].HitCount != 1 {
-		t.Fatalf("hit count = %d, want 1", items[0].HitCount)
+		t.Fatalf("hit count = %d, want decoded target after fallback removal", items[0].HitCount)
 	}
 	if items[0].Device != "device-b" {
 		t.Fatalf("device = %q, want latest device-b", items[0].Device)
 	}
 }
 
-func TestMemoryStoreScreenPositionsSkipsUncrackedDJIDroneAfterCrackedTarget(t *testing.T) {
+func TestMemoryStoreHasCrackedScreenPositionByCorrelationID(t *testing.T) {
+	st := NewMemoryStore(10, 10)
+	base := time.Now()
+
+	fallback := screenPositionTarget("86ca8046", "device-a", "DJI-Drone", base)
+	fallback.CorrelationID = "did_encrypted:86ca8046"
+	fallback.Source = "did_encrypted"
+	fallback.Cracked = false
+	decoded := screenPositionTarget("o3-sn", "device-b", "DJI O4", base.Add(time.Second))
+	decoded.CorrelationID = "did_encrypted:86ca8046"
+	decoded.Source = "did_encrypted"
+	decoded.Cracked = true
+
+	st.AddScreenPosition(fallback)
+	if st.HasCrackedScreenPositionByCorrelationID("did_encrypted:86ca8046") {
+		t.Fatalf("fallback should not count as cracked correlation")
+	}
+	st.RemoveUncrackedDIDScreenPositionByCorrelationID("did_encrypted:86ca8046")
+	st.AddScreenPosition(decoded)
+	if !st.HasCrackedScreenPositionByCorrelationID("did_encrypted:86ca8046") {
+		t.Fatalf("decoded target should count as cracked correlation")
+	}
+	if st.HasCrackedScreenPositionByCorrelationID("did_encrypted:missing") {
+		t.Fatalf("missing correlation should not count as cracked")
+	}
+}
+
+func TestMemoryStoreScreenPositionsDoesNotMergeLaterFallbackIntoCrackedDIDEncrypted(t *testing.T) {
 	st := NewMemoryStore(10, 10)
 	base := time.Now()
 
@@ -786,41 +831,57 @@ func TestMemoryStoreScreenPositionsSkipsUncrackedDJIDroneAfterCrackedTarget(t *t
 		Cracked:    false,
 	}
 
-	if _, updated := st.AddScreenPosition(fallback); updated {
-		t.Fatalf("uncracked DJI-Drone fallback should not update screen positions")
+	if _, updated := st.AddScreenPosition(fallback); !updated {
+		t.Fatalf("uncracked DJI-Drone fallback should update screen positions")
 	}
+	st.RemoveUncrackedDIDScreenPositionByCorrelationID("did_encrypted:86ca8046")
 	st.AddScreenPosition(decoded)
-	if _, updated := st.AddScreenPosition(secondFallback); updated {
-		t.Fatalf("uncracked DJI-Drone fallback should not update cracked target")
+	if _, updated := st.AddScreenPosition(secondFallback); !updated {
+		t.Fatalf("later uncracked DJI-Drone fallback should update screen positions")
 	}
 
 	items := st.ListScreenPositions(10)
-	if len(items) != 1 {
-		t.Fatalf("screen positions count = %d, want 1", len(items))
+	if len(items) != 2 {
+		t.Fatalf("screen positions count = %d, want cracked target plus fallback", len(items))
 	}
-	if items[0].Serial != "o3-sn" {
-		t.Fatalf("serial = %q, want decrypted serial", items[0].Serial)
+
+	var cracked, pending *model.ScreenPositionTarget
+	for index := range items {
+		switch {
+		case items[index].Cracked:
+			cracked = &items[index]
+		case items[index].Model == "DJI-Drone":
+			pending = &items[index]
+		}
 	}
-	if items[0].Model != "DJI O4" {
-		t.Fatalf("model = %q, want decrypted model", items[0].Model)
+	if cracked == nil {
+		t.Fatalf("cracked target not found: %#v", items)
 	}
-	if !items[0].Cracked {
-		t.Fatalf("expected target to stay cracked")
+	if pending == nil {
+		t.Fatalf("pending fallback target not found: %#v", items)
 	}
-	if items[0].Drone == nil || items[0].Drone.Latitude != 31.2 {
-		t.Fatalf("expected decrypted coordinates to be preserved, got %#v", items[0].Drone)
+	if cracked.Serial != "o3-sn" {
+		t.Fatalf("serial = %q, want decrypted serial", cracked.Serial)
 	}
-	if !items[0].LastSeen.Equal(decoded.LastSeen) {
-		t.Fatalf("last seen = %s, want %s", items[0].LastSeen, decoded.LastSeen)
+	if cracked.Model != "DJI O4" {
+		t.Fatalf("model = %q, want decrypted model", cracked.Model)
 	}
-	if items[0].Frequency != decoded.Frequency || items[0].RSSI != decoded.RSSI {
-		t.Fatalf("expected latest signal fields, got freq=%v rssi=%v", items[0].Frequency, items[0].RSSI)
+	if cracked.Drone == nil || cracked.Drone.Latitude != 31.2 {
+		t.Fatalf("expected decrypted coordinates to be preserved, got %#v", cracked.Drone)
 	}
-	if items[0].LastRecord.Model != "DJI O4" || !items[0].LastRecord.Cracked {
-		t.Fatalf("expected decrypted last record to be preserved, got %#v", items[0].LastRecord)
+	if cracked.LastRecord.Model != "DJI O4" || !cracked.LastRecord.Cracked {
+		t.Fatalf("expected decrypted last record to be preserved, got %#v", cracked.LastRecord)
 	}
-	if items[0].Device != "device-b" {
-		t.Fatalf("device = %q, want device-b", items[0].Device)
+	if pending.Serial != "86ca8046" || pending.Cracked {
+		t.Fatalf("pending fallback = %#v", pending)
+	}
+
+	if _, ok := st.RemoveUncrackedDIDScreenPositionByCorrelationID("did_encrypted:86ca8046"); !ok {
+		t.Fatalf("expected later fallback to be removed by correlation id")
+	}
+	items = st.ListScreenPositions(10)
+	if len(items) != 1 || items[0].Serial != "o3-sn" || !items[0].Cracked {
+		t.Fatalf("positions after fallback removal = %#v", items)
 	}
 }
 

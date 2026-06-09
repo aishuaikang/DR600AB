@@ -18,6 +18,7 @@ import (
 	"dr600ab-api/internal/store"
 	"serialport"
 	"tri-detector/client"
+	"uav-protocol/diddecrypt"
 	protocolmerge "uav-protocol/merge"
 	"uav-protocol/parser"
 )
@@ -851,6 +852,12 @@ func (s *Service) ingestScreenPosition(parsed model.ParsedMessage, msg *parser.M
 		}
 	case *parser.DIDEncrypted:
 		did := *data
+		correlationID := didEncryptedCorrelationID(&did)
+		if target, ok := screenPositionFromDIDEncryptedFallback(parsed, &did); ok &&
+			!s.store.HasCrackedScreenPositionByCorrelationID(correlationID) {
+			target.CorrelationID = correlationID
+			s.store.AddScreenPosition(target)
+		}
 		s.mu.RLock()
 		decoder := s.o3Decoder
 		s.mu.RUnlock()
@@ -858,10 +865,9 @@ func (s *Service) ingestScreenPosition(parsed model.ParsedMessage, msg *parser.M
 			return
 		}
 		deviceSN := did.Device
-		correlationID := didEncryptedCorrelationID(&did)
 		go func() {
 			target, ok := decoder.ParseO3PlusO4PacketMQTT(context.Background(), did, deviceSN, parsed.Time)
-			if !ok {
+			if !ok || !target.Cracked {
 				return
 			}
 			target.CorrelationID = correlationID
@@ -882,6 +888,7 @@ func (s *Service) ingestScreenPosition(parsed model.ParsedMessage, msg *parser.M
 			if target.LastRecord.RSSI == 0 {
 				target.LastRecord.RSSI = did.RSSI
 			}
+			s.store.RemoveUncrackedDIDScreenPositionByCorrelationID(correlationID)
 			s.store.AddScreenPosition(target)
 		}()
 	}
@@ -892,6 +899,37 @@ func didEncryptedCorrelationID(data *parser.DIDEncrypted) string {
 		return ""
 	}
 	return protocolmerge.DIDEncryptedCorrelationID(data.EncryptedID)
+}
+
+func screenPositionFromDIDEncryptedFallback(parsed model.ParsedMessage, data *parser.DIDEncrypted) (model.ScreenPositionTarget, bool) {
+	if data == nil || strings.TrimSpace(data.EncryptedID) == "" {
+		return model.ScreenPositionTarget{}, false
+	}
+	target := screenPositionFromProtocolTarget(diddecrypt.TargetFromDecryptResult(
+		*data,
+		diddecrypt.DecryptResult{Model: diddecrypt.FallbackModel},
+		parsed.Time,
+		false,
+	))
+	clearUncrackedDIDFallbackCoordinates(&target)
+	target.LastRecord.Type = parsed.Type
+	target.LastRecord.ReceivedAt = parsed.Time
+	if target.LastRecord.Device == "" {
+		target.LastRecord.Device = data.Device
+	}
+	if target.LastRecord.Serial == "" {
+		target.LastRecord.Serial = target.Serial
+	}
+	if target.LastRecord.Model == "" {
+		target.LastRecord.Model = target.Model
+	}
+	if target.LastRecord.Frequency == 0 {
+		target.LastRecord.Frequency = data.Freq
+	}
+	if target.LastRecord.RSSI == 0 {
+		target.LastRecord.RSSI = data.RSSI
+	}
+	return target, true
 }
 
 func screenPositionFromRID(parsed model.ParsedMessage, data *parser.RID) (model.ScreenPositionTarget, bool) {

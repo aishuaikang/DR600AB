@@ -170,7 +170,7 @@ function App() {
   const licenseInvalid = license !== null && !licenseValid;
   const licenseRecoveryMode = licenseInvalid && !license.deviceSn;
   const debugAccessBlocked = licenseValid && !developerActive && isDebugPage(page);
-  const needsRuntimeData = licenseValid && page !== "screen" && page !== "settings" && page !== "whitelist" && page !== "intrusions" && page !== "fpv-records" && page !== "deception-reports" && !debugAccessBlocked;
+  const needsRuntimeData = licenseValid && page !== "screen" && page !== "settings" && page !== "network-settings" && page !== "whitelist" && page !== "intrusions" && page !== "fpv-records" && page !== "deception-reports" && !debugAccessBlocked;
   const needsSerialRecoveryData = licenseRecoveryMode;
   const serialSettingsEnabled = needsRuntimeData || needsSerialRecoveryData;
   const deceptionReportsVisible = licenseValid ? adminScreenStatus?.deception.configured !== false : false;
@@ -1293,7 +1293,7 @@ function App() {
                   />
                 ) : null}
 
-                {page === "network-settings" && developerActive ? (
+                {page === "network-settings" ? (
                   <NetworkSettingsPage
                     locale={locale}
                     developerToken={developerToken}

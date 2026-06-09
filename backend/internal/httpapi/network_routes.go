@@ -17,14 +17,12 @@ func (s *Server) registerNetworkRoutes(api fiber.Router) {
 	api.Put("/network/priorities", s.handleUpdateNetworkInterfacePriorities)
 	api.Get("/network/wifi", s.handleWiFiNetworks)
 	api.Post("/network/wifi/connect", s.handleConnectWiFi)
+	api.Post("/network/cellular/connect", s.handleConnectCellular)
 }
 
 // handleNetworkInterfaces 返回当前系统网口状态。
 func (s *Server) handleNetworkInterfaces(c *fiber.Ctx) error {
 	locale := s.resolveLocale(c)
-	if !s.requireDeveloper(c, locale) {
-		return nil
-	}
 
 	interfaces, err := s.network.ListInterfaces(c.Context())
 	if err != nil {
@@ -53,9 +51,6 @@ func (s *Server) handleNetworkInterfaces(c *fiber.Ctx) error {
 // handleUpdateNetworkInterfacePriorities 批量更新网口路由优先级。
 func (s *Server) handleUpdateNetworkInterfacePriorities(c *fiber.Ctx) error {
 	locale := s.resolveLocale(c)
-	if !s.requireDeveloper(c, locale) {
-		return nil
-	}
 
 	var req model.NetworkPriorityBatchRequest
 	if err := c.BodyParser(&req); err != nil {
@@ -82,9 +77,6 @@ func (s *Server) handleUpdateNetworkInterfacePriorities(c *fiber.Ctx) error {
 // handleUpdateNetworkInterface 更新指定网口 IPv4 配置。
 func (s *Server) handleUpdateNetworkInterface(c *fiber.Ctx) error {
 	locale := s.resolveLocale(c)
-	if !s.requireDeveloper(c, locale) {
-		return nil
-	}
 
 	var req model.NetworkInterfaceUpdateRequest
 	if err := c.BodyParser(&req); err != nil {
@@ -111,9 +103,6 @@ func (s *Server) handleUpdateNetworkInterface(c *fiber.Ctx) error {
 // handleWiFiNetworks 返回附近无线网络。
 func (s *Server) handleWiFiNetworks(c *fiber.Ctx) error {
 	locale := s.resolveLocale(c)
-	if !s.requireDeveloper(c, locale) {
-		return nil
-	}
 
 	networks, err := s.network.ScanWiFi(c.Context())
 	if err != nil {
@@ -144,9 +133,6 @@ func (s *Server) handleWiFiNetworks(c *fiber.Ctx) error {
 // handleConnectWiFi 连接指定无线网络。
 func (s *Server) handleConnectWiFi(c *fiber.Ctx) error {
 	locale := s.resolveLocale(c)
-	if !s.requireDeveloper(c, locale) {
-		return nil
-	}
 
 	var req model.WiFiConnectRequest
 	if err := c.BodyParser(&req); err != nil {
@@ -165,6 +151,32 @@ func (s *Server) handleConnectWiFi(c *fiber.Ctx) error {
 
 	return c.JSON(model.WiFiConnectResponse{
 		Message: s.translator.T(locale, "common", "wifi.connected"),
+	})
+}
+
+// handleConnectCellular 创建或更新移动网络连接并尝试拨号。
+func (s *Server) handleConnectCellular(c *fiber.Ctx) error {
+	locale := s.resolveLocale(c)
+
+	var req model.CellularConnectRequest
+	if err := c.BodyParser(&req); err != nil {
+		return s.respondError(
+			c,
+			fiber.StatusBadRequest,
+			"invalid_request",
+			s.translator.T(locale, "errors", "invalid_request"),
+			err.Error(),
+		)
+	}
+
+	items, err := s.network.ConnectCellular(c.Context(), req)
+	if err != nil {
+		return s.respondNetworkError(c, locale, err)
+	}
+
+	return c.JSON(model.CellularConnectResponse{
+		Interfaces: items,
+		Message:    s.translator.T(locale, "common", "cellular.connected"),
 	})
 }
 
@@ -239,6 +251,14 @@ func (s *Server) respondNetworkError(c *fiber.Ctx, locale string, err error) err
 		status = fiber.StatusBadRequest
 		code = "wifi_invalid_config"
 		message = s.translator.T(locale, "errors", "wifi_invalid_config")
+	case errors.Is(err, network.ErrCellularUnavailable):
+		status = fiber.StatusServiceUnavailable
+		code = "cellular_unavailable"
+		message = s.translator.T(locale, "errors", "cellular_unavailable")
+	case errors.Is(err, network.ErrInvalidCellularConfig):
+		status = fiber.StatusBadRequest
+		code = "cellular_invalid_config"
+		message = s.translator.T(locale, "errors", "cellular_invalid_config")
 	}
 
 	return s.respondError(c, status, code, message, err.Error())

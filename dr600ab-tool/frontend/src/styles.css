@@ -18,6 +18,14 @@
   box-sizing: border-box;
 }
 
+html,
+body {
+  overscroll-behavior: none;
+  touch-action: pan-x pan-y;
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
 body {
   margin: 0;
   min-width: 980px;
