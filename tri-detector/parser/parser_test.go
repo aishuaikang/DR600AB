@@ -18,15 +18,32 @@ func TestParseDIDEncrypted(t *testing.T) {
 }
 
 func TestParseRID(t *testing.T) {
-	line := "RID ssid=RID-1581F6Z9C2412003L1W8, serial=1581F6Z9C2412003L1W8, model=DJI Mini 4 pro, UA_type=2, drone_GPS=0.000000,0.000000, pilot_GPS=0.000000,0.000000, speed=0.0, Vspeed=0, direc=361, AltitudeP=-38.5, AltitudeG=-1000.0, Height_AGL=0, MAC=60:60:1f:38:98:b9, rssi=-82, freq=2437"
+	line := "RID ssid=RID-1581F6Z9C2412003L1W8, serial=1581F6Z9C2412003L1W8, ver=1, name=Mini Patrol, model=DJI Mini 4 pro, UA_type=2, drone_GPS=0.000000,0.000000, pilot_GPS=0.000000,0.000000, speed=0.0, Vspeed=0, direc=361, AltitudeP=-38.5, AltitudeG=-1000.0, Height_AGL=0, MAC=60:60:1f:38:98:b9, rssi=-82, freq=2437"
 	msg, err := ParseLine(line)
 	if err != nil {
 		t.Fatal(err)
 	}
 	d := msg.Data.(*RID)
+	if d.Version != "1" || d.Name != "Mini Patrol" {
+		t.Fatalf("rid version/name = %q/%q, want 1/Mini Patrol", d.Version, d.Name)
+	}
 	b, _ := json.MarshalIndent(msg, "", "  ")
 	t.Logf("result: %s", b)
 	_ = d
+}
+
+func TestParseRIDWithEmptyName(t *testing.T) {
+	line := "RID ssid=RID-1581F6Z9C2412003L1W8, serial=1581F6Z9C2412003L1W8, ver=1, name=, model=DJI Mini 4 pro, UA_type=2, drone_GPS=0.000000,0.000000, pilot_GPS=0.000000,0.000000, speed=0.0, Vspeed=0, direc=361, AltitudeP=67.5, AltitudeG=-1000.0, Height_AGL=0, MAC=60:60:1f:38:98:b9, rssi=-80, freq=2437"
+
+	msg, err := ParseLine(line)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	d := msg.Data.(*RID)
+	if d.Version != "1" || d.Name != "" || d.Model != "DJI Mini 4 pro" {
+		t.Fatalf("rid = %+v, want version=1 empty name and model parsed", d)
+	}
 }
 
 func TestParseRIDRejectsIncompleteLine(t *testing.T) {

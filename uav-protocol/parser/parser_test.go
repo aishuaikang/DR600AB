@@ -34,13 +34,16 @@ func TestParseLine(t *testing.T) {
 		},
 		{
 			name:     "rid",
-			line:     "RID ssid=RID-1581ABC, serial=1581ABC, model=DJI Mini 4 Pro, UA_type=2, drone_GPS=121.400000,31.200000, pilot_GPS=121.410000,31.210000, speed=12.5, Vspeed=0, direc=90, AltitudeP=20.0, AltitudeG=110.0, Height_AGL=35.5, MAC=60:60:1f:38:98:b9, rssi=-82, freq=2437",
+			line:     "RID ssid=RID-1581ABC, serial=1581ABC, ver=1, name=Mini Patrol, model=DJI Mini 4 Pro, UA_type=2, drone_GPS=121.400000,31.200000, pilot_GPS=121.410000,31.210000, speed=12.5, Vspeed=0, direc=90, AltitudeP=20.0, AltitudeG=110.0, Height_AGL=35.5, MAC=60:60:1f:38:98:b9, rssi=-82, freq=2437",
 			wantType: model.TypeRID,
 			check: func(t *testing.T, msg *model.Message) {
 				t.Helper()
 				data := msg.Data.(*model.RID)
 				if data.Serial != "1581ABC" || data.DroneGPS.Lat != 31.2 || data.DroneGPS.Lng != 121.4 {
 					t.Fatalf("rid = %+v", data)
+				}
+				if data.Version != "1" || data.Name != "Mini Patrol" {
+					t.Fatalf("rid version/name = %q/%q, want 1/Mini Patrol", data.Version, data.Name)
 				}
 			},
 		},

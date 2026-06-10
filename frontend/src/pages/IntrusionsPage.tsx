@@ -116,14 +116,14 @@ function formatRSSI(locale: string, value?: number) {
   return `${formatNumber(locale, value, 0)} dBm`;
 }
 
-function formatOptionalMetric(locale: string, value: number | undefined, unit: string, digits = 1) {
+function formatOptionalMetric(locale: string, value: number | null | undefined, unit: string, digits = 1) {
   if (typeof value !== "number" || !Number.isFinite(value)) {
     return "-";
   }
   return `${formatNumber(locale, value, digits)} ${unit}`;
 }
 
-function formatDistanceMetric(locale: string, value: number | undefined) {
+function formatDistanceMetric(locale: string, value: number | null | undefined) {
   if (typeof value !== "number" || !Number.isFinite(value)) {
     return "-";
   }
@@ -221,6 +221,7 @@ function intrusionToPositionTarget(record: IntrusionRecord): ScreenPositionTarge
     device: record.device,
     drone: validIntrusionPoint(record.drone) ? record.drone : undefined,
     pilot: validIntrusionPoint(record.pilot) ? record.pilot : undefined,
+    home: validIntrusionPoint(record.home) ? record.home : undefined,
     droneTrajectory: (record.droneTrajectory ?? []).filter(validIntrusionTrackPoint),
     pilotTrajectory: (record.pilotTrajectory ?? []).filter(validIntrusionTrackPoint),
     height: record.height,

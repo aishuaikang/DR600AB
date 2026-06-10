@@ -215,11 +215,11 @@ func TestScanSerialRecords(t *testing.T) {
 		{
 			name: "rid releases before encrypted record",
 			input: strings.Join([]string{
-				"RID ssid=RID-1581F6N8C23840032ZDA, serial=1581F6N8C23840032ZDA, model=DJI AIR 3, UA_type=2, drone_GPS=0.000000,0.000000, pilot_GPS=116.882180,28.256403, speed=0.0, Vspeed=0, direc=361, AltitudeP=78.0, AltitudeG=-1000.0, Height_AGL=0, MAC=60:60:1f:71:a2:54, rssi=-80, freq=5805",
+				"RID ssid=RID-1581F6N8C23840032ZDA, serial=1581F6N8C23840032ZDA, ver=1, name=, model=DJI AIR 3, UA_type=2, drone_GPS=0.000000,0.000000, pilot_GPS=116.882180,28.256403, speed=0.0, Vspeed=0, direc=361, AltitudeP=78.0, AltitudeG=-1000.0, Height_AGL=0, MAC=60:60:1f:71:a2:54, rssi=-80, freq=5805",
 				"#=6/0/0, device=4747, Encypted Mavic_O4_ID=557777f5, freq=5796.5, rssi=-71, byte,ee,4a",
 			}, ""),
 			want: []string{
-				"RID ssid=RID-1581F6N8C23840032ZDA, serial=1581F6N8C23840032ZDA, model=DJI AIR 3, UA_type=2, drone_GPS=0.000000,0.000000, pilot_GPS=116.882180,28.256403, speed=0.0, Vspeed=0, direc=361, AltitudeP=78.0, AltitudeG=-1000.0, Height_AGL=0, MAC=60:60:1f:71:a2:54, rssi=-80, freq=5805",
+				"RID ssid=RID-1581F6N8C23840032ZDA, serial=1581F6N8C23840032ZDA, ver=1, name=, model=DJI AIR 3, UA_type=2, drone_GPS=0.000000,0.000000, pilot_GPS=116.882180,28.256403, speed=0.0, Vspeed=0, direc=361, AltitudeP=78.0, AltitudeG=-1000.0, Height_AGL=0, MAC=60:60:1f:71:a2:54, rssi=-80, freq=5805",
 				"#=6/0/0, device=4747, Encypted Mavic_O4_ID=557777f5, freq=5796.5, rssi=-71, byte,ee,4a",
 			},
 		},

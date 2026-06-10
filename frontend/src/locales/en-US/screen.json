@@ -68,6 +68,7 @@
   "positionDrone": "Drone",
   "positionPilot": "Pilot",
   "positionHome": "Home",
+  "positionAltitude": "Altitude",
   "positionPilotDistance": "Pilot Distance",
   "positionDroneDistance": "Drone Distance",
   "mapLegend": "Legend",

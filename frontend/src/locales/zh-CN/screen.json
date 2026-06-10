@@ -68,6 +68,7 @@
   "positionDrone": "无人机",
   "positionPilot": "飞手",
   "positionHome": "返航点",
+  "positionAltitude": "海拔高度",
   "positionPilotDistance": "飞手距离",
   "positionDroneDistance": "无人机距离",
   "mapLegend": "图例",

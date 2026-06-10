@@ -195,8 +195,8 @@ function formatFpvRate(frame: ScreenFpvFrame | null) {
   return `${rateMB.toFixed(2)}MB/s`;
 }
 
-function formatRSSI(value: number) {
-  if (!Number.isFinite(value)) {
+function formatRSSI(value: number | undefined) {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
     return "-";
   }
   return `${Math.round(value)}dBm`;
@@ -298,7 +298,7 @@ function distanceMeters(from: ScreenPositionPoint, to: ScreenPositionPoint) {
   return earthRadiusM * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
-function formatPresetDistance(distanceM?: number) {
+function formatPresetDistance(distanceM?: number | null) {
   if (typeof distanceM !== "number" || !Number.isFinite(distanceM)) {
     return "-";
   }
@@ -308,7 +308,7 @@ function formatPresetDistance(distanceM?: number) {
   return `${Math.round(distanceM)}m`;
 }
 
-function formatPositionDistance(value?: number) {
+function formatPositionDistance(value?: number | null) {
   return formatPresetDistance(value);
 }
 
@@ -447,7 +447,7 @@ function targetDisappearRemainingSeconds(lastSeen: string, now: Date) {
   return Math.max(0, Math.ceil(screenTargetExpireSeconds - (now.getTime() - lastSeenAt) / 1000));
 }
 
-function formatOptionalNumber(value: number | undefined, unit: string, digits = 0) {
+function formatOptionalNumber(value: number | null | undefined, unit: string, digits = 0) {
   if (typeof value !== "number" || !Number.isFinite(value)) {
     return "-";
   }
@@ -573,8 +573,8 @@ async function createNavigationQRCodes(label: string, point: ScreenPositionPoint
   } satisfies NavigationQRCodeState;
 }
 
-function getRSSIPercent(value: number) {
-  if (!Number.isFinite(value)) {
+function getRSSIPercent(value: number | undefined) {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
     return 0;
   }
   return Math.max(0, Math.min(100, Math.round(((value + 100) / 65) * 100)));
@@ -1248,13 +1248,13 @@ function PositionPointRow({
   onOpenNavigationQRCode,
 }: {
   label: string;
-  point?: ScreenPositionPoint;
+  point?: ScreenPositionPoint | null;
   t: TFunction;
   onOpenNavigationQRCode?: (label: string, point: ScreenPositionPoint) => void;
 }) {
-  if (validPositionMapPoint(point) && onOpenNavigationQRCode) {
-    const coordinateText = formatNavigationCoordinates(point);
+  const coordinateText = point ? formatNavigationCoordinates(point) : "-";
 
+  if (validPositionMapPoint(point) && onOpenNavigationQRCode) {
     return (
       <button
         className="screen-position-card__point screen-position-card__point--clickable"
@@ -1267,14 +1267,7 @@ function PositionPointRow({
         }}
       >
         <em>{label}</em>
-        <strong>
-          <small>{t("latitudeShort", { ns: "screen" })}</small>
-          {formatCoordinateValue(point.latitude)}
-        </strong>
-        <strong>
-          <small>{t("longitudeShort", { ns: "screen" })}</small>
-          {formatCoordinateValue(point.longitude)}
-        </strong>
+        <strong>{coordinateText}</strong>
         <span className="screen-position-card__point-action" aria-hidden="true">
           <QrCode size={11} />
         </span>
@@ -1285,14 +1278,32 @@ function PositionPointRow({
   return (
     <span className="screen-position-card__point">
       <em>{label}</em>
-      <strong>
-        <small>{t("latitudeShort", { ns: "screen" })}</small>
-        {formatCoordinateValue(point?.latitude)}
-      </strong>
-      <strong>
-        <small>{t("longitudeShort", { ns: "screen" })}</small>
-        {formatCoordinateValue(point?.longitude)}
-      </strong>
+      <strong>{coordinateText}</strong>
+    </span>
+  );
+}
+
+function PositionCompactReadout({ label, value }: { label: string; value: ReactNode }) {
+  return (
+    <span className="screen-position-card__compact-item">
+      <em>{label}</em>
+      <strong>{value}</strong>
+    </span>
+  );
+}
+
+function PositionRSSIReadout({ value, t }: { value?: number; t: TFunction }) {
+  const signalPercent = getRSSIPercent(value);
+
+  return (
+    <span className="screen-position-card__compact-item screen-position-card__compact-item--rssi">
+      <span className="screen-target-signal-head">
+        <em>{t("rssi", { ns: "screen" })}</em>
+        <strong>{formatRSSI(value)}</strong>
+      </span>
+      <span className="screen-target-signal-meter" aria-hidden="true">
+        <span style={{ width: `${signalPercent}%` }} />
+      </span>
     </span>
   );
 }
@@ -1329,6 +1340,7 @@ function PositionTargetCard({
   const timeLabel = showCountdown
     ? `${timeToneTitle}，${t("targetDisappearCountdown", { ns: "screen" })} ${countdownText}`
     : timeToneTitle;
+  const signalPercent = getRSSIPercent(target.rssi);
 
   return (
     <article
@@ -1336,24 +1348,43 @@ function PositionTargetCard({
       onClick={() => onSelect(target)}
     >
       <div className="screen-position-card__head">
-        <span className="screen-position-card__identity">
-          <span className="screen-position-card__title-row">
-            <strong>{target.model || t("unknownTarget", { ns: "screen" })}</strong>
-            {whitelisted ? (
-              <span className="screen-position-card__whitelist-badge">
-                <ShieldCheck size={11} aria-hidden="true" />
-                {t("whitelist", { ns: "screen" })}
-              </span>
-            ) : null}
-            {pendingEncrypted ? (
-              <span className="screen-position-card__parsing">
-                <span aria-hidden="true" />
-                {t("parsingTarget", { ns: "screen" })}
-              </span>
-            ) : null}
+        <div className={cx("screen-position-card__profile", pendingEncrypted && "screen-position-card__profile--text-only")}>
+          {!pendingEncrypted ? (
+            <span className="screen-position-card__image">
+              <img
+                src={imageUrl}
+                alt=""
+                loading="lazy"
+                decoding="async"
+                onError={(event) => {
+                  event.currentTarget.src = mini2Image;
+                }}
+              />
+              <span className="screen-position-card__image-glow" />
+            </span>
+          ) : null}
+          <span className="screen-position-card__identity">
+            <span className="screen-position-card__title-row">
+              {whitelisted ? (
+                <span className="screen-position-card__whitelist-badge">
+                  <ShieldCheck size={11} aria-hidden="true" />
+                  {t("whitelist", { ns: "screen" })}
+                </span>
+              ) : null}
+              <strong>{target.model || t("unknownTarget", { ns: "screen" })}</strong>
+              {pendingEncrypted ? (
+                <span className="screen-position-card__parsing">
+                  <span aria-hidden="true" />
+                  {t("parsingTarget", { ns: "screen" })}
+                </span>
+              ) : null}
+            </span>
+            <span className="screen-position-card__meta-line">
+              <em className="screen-position-card__meta-sn">{t("deviceSn", { ns: "screen" })}: {target.serial || "-"}</em>
+              <em className="screen-position-card__meta-first">{t("firstSeen", { ns: "screen" })}: {formatTargetTime(target.firstSeen)}</em>
+            </span>
           </span>
-          <em>{t("deviceSn", { ns: "screen" })}: {target.serial || "-"}</em>
-        </span>
+        </div>
         <span className="screen-position-card__actions">
           <button
             className={cx(
@@ -1375,21 +1406,6 @@ function PositionTargetCard({
               </span>
             ) : null}
           </button>
-          {allowWhitelist ? (
-            <button
-              className={cx("screen-whitelist-button", whitelisted && "screen-whitelist-button--active")}
-              type="button"
-              disabled={whitelistBusy || !target.serial.trim()}
-              title={whitelisted ? t("removeFromWhitelist", { ns: "screen" }) : t("addToWhitelist", { ns: "screen" })}
-              onClick={(event) => {
-                event.stopPropagation();
-                onToggleWhitelist(target);
-              }}
-            >
-              {whitelisted ? <ShieldMinus size={11} aria-hidden="true" /> : <ShieldPlus size={11} aria-hidden="true" />}
-              <span>{whitelisted ? t("removeFromWhitelistShort", { ns: "screen" }) : t("addToWhitelist", { ns: "screen" })}</span>
-            </button>
-          ) : null}
         </span>
       </div>
 
@@ -1399,83 +1415,63 @@ function PositionTargetCard({
             <em>{t("frequency", { ns: "screen" })}</em>
             <strong>{formatOptionalNumber(target.frequency, "MHz", 1)}</strong>
           </span>
-          <span className="screen-target-readout">
-            <em>{t("rssi", { ns: "screen" })}</em>
-            <strong>{formatOptionalNumber(target.rssi, "dBm", 0)}</strong>
+          <span className="screen-target-readout screen-target-readout--signal">
+            <span className="screen-target-signal-head">
+              <em>{t("rssi", { ns: "screen" })}</em>
+              <strong>{formatRSSI(target.rssi)}</strong>
+            </span>
+            <span className="screen-target-signal-meter" aria-hidden="true">
+              <span style={{ width: `${signalPercent}%` }} />
+            </span>
           </span>
         </div>
       ) : (
         <>
-          <div className="screen-position-card__location">
-            <span className="screen-position-card__image">
-              <img
-                src={imageUrl}
-                alt=""
-                loading="lazy"
-                decoding="async"
-                onError={(event) => {
-                  event.currentTarget.src = mini2Image;
+          <div className="screen-position-card__compact-grid">
+            <PositionCompactReadout label={t("frequency", { ns: "screen" })} value={formatOptionalNumber(target.frequency, "MHz", 1)} />
+            <PositionRSSIReadout value={target.rssi} t={t} />
+            <PositionPointRow
+              label={t("positionDrone", { ns: "screen" })}
+              point={target.drone}
+              t={t}
+              onOpenNavigationQRCode={onOpenNavigationQRCode}
+            />
+            <PositionPointRow
+              label={t("positionPilot", { ns: "screen" })}
+              point={target.pilot}
+              t={t}
+              onOpenNavigationQRCode={onOpenNavigationQRCode}
+            />
+            <PositionPointRow
+              label={t("positionHome", { ns: "screen" })}
+              point={target.home}
+              t={t}
+              onOpenNavigationQRCode={onOpenNavigationQRCode}
+            />
+            <PositionCompactReadout label={t("speed", { ns: "screen" })} value={formatOptionalNumber(target.speed, "m/s", 1)} />
+            <PositionCompactReadout label={t("height", { ns: "screen" })} value={formatOptionalNumber(target.height, "m", 0)} />
+            <PositionCompactReadout label={t("positionAltitude", { ns: "screen" })} value={formatOptionalNumber(target.altitude, "m", 0)} />
+            <PositionCompactReadout label={t("positionDroneDistance", { ns: "screen" })} value={formatPositionDistance(target.droneDistanceM)} />
+            <PositionCompactReadout label={t("positionPilotDistance", { ns: "screen" })} value={formatPositionDistance(target.pilotDistanceM)} />
+          </div>
+
+          {allowWhitelist ? (
+            <div className="screen-position-card__footer">
+              <button
+                className={cx("screen-whitelist-button", whitelisted && "screen-whitelist-button--active")}
+                type="button"
+                disabled={whitelistBusy || !target.serial.trim()}
+                title={whitelisted ? t("removeFromWhitelist", { ns: "screen" }) : t("addToWhitelist", { ns: "screen" })}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onToggleWhitelist(target);
                 }}
-              />
-              <span className="screen-position-card__image-glow" />
-            </span>
-
-            <div className="screen-position-card__grid">
-              <PositionPointRow
-                label={t("positionDrone", { ns: "screen" })}
-                point={target.drone}
-                t={t}
-                onOpenNavigationQRCode={onOpenNavigationQRCode}
-              />
-              <PositionPointRow
-                label={t("positionPilot", { ns: "screen" })}
-                point={target.pilot}
-                t={t}
-                onOpenNavigationQRCode={onOpenNavigationQRCode}
-              />
-              <PositionPointRow
-                label={t("positionHome", { ns: "screen" })}
-                point={target.home}
-                t={t}
-                onOpenNavigationQRCode={onOpenNavigationQRCode}
-              />
+              >
+                {whitelisted ? <ShieldMinus size={11} aria-hidden="true" /> : <ShieldPlus size={11} aria-hidden="true" />}
+                <span>{whitelisted ? t("removeFromWhitelistShort", { ns: "screen" }) : t("addToWhitelist", { ns: "screen" })}</span>
+              </button>
             </div>
-          </div>
-
-          <div className="screen-position-card__readouts screen-target-readouts">
-            <span className="screen-target-readout screen-target-readout--relation">
-              <em>{t("positionPilotDistance", { ns: "screen" })}</em>
-              <strong>{formatPositionDistance(target.pilotDistanceM)}</strong>
-            </span>
-            <span className="screen-target-readout screen-target-readout--relation">
-              <em>{t("positionDroneDistance", { ns: "screen" })}</em>
-              <strong>{formatPositionDistance(target.droneDistanceM)}</strong>
-            </span>
-            <span className="screen-target-readout">
-              <em>{t("frequency", { ns: "screen" })}</em>
-              <strong>{formatOptionalNumber(target.frequency, "MHz", 1)}</strong>
-            </span>
-            <span className="screen-target-readout">
-              <em>{t("rssi", { ns: "screen" })}</em>
-              <strong>{formatOptionalNumber(target.rssi, "dBm", 0)}</strong>
-            </span>
-            <span className="screen-target-readout">
-              <em>{t("height", { ns: "screen" })}</em>
-              <strong>{formatOptionalNumber(target.height, "m", 0)}</strong>
-            </span>
-            <span className="screen-target-readout">
-              <em>{t("altitude", { ns: "screen" })}</em>
-              <strong>{formatOptionalNumber(target.altitude, "m", 0)}</strong>
-            </span>
-            <span className="screen-target-readout">
-              <em>{t("speed", { ns: "screen" })}</em>
-              <strong>{formatOptionalNumber(target.speed, "m/s", 1)}</strong>
-            </span>
-            <span className="screen-target-readout">
-              <em>{t("firstSeen", { ns: "screen" })}</em>
-              <strong>{formatTargetTime(target.firstSeen)}</strong>
-            </span>
-          </div>
+          ) : null}
         </>
       )}
     </article>
@@ -2036,7 +2032,7 @@ function formatVersionStatus(value?: ScreenDeceptionDeviceStatus["version"]) {
 	return `SW ${value.software || "-"} / FPGA ${value.fpga || "-"} / PROTO ${value.protocol || "-"}`;
 }
 
-function formatDegrees(value: number | undefined) {
+function formatDegrees(value: number | null | undefined) {
 	if (typeof value !== "number" || !Number.isFinite(value)) {
 		return "-";
 	}

@@ -13,7 +13,7 @@ var (
 		`^\s*device=[^,\r\n]+,\s*model=[^,\r\n]+,\s*freq=[^,\r\n]+,\s*rssi=[+-]?(?:\d+(?:\.\d)?|\.\d)`,
 	)
 	ridRecordPattern = regexp.MustCompile(
-		`^\s*RID\s+ssid=[^,\r\n]+,\s*serial=[^,\r\n]+,\s*model=[^,\r\n]+,\s*UA_type=[^,\r\n]+,\s*drone_GPS=[^,\r\n]+,[^,\r\n]+,\s*pilot_GPS=[^,\r\n]+,[^,\r\n]+,\s*speed=[^,\r\n]+,\s*Vspeed=[^,\r\n]+,\s*direc=[^,\r\n]+,\s*AltitudeP=[^,\r\n]+,\s*AltitudeG=[^,\r\n]+,\s*Height_AGL=[^,\r\n]+,\s*MAC=[^,\r\n]+,\s*rssi=[+-]?(?:\d+(?:\.\d)?|\.\d),\s*freq=[+-]?(?:\d+(?:\.\d)?|\.\d)`,
+		`^\s*RID\s+ssid=[^,\r\n]+,\s*serial=[^,\r\n]+,\s*(?:ver=[^,\r\n]*,\s*)?(?:name=[^,\r\n]*,\s*)?model=[^,\r\n]+,\s*UA_type=[^,\r\n]+,\s*drone_GPS=[^,\r\n]+,[^,\r\n]+,\s*pilot_GPS=[^,\r\n]+,[^,\r\n]+,\s*speed=[^,\r\n]+,\s*Vspeed=[^,\r\n]+,\s*direc=[^,\r\n]+,\s*AltitudeP=[^,\r\n]+,\s*AltitudeG=[^,\r\n]+,\s*Height_AGL=[^,\r\n]+,\s*MAC=[^,\r\n]+,\s*rssi=[+-]?(?:\d+(?:\.\d)?|\.\d),\s*freq=[+-]?(?:\d+(?:\.\d)?|\.\d)`,
 	)
 	numericDIDPlainRecordPattern = regexp.MustCompile(`^\s*\d+,\s*serial=[^,\r\n]+,\s*(?:model=[^,\r\n]+,\s*)?uuid=`)
 	recordBoundaries             = [][]byte{

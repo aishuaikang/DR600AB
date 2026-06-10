@@ -313,6 +313,82 @@ func TestMemoryStoreScreenPositionsMergeBySerial(t *testing.T) {
 	}
 }
 
+func TestMemoryStoreScreenPositionsIgnoreInvalidIncomingFields(t *testing.T) {
+	st := NewMemoryStore(10, 10)
+	base := time.Now()
+	speed := 8.5
+	height := 30.0
+	altitude := 120.0
+
+	first := screenPositionTarget("sn-1", "device-a", "DJI Mini", base)
+	first.Pilot = &model.ScreenPositionPoint{Latitude: 31.1, Longitude: 121.3}
+	first.Home = &model.ScreenPositionPoint{Latitude: 31.0, Longitude: 121.2}
+	first.Speed = &speed
+	first.Height = &height
+	first.Altitude = &altitude
+
+	second := screenPositionTarget("sn-1", "", "DJI Mini 4", base.Add(time.Second))
+	second.Frequency = 0
+	second.RSSI = 0
+	second.Device = ""
+	second.Drone = &model.ScreenPositionPoint{Latitude: 0, Longitude: 0}
+	second.Pilot = nil
+	second.Home = nil
+	second.Speed = nil
+	second.Height = nil
+	second.Altitude = nil
+	second.LastRecord = model.ScreenPositionLastRecord{
+		Type:       "rid",
+		ReceivedAt: base.Add(time.Second),
+		Serial:     "sn-1",
+	}
+
+	st.AddScreenPosition(first)
+	st.AddScreenPosition(second)
+
+	items := st.ListScreenPositions(10)
+	if len(items) != 1 {
+		t.Fatalf("screen positions count = %d, want 1", len(items))
+	}
+	item := items[0]
+	if item.Model != "DJI Mini 4" {
+		t.Fatalf("model = %q, want latest valid model", item.Model)
+	}
+	if item.Frequency != 2437 {
+		t.Fatalf("frequency = %v, want previous valid 2437", item.Frequency)
+	}
+	if item.RSSI != -68 {
+		t.Fatalf("rssi = %v, want previous valid -68", item.RSSI)
+	}
+	if item.Device != "device-a" {
+		t.Fatalf("device = %q, want previous valid device-a", item.Device)
+	}
+	if item.Drone == nil || item.Drone.Latitude != 31.2 || item.Drone.Longitude != 121.4 {
+		t.Fatalf("drone point = %#v, want previous valid drone point", item.Drone)
+	}
+	if item.Pilot == nil || item.Pilot.Latitude != 31.1 || item.Pilot.Longitude != 121.3 {
+		t.Fatalf("pilot point = %#v, want previous valid pilot point", item.Pilot)
+	}
+	if item.Home == nil || item.Home.Latitude != 31.0 || item.Home.Longitude != 121.2 {
+		t.Fatalf("home point = %#v, want previous valid home point", item.Home)
+	}
+	if item.Speed == nil || *item.Speed != speed {
+		t.Fatalf("speed = %#v, want previous valid %v", item.Speed, speed)
+	}
+	if item.Height == nil || *item.Height != height {
+		t.Fatalf("height = %#v, want previous valid %v", item.Height, height)
+	}
+	if item.Altitude == nil || *item.Altitude != altitude {
+		t.Fatalf("altitude = %#v, want previous valid %v", item.Altitude, altitude)
+	}
+	if item.LastRecord.Device != "device-a" ||
+		item.LastRecord.Model != "DJI Mini" ||
+		item.LastRecord.Frequency != 2437 ||
+		item.LastRecord.RSSI != -68 {
+		t.Fatalf("last record = %#v, want invalid incoming fields ignored", item.LastRecord)
+	}
+}
+
 func TestMemoryStoreScreenPositionsTracksDroneAndPilotTrajectory(t *testing.T) {
 	st := NewMemoryStore(10, 10)
 	base := time.Now()

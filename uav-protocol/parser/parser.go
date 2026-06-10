@@ -172,6 +172,8 @@ func buildRID(f map[string]string) *model.RID {
 	return &model.RID{
 		SSID:      f["ssid"],
 		Serial:    f["serial"],
+		Version:   f["ver"],
+		Name:      f["name"],
 		Model:     f["model"],
 		UAType:    f["UA_type"],
 		DroneGPS:  parseGPS(f["drone_GPS"]),

@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"log/slog"
+	"math"
 	"slices"
 	"strings"
 	"sync"
@@ -510,6 +511,7 @@ func (s *MemoryStore) addScreenPositionLocked(target model.ScreenPositionTarget)
 		if merged.CorrelationID == "" {
 			merged.CorrelationID = s.positions[matchIndex].CorrelationID
 		}
+		merged = mergeScreenPositionFallbackFields(merged, s.positions[matchIndex])
 		merged.Sources = appendScreenTargetSources(merged.Sources, s.positions[matchIndex].Source)
 		merged.Sources = appendScreenTargetSources(merged.Sources, s.positions[matchIndex].Sources...)
 		if s.positions[matchIndex].FirstSeen.Before(merged.FirstSeen) {
@@ -534,24 +536,30 @@ func (s *MemoryStore) addScreenPositionLocked(target model.ScreenPositionTarget)
 	if !keepDecodedFields {
 		merged.Serial = target.Serial
 		merged.Model = target.Model
-		merged.Source = target.Source
+		if target.Source != "" {
+			merged.Source = target.Source
+		}
 	}
-	merged.Frequency = target.Frequency
-	merged.RSSI = target.RSSI
+	if validScreenPositionFrequency(target.Frequency) {
+		merged.Frequency = target.Frequency
+	}
+	if validScreenPositionRSSI(target.RSSI) {
+		merged.RSSI = target.RSSI
+	}
 	if target.Device != "" {
 		merged.Device = target.Device
 	}
 	merged.DroneTrajectory = mergeScreenPositionTrajectories(merged.DroneTrajectory, target.DroneTrajectory)
 	merged.PilotTrajectory = mergeScreenPositionTrajectories(merged.PilotTrajectory, target.PilotTrajectory)
 	if !keepDecodedFields {
-		merged.Drone = cloneScreenPositionPoint(target.Drone)
-		merged.Pilot = cloneScreenPositionPoint(target.Pilot)
-		merged.Home = cloneScreenPositionPoint(target.Home)
-		merged.Height = cloneFloat64Ptr(target.Height)
-		merged.Altitude = cloneFloat64Ptr(target.Altitude)
-		merged.Speed = cloneFloat64Ptr(target.Speed)
+		merged.Drone = mergeScreenPositionPoint(merged.Drone, target.Drone)
+		merged.Pilot = mergeScreenPositionPoint(merged.Pilot, target.Pilot)
+		merged.Home = mergeScreenPositionPoint(merged.Home, target.Home)
+		merged.Height = mergeScreenPositionNumber(merged.Height, target.Height)
+		merged.Altitude = mergeScreenPositionNumber(merged.Altitude, target.Altitude)
+		merged.Speed = mergeScreenPositionNumber(merged.Speed, target.Speed)
 		merged.Cracked = target.Cracked
-		merged.LastRecord = target.LastRecord
+		merged.LastRecord = mergeScreenPositionLastRecord(merged.LastRecord, target.LastRecord)
 	}
 	merged.LastSeen = target.LastSeen
 	merged.HitCount++
@@ -620,6 +628,148 @@ func mergeScreenPositionTrajectories(
 		protocolmerge.TrajectoryOptions{},
 	)
 	return protocolTrackPointsToScreen(merged)
+}
+
+func mergeScreenPositionFallbackFields(
+	current model.ScreenPositionTarget,
+	incoming model.ScreenPositionTarget,
+) model.ScreenPositionTarget {
+	if current.Source == "" && incoming.Source != "" {
+		current.Source = incoming.Source
+	}
+	if !validScreenPositionFrequency(current.Frequency) && validScreenPositionFrequency(incoming.Frequency) {
+		current.Frequency = incoming.Frequency
+	}
+	if !validScreenPositionRSSI(current.RSSI) && validScreenPositionRSSI(incoming.RSSI) {
+		current.RSSI = incoming.RSSI
+	}
+	if current.Device == "" && incoming.Device != "" {
+		current.Device = incoming.Device
+	}
+	current.Drone = mergeScreenPositionMissingPoint(current.Drone, incoming.Drone)
+	current.Pilot = mergeScreenPositionMissingPoint(current.Pilot, incoming.Pilot)
+	current.Home = mergeScreenPositionMissingPoint(current.Home, incoming.Home)
+	current.Height = mergeScreenPositionMissingNumber(current.Height, incoming.Height)
+	current.Altitude = mergeScreenPositionMissingNumber(current.Altitude, incoming.Altitude)
+	current.Speed = mergeScreenPositionMissingNumber(current.Speed, incoming.Speed)
+	current.LastRecord = mergeScreenPositionMissingLastRecord(current.LastRecord, incoming.LastRecord)
+	return current
+}
+
+func mergeScreenPositionPoint(
+	current *model.ScreenPositionPoint,
+	incoming *model.ScreenPositionPoint,
+) *model.ScreenPositionPoint {
+	if validScreenPositionPoint(incoming) {
+		return cloneScreenPositionPoint(incoming)
+	}
+	return cloneScreenPositionPoint(current)
+}
+
+func mergeScreenPositionMissingPoint(
+	current *model.ScreenPositionPoint,
+	incoming *model.ScreenPositionPoint,
+) *model.ScreenPositionPoint {
+	if validScreenPositionPoint(current) {
+		return cloneScreenPositionPoint(current)
+	}
+	return mergeScreenPositionPoint(current, incoming)
+}
+
+func mergeScreenPositionNumber(current *float64, incoming *float64) *float64 {
+	if validScreenPositionNumber(incoming) {
+		return cloneFloat64Ptr(incoming)
+	}
+	return cloneFloat64Ptr(current)
+}
+
+func mergeScreenPositionMissingNumber(current *float64, incoming *float64) *float64 {
+	if validScreenPositionNumber(current) {
+		return cloneFloat64Ptr(current)
+	}
+	return mergeScreenPositionNumber(current, incoming)
+}
+
+func mergeScreenPositionLastRecord(
+	current model.ScreenPositionLastRecord,
+	incoming model.ScreenPositionLastRecord,
+) model.ScreenPositionLastRecord {
+	if incoming.Type != "" {
+		current.Type = incoming.Type
+	}
+	if !incoming.ReceivedAt.IsZero() {
+		current.ReceivedAt = incoming.ReceivedAt
+	}
+	if device := stringsTrim(incoming.Device); device != "" {
+		current.Device = device
+	}
+	if serial := stringsTrim(incoming.Serial); serial != "" {
+		current.Serial = serial
+	}
+	if modelName := normalizeScreenTargetModel(incoming.Model); modelName != "" {
+		current.Model = modelName
+	}
+	if validScreenPositionFrequency(incoming.Frequency) {
+		current.Frequency = incoming.Frequency
+	}
+	if validScreenPositionRSSI(incoming.RSSI) {
+		current.RSSI = incoming.RSSI
+	}
+	current.Cracked = current.Cracked || incoming.Cracked
+	return current
+}
+
+func mergeScreenPositionMissingLastRecord(
+	current model.ScreenPositionLastRecord,
+	incoming model.ScreenPositionLastRecord,
+) model.ScreenPositionLastRecord {
+	if current.Type == "" && incoming.Type != "" {
+		current.Type = incoming.Type
+	}
+	if current.ReceivedAt.IsZero() && !incoming.ReceivedAt.IsZero() {
+		current.ReceivedAt = incoming.ReceivedAt
+	}
+	if stringsTrim(current.Device) == "" {
+		current.Device = stringsTrim(incoming.Device)
+	}
+	if stringsTrim(current.Serial) == "" {
+		current.Serial = stringsTrim(incoming.Serial)
+	}
+	if normalizeScreenTargetModel(current.Model) == "" {
+		current.Model = normalizeScreenTargetModel(incoming.Model)
+	}
+	if !validScreenPositionFrequency(current.Frequency) && validScreenPositionFrequency(incoming.Frequency) {
+		current.Frequency = incoming.Frequency
+	}
+	if !validScreenPositionRSSI(current.RSSI) && validScreenPositionRSSI(incoming.RSSI) {
+		current.RSSI = incoming.RSSI
+	}
+	current.Cracked = current.Cracked || incoming.Cracked
+	return current
+}
+
+func validScreenPositionPoint(point *model.ScreenPositionPoint) bool {
+	return protocolmerge.ValidPoint(screenPositionPointToProtocol(point))
+}
+
+func validScreenPositionNumber(value *float64) bool {
+	return value != nil && finiteFloat64(*value)
+}
+
+func validScreenPositionFrequency(value float64) bool {
+	return finiteNonZeroFloat64(value)
+}
+
+func validScreenPositionRSSI(value float64) bool {
+	return finiteNonZeroFloat64(value)
+}
+
+func finiteNonZeroFloat64(value float64) bool {
+	return finiteFloat64(value) && value != 0
+}
+
+func finiteFloat64(value float64) bool {
+	return !math.IsNaN(value) && !math.IsInf(value, 0)
 }
 
 func (s *MemoryStore) pruneExpiredScreenPositionsLocked(now time.Time) {

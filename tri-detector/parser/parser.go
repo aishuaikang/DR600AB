@@ -62,6 +62,8 @@ type DIDEncrypted struct {
 type RID struct {
 	SSID      string  `json:"ssid"`
 	Serial    string  `json:"serial"`
+	Version   string  `json:"ver"`
+	Name      string  `json:"name"`
 	Model     string  `json:"model"`
 	UAType    string  `json:"ua_type"`
 	DroneGPS  GPS     `json:"drone_gps"`
@@ -186,6 +188,8 @@ func buildRID(f map[string]string) *RID {
 	return &RID{
 		SSID:      f["ssid"],
 		Serial:    f["serial"],
+		Version:   f["ver"],
+		Name:      f["name"],
 		Model:     f["model"],
 		UAType:    f["UA_type"],
 		DroneGPS:  parseGPS(f["drone_GPS"]),

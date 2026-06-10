@@ -230,7 +230,7 @@ function formatMapRSSI(value?: number) {
   return `${Math.round(value)}dBm`;
 }
 
-function formatMapOptionalNumber(value: number | undefined, unit: string, digits: number) {
+function formatMapOptionalNumber(value: number | null | undefined, unit: string, digits: number) {
   if (typeof value !== "number" || !Number.isFinite(value)) {
     return "-";
   }
@@ -376,7 +376,7 @@ function toLatLng(point: ScreenPositionPoint) {
   return L.latLng(point.latitude, point.longitude);
 }
 
-function toTrackLatLngs(points?: ScreenPositionTrackPoint[]) {
+function toTrackLatLngs(points?: ScreenPositionTrackPoint[] | null) {
   if (!points?.length) {
     return [];
   }

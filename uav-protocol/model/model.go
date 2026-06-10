@@ -40,6 +40,8 @@ type DIDEncrypted struct {
 type RID struct {
 	SSID      string  `json:"ssid"`
 	Serial    string  `json:"serial"`
+	Version   string  `json:"ver"`
+	Name      string  `json:"name"`
 	Model     string  `json:"model"`
 	UAType    string  `json:"ua_type"`
 	DroneGPS  GPS     `json:"drone_gps"`
