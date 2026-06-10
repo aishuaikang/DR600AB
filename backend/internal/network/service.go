@@ -110,6 +110,9 @@ func (s *Service) ListInterfaces(ctx context.Context) ([]model.NetworkInterface,
 	}
 	modems, _ := s.listCellularModems(ctx)
 	applyCellularModems(interfaces, modems)
+	defaultRouteDevice := s.defaultIPv4RouteInterface(ctx)
+	applyDefaultRoute(interfaces, defaultRouteDevice)
+	defaultRouteMetrics := s.defaultIPv4RouteMetrics(ctx)
 
 	result := make([]model.NetworkInterface, 0, len(interfaces))
 	for _, item := range interfaces {
@@ -123,6 +126,9 @@ func (s *Service) ListInterfaces(ctx context.Context) ([]model.NetworkInterface,
 			if routeMetric, err := s.connectionRouteMetric(ctx, item.ConnectionName); err == nil {
 				item.RouteMetric = routeMetric
 			}
+		}
+		if routeMetric, ok := defaultRouteMetrics[item.Name]; ok {
+			item.RouteMetric = &routeMetric
 		}
 		if item.IPv4Method == "" {
 			item.IPv4Method = "unknown"
@@ -246,9 +252,11 @@ func (s *Service) UpdateInterfacePriorities(
 		Priorities: make([]model.NetworkPrioritySetting, 0, len(targets)),
 	}
 	for _, target := range targets {
-		args := append([]string{"connection", "modify", target.item.ConnectionName}, persistentRouteMetricArgs(target.routeMetric)...)
-		if _, err := s.nmcli(ctx, args...); err != nil {
-			return nil, err
+		if hasConnectionName(target.item) {
+			args := append([]string{"connection", "modify", target.item.ConnectionName}, persistentRouteMetricArgs(target.routeMetric)...)
+			if _, err := s.nmcli(ctx, args...); err != nil {
+				return nil, err
+			}
 		}
 		settings.Priorities = append(settings.Priorities, model.NetworkPrioritySetting{
 			InterfaceName:  target.item.Name,
@@ -263,7 +271,7 @@ func (s *Service) UpdateInterfacePriorities(
 		}
 	}
 	for _, target := range targets {
-		if err := s.reapplyConnectedConnection(ctx, target.item); err != nil {
+		if err := s.reapplyConnectedConnection(ctx, target.item, target.routeMetric); err != nil {
 			return nil, err
 		}
 	}
@@ -296,14 +304,16 @@ func (s *Service) RestoreSavedSettings(ctx context.Context) error {
 			continue
 		}
 		target, ok := index.lookup(priority)
-		if !ok || target.ConnectionName == "" || target.ConnectionName == "--" {
+		if !ok {
 			continue
 		}
-		args := append([]string{"connection", "modify", target.ConnectionName}, persistentRouteMetricArgs(priority.RouteMetric)...)
-		if _, err := s.nmcli(ctx, args...); err != nil {
-			return err
+		if hasConnectionName(target) {
+			args := append([]string{"connection", "modify", target.ConnectionName}, persistentRouteMetricArgs(priority.RouteMetric)...)
+			if _, err := s.nmcli(ctx, args...); err != nil {
+				return err
+			}
 		}
-		if err := s.reapplyConnectedConnection(ctx, target); err != nil {
+		if err := s.reapplyConnectedConnection(ctx, target, priority.RouteMetric); err != nil {
 			return err
 		}
 	}
@@ -358,6 +368,26 @@ func (s *Service) ConnectWiFi(ctx context.Context, req model.WiFiConnectRequest)
 	return nil
 }
 
+// DisconnectWiFi 断开当前无线连接。
+func (s *Service) DisconnectWiFi(ctx context.Context, req model.WiFiDisconnectRequest) error {
+	if err := s.checkBackend(ctx); err != nil {
+		return err
+	}
+
+	device, err := s.selectWiFiDisconnectDevice(ctx, req.Device)
+	if err != nil {
+		return err
+	}
+	if device == "" {
+		return nil
+	}
+
+	if _, err := s.nmcli(ctx, "device", "disconnect", device); err != nil {
+		return err
+	}
+	return nil
+}
+
 // ConnectCellular 创建或更新 4G/移动网络连接并尝试拨号。
 func (s *Service) ConnectCellular(ctx context.Context, req model.CellularConnectRequest) ([]model.NetworkInterface, error) {
 	if err := s.checkBackend(ctx); err != nil {
@@ -386,7 +416,7 @@ func (s *Service) ConnectCellular(ctx context.Context, req model.CellularConnect
 
 	if req.RouteMetric != nil {
 		if err := s.saveNetworkPriority(model.NetworkInterface{
-			Name:           modem.PrimaryPort,
+			Name:           cellularNetworkInterfaceName(modem),
 			ConnectionName: connectionName,
 		}, *req.RouteMetric); err != nil {
 			return nil, err
@@ -465,6 +495,53 @@ func (s *Service) ensureWiFiDevice(ctx context.Context) error {
 		}
 	}
 	return ErrWiFiUnavailable
+}
+
+func (s *Service) selectWiFiDisconnectDevice(ctx context.Context, requested string) (string, error) {
+	output, err := s.nmcli(ctx, "-t", "-f", "DEVICE,TYPE,STATE", "device", "status")
+	if err != nil {
+		return "", err
+	}
+
+	requested = strings.TrimSpace(requested)
+	if requested != "" {
+		if err := validateInterfaceName(requested); err != nil {
+			return "", err
+		}
+		for _, line := range strings.Split(output, "\n") {
+			parts := splitNMCLIFields(line, 3)
+			if strings.TrimSpace(parts[0]) != requested {
+				continue
+			}
+			if strings.TrimSpace(parts[1]) != "wifi" {
+				return "", ErrInvalidWiFiConfig
+			}
+			if !isConnectedState(parts[2]) {
+				return "", nil
+			}
+			return requested, nil
+		}
+		return "", ErrWiFiUnavailable
+	}
+
+	hasWiFi := false
+	for _, line := range strings.Split(output, "\n") {
+		parts := splitNMCLIFields(line, 3)
+		device := strings.TrimSpace(parts[0])
+		deviceType := strings.TrimSpace(parts[1])
+		state := strings.TrimSpace(parts[2])
+		if deviceType != "wifi" {
+			continue
+		}
+		hasWiFi = true
+		if device != "" && isConnectedState(state) {
+			return device, nil
+		}
+	}
+	if hasWiFi {
+		return "", nil
+	}
+	return "", ErrWiFiUnavailable
 }
 
 func (s *Service) connectionIPv4Method(ctx context.Context, connectionName string) (string, error) {
@@ -551,6 +628,43 @@ func (s *Service) mmcli(ctx context.Context, args ...string) (string, error) {
 	return strings.TrimSpace(string(output)), nil
 }
 
+func (s *Service) ip(ctx context.Context, args ...string) (string, error) {
+	ctx, cancel := context.WithTimeout(ctx, commandTimeout)
+	defer cancel()
+
+	output, err := s.runner.Run(ctx, "ip", args...)
+	if err != nil {
+		return "", commandError("ip", args, output, err)
+	}
+	return strings.TrimSpace(string(output)), nil
+}
+
+func (s *Service) defaultIPv4RouteInterface(ctx context.Context) string {
+	output, err := s.ip(ctx, "-4", "route", "get", "1.1.1.1")
+	if err != nil {
+		return ""
+	}
+	return parseRouteDevice(output)
+}
+
+func (s *Service) defaultIPv4RouteMetrics(ctx context.Context) map[string]int {
+	output, err := s.ip(ctx, "-4", "route", "show", "default")
+	if err != nil {
+		return map[string]int{}
+	}
+	metrics := map[string]int{}
+	for _, route := range parseDefaultIPv4Routes(output) {
+		if route.Device == "" || route.Metric == nil {
+			continue
+		}
+		current, ok := metrics[route.Device]
+		if !ok || *route.Metric < current {
+			metrics[route.Device] = *route.Metric
+		}
+	}
+	return metrics
+}
+
 func (s *Service) saveNetworkPriority(target model.NetworkInterface, routeMetric int) error {
 	if s.settings == nil {
 		return nil
@@ -568,15 +682,82 @@ func (s *Service) saveNetworkPriority(target model.NetworkInterface, routeMetric
 	return s.settings.SaveNetwork(settings)
 }
 
-func (s *Service) reapplyConnectedConnection(ctx context.Context, target model.NetworkInterface) error {
+func (s *Service) reapplyConnectedConnection(ctx context.Context, target model.NetworkInterface, routeMetric int) error {
 	if !shouldReactivateConnection(target) {
 		return nil
 	}
-	if _, err := s.nmcli(ctx, "device", "reapply", target.Name); err == nil {
+	if routeMetric >= 0 {
+		_, _ = s.nmcli(ctx, "device", "modify", runtimeRouteDevice(target), "ipv4.route-metric", strconv.Itoa(routeMetric))
+	}
+	if hasConnectionName(target) {
+		if _, err := s.nmcli(ctx, "device", "reapply", target.Name); err == nil {
+			return s.replaceActiveDefaultRouteMetric(ctx, target, routeMetric)
+		}
+		if _, err := s.nmcli(ctx, "connection", "up", target.ConnectionName); err == nil {
+			return s.replaceActiveDefaultRouteMetric(ctx, target, routeMetric)
+		}
+	}
+	return s.replaceActiveDefaultRouteMetric(ctx, target, routeMetric)
+}
+
+func (s *Service) replaceActiveDefaultRouteMetric(ctx context.Context, target model.NetworkInterface, routeMetric int) error {
+	if routeMetric < 0 {
 		return nil
 	}
-	_, err := s.nmcli(ctx, "connection", "up", target.ConnectionName)
+	device := runtimeRouteDevice(target)
+	if device == "" {
+		return nil
+	}
+	output, err := s.ip(ctx, "-4", "route", "show", "default")
+	if err != nil {
+		return nil
+	}
+	var replaceErr error
+	for _, route := range parseDefaultIPv4Routes(output) {
+		if route.Device != device {
+			continue
+		}
+		if err := s.replaceDefaultIPv4RouteMetric(ctx, route, routeMetric); err != nil {
+			replaceErr = err
+		}
+	}
+	return replaceErr
+}
+
+func (s *Service) replaceDefaultIPv4RouteMetric(ctx context.Context, route defaultIPv4Route, routeMetric int) error {
+	if route.Device == "" {
+		return nil
+	}
+	if _, err := s.ip(ctx, defaultIPv4RouteCommandArgs("delete", route, route.Metric)...); err != nil {
+		return err
+	}
+	metric := routeMetric
+	_, err := s.ip(ctx, defaultIPv4RouteCommandArgs("add", route, &metric)...)
 	return err
+}
+
+func defaultIPv4RouteCommandArgs(action string, route defaultIPv4Route, metric *int) []string {
+	args := []string{"-4", "route", action, "default"}
+	if route.Via != "" {
+		args = append(args, "via", route.Via)
+	}
+	args = append(args, "dev", route.Device)
+	if route.Onlink {
+		args = append(args, "onlink")
+	}
+	if route.Proto != "" {
+		args = append(args, "proto", route.Proto)
+	}
+	if route.Scope != "" {
+		args = append(args, "scope", route.Scope)
+	}
+	if route.Src != "" {
+		args = append(args, "src", route.Src)
+	}
+	if metric != nil {
+		args = append(args, "metric", strconv.Itoa(*metric))
+	}
+	return args
 }
 
 func (s *Service) nmcli(ctx context.Context, args ...string) (string, error) {
@@ -753,7 +934,7 @@ func interfaceCapabilities(item model.NetworkInterface) []string {
 		if item.Modem != nil && item.Modem.PrimaryPort != "" {
 			capabilities = append(capabilities, "cellular-connect")
 		}
-		if strings.TrimSpace(item.ConnectionName) != "" && strings.TrimSpace(item.ConnectionName) != "--" {
+		if hasConnectionName(item) || isRuntimeRoutePriorityConfigurable(item) {
 			capabilities = append(capabilities, "priority")
 		}
 	}
@@ -933,11 +1114,20 @@ func applyCellularModems(interfaces map[string]model.NetworkInterface, modems []
 			item.Type = "gsm"
 			item.Source = mergeSource(item.Source, "modemmanager")
 			item.ReadOnly = true
+			if modem.PrimaryPort != "" && modem.PrimaryPort != modem.DataInterface {
+				if control, ok := interfaces[modem.PrimaryPort]; ok {
+					item = mergeCellularControlPort(item, control)
+				}
+			}
 			item.Modem = cloneCellularModem(modem)
-			if item.State == "" || item.State == "unknown" || item.State == "down" {
+			if modem.FailedReason != "" || item.State == "" || item.State == "unknown" || item.State == "down" {
 				item.State = cellularInterfaceState(item, modem)
 			}
 			interfaces[item.Name] = item
+			if modem.PrimaryPort != "" && modem.PrimaryPort != modem.DataInterface {
+				delete(interfaces, modem.PrimaryPort)
+			}
+			continue
 		}
 		if modem.PrimaryPort != "" {
 			item := ensureInterface(interfaces, modem.PrimaryPort, "gsm")
@@ -951,6 +1141,35 @@ func applyCellularModems(interfaces map[string]model.NetworkInterface, modems []
 			}
 			interfaces[item.Name] = item
 		}
+	}
+}
+
+func mergeCellularControlPort(data model.NetworkInterface, control model.NetworkInterface) model.NetworkInterface {
+	if data.ConnectionName == "" || data.ConnectionName == "--" {
+		data.ConnectionName = control.ConnectionName
+	}
+	if (data.State == "" || data.State == "unknown" || data.State == "down") &&
+		control.State != "" &&
+		control.State != "unknown" {
+		data.State = control.State
+	}
+	if data.IPv4Method == "" || data.IPv4Method == "unknown" {
+		data.IPv4Method = control.IPv4Method
+	}
+	if data.RouteMetric == nil {
+		data.RouteMetric = control.RouteMetric
+	}
+	if control.Source != "" {
+		data.Source = mergeSource(data.Source, control.Source)
+	}
+	return data
+}
+
+func applyDefaultRoute(interfaces map[string]model.NetworkInterface, device string) {
+	device = strings.TrimSpace(device)
+	for name, item := range interfaces {
+		item.DefaultRoute = device != "" && item.Name == device
+		interfaces[name] = item
 	}
 }
 
@@ -1023,6 +1242,16 @@ type priorityTarget struct {
 	routeMetric int
 }
 
+type defaultIPv4Route struct {
+	Device string
+	Via    string
+	Proto  string
+	Scope  string
+	Src    string
+	Onlink bool
+	Metric *int
+}
+
 func networkPriorityIndex(items []model.NetworkInterface) priorityIndex {
 	index := priorityIndex{
 		byInterface:  map[string]model.NetworkInterface{},
@@ -1091,14 +1320,16 @@ func resolvePriorityTargets(items []model.NetworkInterface, priorities []model.N
 }
 
 func isPriorityConfigurable(item model.NetworkInterface) bool {
-	connectionName := strings.TrimSpace(item.ConnectionName)
-	if connectionName == "" || connectionName == "--" {
-		return false
-	}
 	if item.Managed && !item.ReadOnly {
 		return true
 	}
-	return item.Kind == "cellular" && hasCapability(item, "cellular-connect")
+	if item.Kind != "cellular" {
+		return false
+	}
+	if hasConnectionName(item) && hasCapability(item, "cellular-connect") {
+		return true
+	}
+	return isRuntimeRoutePriorityConfigurable(item)
 }
 
 func hasCapability(item model.NetworkInterface, capability string) bool {
@@ -1198,6 +1429,71 @@ func parseNetworkAddress(value string) model.NetworkAddress {
 	}
 	prefix, _ := strconv.Atoi(rawPrefix)
 	return model.NetworkAddress{Address: address, Prefix: prefix}
+}
+
+func parseRouteDevice(output string) string {
+	for _, line := range strings.Split(output, "\n") {
+		fields := strings.Fields(line)
+		for index := 0; index < len(fields)-1; index++ {
+			if fields[index] == "dev" {
+				return fields[index+1]
+			}
+		}
+	}
+	return ""
+}
+
+func parseDefaultIPv4Routes(output string) []defaultIPv4Route {
+	routes := []defaultIPv4Route{}
+	for _, line := range strings.Split(output, "\n") {
+		fields := strings.Fields(line)
+		if len(fields) == 0 || fields[0] != "default" {
+			continue
+		}
+		route := defaultIPv4Route{}
+		for index := 1; index < len(fields); index++ {
+			switch fields[index] {
+			case "dev":
+				if index+1 < len(fields) {
+					route.Device = fields[index+1]
+					index++
+				}
+			case "via":
+				if index+1 < len(fields) {
+					route.Via = fields[index+1]
+					index++
+				}
+			case "proto":
+				if index+1 < len(fields) {
+					route.Proto = fields[index+1]
+					index++
+				}
+			case "scope":
+				if index+1 < len(fields) {
+					route.Scope = fields[index+1]
+					index++
+				}
+			case "src":
+				if index+1 < len(fields) {
+					route.Src = fields[index+1]
+					index++
+				}
+			case "onlink":
+				route.Onlink = true
+			case "metric":
+				if index+1 < len(fields) {
+					if metric, err := strconv.Atoi(fields[index+1]); err == nil {
+						route.Metric = &metric
+					}
+					index++
+				}
+			}
+		}
+		if route.Device != "" {
+			routes = append(routes, route)
+		}
+	}
+	return routes
 }
 
 func updateIPv4Addresses(req model.NetworkInterfaceUpdateRequest) []string {
@@ -1354,6 +1650,26 @@ func modemMatchesInterface(modem model.CellularModem, name string) bool {
 	return false
 }
 
+func cellularNetworkInterfaceName(modem model.CellularModem) string {
+	if name := strings.TrimSpace(modem.DataInterface); name != "" {
+		return name
+	}
+	return strings.TrimSpace(modem.PrimaryPort)
+}
+
+func runtimeRouteDevice(target model.NetworkInterface) string {
+	if target.Modem != nil {
+		if name := strings.TrimSpace(target.Modem.DataInterface); name != "" {
+			return name
+		}
+	}
+	return strings.TrimSpace(target.Name)
+}
+
+func isRuntimeRoutePriorityConfigurable(item model.NetworkInterface) bool {
+	return item.Kind == "cellular" && item.DefaultRoute && runtimeRouteDevice(item) != ""
+}
+
 func defaultCellularConnectionName(modem model.CellularModem) string {
 	if modem.Model != "" {
 		return "4g-" + sanitizeConnectionSuffix(modem.Model)
@@ -1429,10 +1745,17 @@ func autoconnectPriorityForRouteMetric(routeMetric int) int {
 }
 
 func shouldReactivateConnection(target model.NetworkInterface) bool {
-	connectionName := strings.TrimSpace(target.ConnectionName)
-	return connectionName != "" &&
-		connectionName != "--" &&
-		strings.TrimSpace(target.State) == "connected"
+	return hasConnectionName(target) && isConnectedState(target.State) ||
+		isRuntimeRoutePriorityConfigurable(target)
+}
+
+func isConnectedState(state string) bool {
+	return strings.HasPrefix(strings.TrimSpace(state), "connected")
+}
+
+func hasConnectionName(item model.NetworkInterface) bool {
+	connectionName := strings.TrimSpace(item.ConnectionName)
+	return connectionName != "" && connectionName != "--"
 }
 
 func commandError(command string, args []string, output []byte, err error) error {

@@ -1010,6 +1010,7 @@ type NetworkInterface struct {
 	RouteMetric     *int             `json:"routeMetric,omitempty"`
 	Managed         bool             `json:"managed"`
 	ReadOnly        bool             `json:"readOnly,omitempty"`
+	DefaultRoute    bool             `json:"defaultRoute"`
 	Source          string           `json:"source,omitempty"`
 	Capabilities    []string         `json:"capabilities,omitempty"`
 	Modem           *CellularModem   `json:"modem,omitempty"`
@@ -1102,6 +1103,16 @@ type WiFiConnectRequest struct {
 
 // WiFiConnectResponse 返回无线连接操作结果。
 type WiFiConnectResponse struct {
+	Message string `json:"message"`
+}
+
+// WiFiDisconnectRequest 断开当前无线网络连接。
+type WiFiDisconnectRequest struct {
+	Device string `json:"device,omitempty"`
+}
+
+// WiFiDisconnectResponse 返回无线断开操作结果。
+type WiFiDisconnectResponse struct {
 	Message string `json:"message"`
 }
 

@@ -3828,18 +3828,22 @@ body.virtual-keyboard-open .app-loading-overlay {
 
 .screen-detection-card {
   position: relative;
-  display: flex;
-  align-items: center;
+  display: grid;
   width: 100%;
-  gap: 0.5em;
+  gap: 0.34em;
   border: 1px solid var(--screen-line);
-  border-left: 3px solid rgba(38, 201, 255, 0.62);
+  border-left: 3px solid rgba(216, 226, 232, 0.62);
   border-radius: var(--screen-panel-radius);
-  padding: 0.42em 0.46em 0.4em 0.42em;
+  padding: 0.48em 0.58em 0.5em;
   color: #f5fbff;
   text-align: left;
-  background: var(--screen-card-bg);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.045);
+  background:
+    linear-gradient(180deg, rgba(22, 34, 42, 0.84), rgba(7, 14, 22, 0.78)),
+    rgba(8, 18, 30, 0.68);
+  box-shadow:
+    0 0.45em 1.2em rgba(0, 0, 0, 0.2),
+    inset 0 1px 0 rgba(255, 255, 255, 0.055);
+  backdrop-filter: blur(8px);
   cursor: pointer;
   contain: layout style;
   transition:
@@ -3851,12 +3855,14 @@ body.virtual-keyboard-open .app-loading-overlay {
 
 .screen-detection-card:hover,
 .screen-detection-card--selected {
-  border-color: rgba(38, 201, 255, 0.38);
-  border-left-color: rgba(38, 201, 255, 0.95);
-  background: var(--screen-card-bg-hover);
+  border-color: var(--screen-line-strong);
+  border-left-color: rgba(216, 226, 232, 0.94);
+  background:
+    linear-gradient(180deg, rgba(29, 45, 55, 0.9), rgba(9, 19, 30, 0.84)),
+    rgba(10, 24, 38, 0.74);
   box-shadow:
-    inset 0 0 0 1px rgba(38, 201, 255, 0.1),
-    0 0.42em 1em rgba(0, 0, 0, 0.16);
+    inset 0 0 0 1px rgba(216, 226, 232, 0.08),
+    0 0.52em 1.15em rgba(0, 0, 0, 0.2);
 }
 
 .screen-detection-card:hover {
@@ -3867,16 +3873,34 @@ body.virtual-keyboard-open .app-loading-overlay {
   z-index: 8;
 }
 
+.screen-detection-card__head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.48em;
+  min-width: 0;
+}
+
+.screen-detection-card__profile {
+  display: grid;
+  grid-template-columns: 4.45em minmax(0, 1fr);
+  align-items: center;
+  gap: 0.58em;
+  min-width: 0;
+}
+
 .screen-detection-card__image {
   position: relative;
   display: grid;
   flex: none;
-  width: 3.72em;
-  height: 2.62em;
+  width: 100%;
+  height: 3.1em;
   place-items: center;
-  border: 1px solid var(--screen-line);
+  border: 1px solid rgba(38, 201, 255, 0.24);
   border-radius: var(--screen-panel-radius-xs);
-  background: rgba(255, 255, 255, 0.045);
+  background:
+    radial-gradient(circle at 50% 48%, rgba(38, 201, 255, 0.14), transparent 68%),
+    rgba(255, 255, 255, 0.045);
   overflow: hidden;
   transform: translateZ(0);
   align-content: center;
@@ -3909,6 +3933,7 @@ body.virtual-keyboard-open .app-loading-overlay {
   object-fit: contain;
   filter: brightness(1.12);
   transform: translateZ(0);
+  padding: 0.24em;
   transition:
     filter 0.18s ease,
     transform 0.18s ease;
@@ -3933,27 +3958,37 @@ body.virtual-keyboard-open .app-loading-overlay {
   opacity: 0.62;
 }
 
-.screen-detection-card__content {
+.screen-detection-card__identity {
   display: grid;
-  flex: 1;
   min-width: 0;
-  gap: 0.2em;
+  align-content: center;
+  gap: 0.12em;
 }
 
-.screen-detection-card__title {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: baseline;
-  gap: 0.5em;
+.screen-detection-card__title-row {
+  display: flex;
+  align-items: center;
   min-width: 0;
+  gap: 0.32em;
 }
 
-.screen-detection-card__title strong {
+.screen-detection-card__title-row strong {
+  flex: 1 1 auto;
   min-width: 0;
   overflow: hidden;
   color: #f7fbfc;
-  font-size: 0.76em;
+  font-size: 0.82em;
   font-weight: 800;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.screen-detection-card__identity em {
+  min-width: 0;
+  overflow: hidden;
+  color: rgba(219, 234, 238, 0.64);
+  font-size: 0.64em;
+  font-style: normal;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -4039,7 +4074,7 @@ body.virtual-keyboard-open .app-loading-overlay {
 
 .screen-detection-card__freshness {
   position: absolute;
-  bottom: 0.46em;
+  bottom: 0.62em;
   right: 0.58em;
   z-index: 6;
   display: block;
@@ -4145,6 +4180,14 @@ body.virtual-keyboard-open .app-loading-overlay {
   grid-template-columns: minmax(0, 0.82fr) minmax(0, 1.18fr);
 }
 
+.screen-detection-card__compact-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.14em 0.74em;
+  min-width: 0;
+  padding: 0.08em 0.04em 0;
+}
+
 .screen-target-readout {
   display: grid;
   min-width: 0;
@@ -4220,10 +4263,21 @@ body.virtual-keyboard-open .app-loading-overlay {
 }
 
 .screen-detection-card__actions {
-  display: flex;
+  display: inline-flex;
   min-width: 0;
+  align-items: center;
   justify-content: flex-end;
-  margin-top: 0.08em;
+}
+
+.screen-detection-card__footer {
+  display: flex;
+  flex-direction: row-reverse;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  gap: 0.28em;
+  padding-top: 0.04em;
 }
 
 .screen-direction-button {
@@ -4367,7 +4421,7 @@ body.virtual-keyboard-open .app-loading-overlay {
   gap: 0.34em;
   border: 1px solid var(--screen-line);
   border-left: 3px solid rgba(216, 226, 232, 0.62);
-  border-radius: 1em;
+  border-radius: var(--screen-panel-radius);
   padding: 0.48em 0.58em 0.5em;
   color: #f5fbff;
   text-align: left;
@@ -4445,27 +4499,28 @@ body.virtual-keyboard-open .app-loading-overlay {
   flex: 1 1 auto;
 }
 
-.screen-position-card__head .screen-position-card__meta-line {
-  display: flex;
-  min-width: 0;
-  max-width: 100%;
-  align-items: center;
-  gap: 0.56em;
-}
-
 .screen-position-card__head .screen-position-card__meta-sn {
-  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  color: rgba(219, 234, 238, 0.64);
+  font-size: 0.66em;
+  font-style: normal;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.screen-position-card__head .screen-position-card__meta-first {
+.screen-position-card__footer-meta {
   display: inline-flex;
   flex: none;
   align-items: center;
   gap: 0.34em;
   color: rgba(219, 234, 238, 0.78);
+  font-size: 0.66em;
+  line-height: 1;
+  white-space: nowrap;
 }
 
-.screen-position-card__head .screen-position-card__meta-first::before {
+.screen-position-card__footer-meta::before {
   display: block;
   width: 0.24em;
   height: 0.24em;
@@ -4602,6 +4657,14 @@ body.virtual-keyboard-open .app-loading-overlay {
   white-space: nowrap;
 }
 
+.screen-position-card__footer .screen-whitelist-button,
+.screen-detection-card__footer .screen-direction-button {
+  min-height: 2.66em;
+  gap: 0.32em;
+  padding: 0 0.96em;
+  font-size: 0.8em;
+}
+
 .screen-position-card__head em {
   min-width: 0;
   overflow: hidden;
@@ -4620,7 +4683,7 @@ body.virtual-keyboard-open .app-loading-overlay {
   place-items: center;
   align-self: stretch;
   border: 1px solid rgba(38, 201, 255, 0.24);
-  border-radius: 0.82em;
+  border-radius: var(--screen-panel-radius-xs);
   background:
     radial-gradient(circle at 50% 48%, rgba(38, 201, 255, 0.14), transparent 68%),
     rgba(255, 255, 255, 0.045);
@@ -4795,11 +4858,6 @@ body.virtual-keyboard-open .app-loading-overlay {
   transform: translateY(-0.02em);
 }
 
-.screen-position-card__metrics {
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 0.16em;
-}
-
 .screen-position-card__compact-item {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
@@ -4857,9 +4915,14 @@ body.virtual-keyboard-open .app-loading-overlay {
   flex-direction: row-reverse;
   min-width: 0;
   align-items: center;
-  justify-content: flex-start;
+  justify-content: space-between;
+  width: 100%;
   gap: 0.28em;
   padding-top: 0.04em;
+}
+
+.screen-position-card__footer--solo {
+  justify-content: flex-end;
 }
 
 .screen-position-card__relations {
@@ -4873,10 +4936,6 @@ body.virtual-keyboard-open .app-loading-overlay {
   text-overflow: clip;
   white-space: normal;
   overflow-wrap: anywhere;
-}
-
-.screen-position-card__metrics--pending {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
 .screen-navigation-modal {
@@ -5747,10 +5806,10 @@ body.virtual-keyboard-open .app-loading-overlay {
 .screen-fpv-row {
   display: grid;
   grid-template-columns:
-    minmax(5.1em, 1.18fr)
+    minmax(4.7em, 1fr)
     minmax(3.6em, 0.68fr)
     minmax(4.8em, 0.9fr)
-    minmax(4.4em, 0.72fr);
+    minmax(6.4em, 0.98fr);
   align-items: stretch;
 }
 
@@ -5761,13 +5820,13 @@ body.virtual-keyboard-open .app-loading-overlay {
 
 .screen-fpv-table__head span {
   display: flex;
-  min-height: 1.88em;
+  min-height: 28px;
   align-items: center;
   justify-content: center;
   border-right: 1px solid var(--screen-line);
-  padding: 0.24em 0.22em;
-  font-size: 0.58em;
-  font-weight: 700;
+  padding: 0.3em 0.26em;
+  font-size: 0.72rem;
+  font-weight: 800;
   line-height: 1.15;
   text-align: center;
   word-break: break-word;
@@ -5896,30 +5955,23 @@ body.virtual-keyboard-open .app-loading-overlay {
 }
 
 .screen-fpv-row__action .screen-fpv-row__view-button {
-  position: relative;
   display: inline-flex;
-  isolation: isolate;
   min-width: 0;
   max-width: 100%;
-  min-height: clamp(28px, 2em, 32px);
+  min-height: 28px;
   align-items: center;
   justify-content: center;
-  gap: 0.34em;
+  gap: 0.32em;
   overflow: hidden;
-  border: 1px solid rgba(121, 219, 241, 0.28);
+  border: 1px solid rgba(38, 201, 255, 0.32);
   border-radius: 999px;
-  padding: 0 0.68em 0 0.42em;
-  color: rgba(229, 251, 255, 0.92);
+  padding: 0 12px;
+  color: #dff8ff;
   font: inherit;
-  font-size: 0.78em;
+  font-size: 0.72rem;
   font-weight: 800;
   line-height: 1;
-  background:
-    linear-gradient(180deg, rgba(20, 45, 56, 0.86), rgba(6, 16, 27, 0.72)),
-    rgba(38, 201, 255, 0.08);
-  box-shadow:
-    0 0.34rem 0.9rem rgba(0, 0, 0, 0.16),
-    inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  background: rgba(38, 201, 255, 0.11);
   cursor: pointer;
   transition:
     border-color 0.16s ease,
@@ -5930,49 +5982,30 @@ body.virtual-keyboard-open .app-loading-overlay {
 }
 
 .screen-fpv-row__action .screen-fpv-row__view-button::before {
-  position: absolute;
-  inset: 1px auto 1px 1px;
-  z-index: 0;
-  width: 2.18em;
-  border-radius: inherit;
-  background: rgba(38, 201, 255, 0.08);
-  content: "";
-  pointer-events: none;
+  display: none;
 }
 
 .screen-fpv-row__action .screen-fpv-row__view-button svg {
-  position: relative;
-  z-index: 1;
   flex: none;
   width: 1em;
   height: 1em;
-  color: #9feeff;
-  filter: drop-shadow(0 0 0.32em rgba(38, 201, 255, 0.28));
+  color: currentColor;
+  filter: none;
 }
 
 .screen-fpv-row__action .screen-fpv-row__view-button:hover,
 .screen-fpv-row__action .screen-fpv-row__view-button:focus-visible {
-  border-color: rgba(126, 230, 255, 0.58);
+  border-color: rgba(244, 201, 93, 0.72);
   color: #ffffff;
-  background:
-    linear-gradient(180deg, rgba(30, 62, 73, 0.94), rgba(8, 22, 36, 0.82)),
-    rgba(38, 201, 255, 0.14);
-  box-shadow:
-    0 0.42rem 1rem rgba(0, 0, 0, 0.18),
-    0 0 0.68em rgba(38, 201, 255, 0.12),
-    inset 0 1px 0 rgba(255, 255, 255, 0.1);
+  background: rgba(244, 201, 93, 0.16);
+  box-shadow: 0 0 0.72em rgba(244, 201, 93, 0.1);
 }
 
 .screen-fpv-row__action .screen-fpv-row__view-button--active {
   border-color: rgba(244, 201, 93, 0.66);
   color: #fff8df;
-  background:
-    linear-gradient(180deg, rgba(76, 61, 26, 0.92), rgba(30, 23, 11, 0.8)),
-    rgba(244, 201, 93, 0.16);
-  box-shadow:
-    0 0.42rem 1rem rgba(0, 0, 0, 0.18),
-    0 0 0.74em rgba(244, 201, 93, 0.16),
-    inset 0 1px 0 rgba(255, 255, 255, 0.1);
+  background: rgba(244, 201, 93, 0.16);
+  box-shadow: 0 0 0.72em rgba(244, 201, 93, 0.1);
   cursor: default;
 }
 
@@ -5981,16 +6014,14 @@ body.virtual-keyboard-open .app-loading-overlay {
 }
 
 .screen-fpv-row__action .screen-fpv-row__view-button--active svg {
-  color: #ffe08a;
-  filter: drop-shadow(0 0 0.32em rgba(244, 201, 93, 0.34));
+  color: currentColor;
+  filter: none;
 }
 
 .screen-fpv-row__action .screen-fpv-row__view-button:disabled {
   border-color: rgba(148, 163, 184, 0.18);
   color: rgba(194, 214, 220, 0.36);
-  background:
-    linear-gradient(180deg, rgba(24, 33, 42, 0.62), rgba(8, 13, 20, 0.54)),
-    rgba(148, 163, 184, 0.04);
+  background: rgba(148, 163, 184, 0.06);
   box-shadow: none;
   cursor: not-allowed;
 }
@@ -5998,9 +6029,7 @@ body.virtual-keyboard-open .app-loading-overlay {
 .screen-fpv-row__action .screen-fpv-row__view-button:disabled:hover {
   border-color: rgba(148, 163, 184, 0.18);
   color: rgba(194, 214, 220, 0.36);
-  background:
-    linear-gradient(180deg, rgba(24, 33, 42, 0.62), rgba(8, 13, 20, 0.54)),
-    rgba(148, 163, 184, 0.04);
+  background: rgba(148, 163, 184, 0.06);
   box-shadow: none;
 }
 
@@ -6014,8 +6043,6 @@ body.virtual-keyboard-open .app-loading-overlay {
 }
 
 .screen-fpv-row__action .screen-fpv-row__view-button span {
-  position: relative;
-  z-index: 1;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -6421,7 +6448,7 @@ body.virtual-keyboard-open .app-loading-overlay {
   .screen-panel-title__text strong,
   .screen-alert-card__body strong,
   .screen-alert-card__meta,
-  .screen-detection-card__title strong {
+  .screen-detection-card__title-row strong {
     font-size: 0.86em;
   }
 
@@ -6695,8 +6722,13 @@ body.virtual-keyboard-open .app-loading-overlay {
   }
 
   .screen-detection-card {
-    gap: 0.48em;
+    gap: 0.32em;
     padding: 0.46em;
+  }
+
+  .screen-detection-card__profile {
+    grid-template-columns: 3.55em minmax(0, 1fr);
+    gap: 0.46em;
   }
 
   .screen-detection-card__image {
@@ -6704,19 +6736,15 @@ body.virtual-keyboard-open .app-loading-overlay {
     height: 2.62em;
   }
 
-  .screen-detection-card__title strong {
+  .screen-detection-card__title-row strong {
     font-size: 0.82em;
   }
 
-  .screen-detection-card__title em {
-    display: none;
-  }
-
-  .screen-detection-card__content {
+  .screen-target-readouts {
     gap: 0.14em;
   }
 
-  .screen-target-readouts {
+  .screen-detection-card__compact-grid {
     gap: 0.14em;
   }
 
@@ -6746,7 +6774,7 @@ body.virtual-keyboard-open .app-loading-overlay {
     font-size: 0.72em;
   }
 
-  .screen-detection-card__actions {
+  .screen-detection-card__footer {
     margin-top: 0.06em;
   }
 
@@ -6814,11 +6842,6 @@ body.virtual-keyboard-open .app-loading-overlay {
   .screen-position-card__point > em,
   .screen-position-card__compact-item em {
     font-size: 0.72em;
-  }
-
-  .screen-position-card__metrics {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: 0.14em;
   }
 
   .screen-position-card__readouts {

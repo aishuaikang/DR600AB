@@ -956,22 +956,27 @@ function DetectionTargetCard({
       )}
       onClick={() => onSelect(target)}
     >
-      <span className="screen-detection-card__image">
-        <img
-          src={imageUrl}
-          alt=""
-          loading="lazy"
-          decoding="async"
-          onError={(event) => {
-            event.currentTarget.src = mini2Image;
-          }}
-        />
-        <span className="screen-detection-card__glow" />
-      </span>
-
-      <div className="screen-detection-card__content">
-        <span className="screen-detection-card__title">
-          <strong>{title}</strong>
+      <div className="screen-detection-card__head">
+        <div className="screen-detection-card__profile">
+          <span className="screen-detection-card__image">
+            <img
+              src={imageUrl}
+              alt=""
+              loading="lazy"
+              decoding="async"
+              onError={(event) => {
+                event.currentTarget.src = mini2Image;
+              }}
+            />
+            <span className="screen-detection-card__glow" />
+          </span>
+          <span className="screen-detection-card__identity">
+            <span className="screen-detection-card__title-row">
+              <strong>{title}</strong>
+            </span>
+          </span>
+        </div>
+        <span className="screen-detection-card__actions">
           <button
             className={cx(
               "screen-detection-card__time",
@@ -995,52 +1000,55 @@ function DetectionTargetCard({
             ) : null}
           </button>
         </span>
+      </div>
 
-        <div className="screen-target-readouts screen-detection-card__readouts">
-          <span className="screen-target-readout">
-            <em>{t("frequency", { ns: "screen" })}</em>
-            <strong>{formatFrequency(target.frequency)}</strong>
+      <div className="screen-detection-card__compact-grid">
+        <span className="screen-position-card__compact-item">
+          <em>{t("frequency", { ns: "screen" })}</em>
+          <strong>{formatFrequency(target.frequency)}</strong>
+        </span>
+        <span className="screen-position-card__compact-item screen-position-card__compact-item--rssi">
+          <span className="screen-target-signal-head">
+            <em>{t("rssi", { ns: "screen" })}</em>
+            <strong>{formatRSSI(target.rssi)}</strong>
           </span>
-          <span className="screen-target-readout screen-target-readout--signal">
-            <span className="screen-target-signal-head">
-              <em>{t("rssi", { ns: "screen" })}</em>
-              <strong>{formatRSSI(target.rssi)}</strong>
-            </span>
-            <span className="screen-target-signal-meter" aria-hidden="true">
-              <span style={{ width: `${signalPercent}%` }} />
-            </span>
+          <span className="screen-target-signal-meter" aria-hidden="true">
+            <span style={{ width: `${signalPercent}%` }} />
           </span>
-        </div>
+        </span>
+      </div>
 
-        {freshnessOpen ? (
-          <span className={`screen-detection-card__freshness screen-detection-card__freshness--${timeTone}`}>
-            {timeToneTitle}
-          </span>
-        ) : null}
+      {freshnessOpen ? (
+        <span className={`screen-detection-card__freshness screen-detection-card__freshness--${timeTone}`}>
+          {timeToneTitle}
+        </span>
+      ) : null}
 
-        <div className="screen-detection-card__actions">
-          <button
-            className={cx(
-              "screen-direction-button",
-              directionActive && "screen-direction-button--active",
-              directionBusy && "screen-direction-button--busy",
-            )}
-            type="button"
-            disabled={directionDisabled}
-            aria-pressed={directionActive}
-            aria-label={`${directionLabel} ${formatFrequency(target.frequency)}`}
-            onClick={(event) => {
-              event.stopPropagation();
-              if (directionDisabled) {
-                return;
-              }
-              onToggleDirection(target);
-            }}
-          >
-            {directionBusy ? <Loader2 size={12} aria-hidden="true" /> : directionActive ? <Square size={11} aria-hidden="true" /> : <ScanSearch size={12} aria-hidden="true" />}
-            <span>{directionLabel}</span>
-          </button>
-        </div>
+      <div className="screen-detection-card__footer">
+        <button
+          className={cx(
+            "screen-direction-button",
+            directionActive && "screen-direction-button--active",
+            directionBusy && "screen-direction-button--busy",
+          )}
+          type="button"
+          disabled={directionDisabled}
+          aria-pressed={directionActive}
+          aria-label={`${directionLabel} ${formatFrequency(target.frequency)}`}
+          onClick={(event) => {
+            event.stopPropagation();
+            if (directionDisabled) {
+              return;
+            }
+            onToggleDirection(target);
+          }}
+        >
+          {directionBusy ? <Loader2 size={12} aria-hidden="true" /> : directionActive ? <Square size={12} aria-hidden="true" /> : <ScanSearch size={12} aria-hidden="true" />}
+          <span>{directionLabel}</span>
+        </button>
+        <span className="screen-position-card__footer-meta">
+          {t("firstSeen", { ns: "screen" })}: {formatTargetTime(target.firstSeen)}
+        </span>
       </div>
     </article>
   );
@@ -1104,7 +1112,6 @@ function FpvTargetTable({
               <span className="screen-fpv-row__signal">
                 <span>
                   <strong>{t("fpvSignalTransmission", { ns: "screen" })}</strong>
-                  <em>{resolveDisplayModel(target) || t("unknownTarget", { ns: "screen" })}</em>
                 </span>
               </span>
 
@@ -1340,7 +1347,6 @@ function PositionTargetCard({
   const timeLabel = showCountdown
     ? `${timeToneTitle}，${t("targetDisappearCountdown", { ns: "screen" })} ${countdownText}`
     : timeToneTitle;
-  const signalPercent = getRSSIPercent(target.rssi);
 
   return (
     <article
@@ -1371,18 +1377,15 @@ function PositionTargetCard({
                   {t("whitelist", { ns: "screen" })}
                 </span>
               ) : null}
-              <strong>{target.model || t("unknownTarget", { ns: "screen" })}</strong>
               {pendingEncrypted ? (
                 <span className="screen-position-card__parsing">
                   <span aria-hidden="true" />
                   {t("parsingTarget", { ns: "screen" })}
                 </span>
               ) : null}
+              <strong>{target.model || t("unknownTarget", { ns: "screen" })}</strong>
             </span>
-            <span className="screen-position-card__meta-line">
-              <em className="screen-position-card__meta-sn">{t("deviceSn", { ns: "screen" })}: {target.serial || "-"}</em>
-              <em className="screen-position-card__meta-first">{t("firstSeen", { ns: "screen" })}: {formatTargetTime(target.firstSeen)}</em>
-            </span>
+            <em className="screen-position-card__meta-sn">{t("deviceSn", { ns: "screen" })}: {target.serial || "-"}</em>
           </span>
         </div>
         <span className="screen-position-card__actions">
@@ -1410,21 +1413,17 @@ function PositionTargetCard({
       </div>
 
       {pendingEncrypted ? (
-        <div className="screen-position-card__metrics screen-position-card__metrics--pending screen-target-readouts">
-          <span className="screen-target-readout">
-            <em>{t("frequency", { ns: "screen" })}</em>
-            <strong>{formatOptionalNumber(target.frequency, "MHz", 1)}</strong>
-          </span>
-          <span className="screen-target-readout screen-target-readout--signal">
-            <span className="screen-target-signal-head">
-              <em>{t("rssi", { ns: "screen" })}</em>
-              <strong>{formatRSSI(target.rssi)}</strong>
+        <>
+          <div className="screen-position-card__compact-grid screen-position-card__compact-grid--pending">
+            <PositionCompactReadout label={t("frequency", { ns: "screen" })} value={formatOptionalNumber(target.frequency, "MHz", 1)} />
+            <PositionRSSIReadout value={target.rssi} t={t} />
+          </div>
+          <div className="screen-position-card__footer screen-position-card__footer--solo">
+            <span className="screen-position-card__footer-meta">
+              {t("firstSeen", { ns: "screen" })}: {formatTargetTime(target.firstSeen)}
             </span>
-            <span className="screen-target-signal-meter" aria-hidden="true">
-              <span style={{ width: `${signalPercent}%` }} />
-            </span>
-          </span>
-        </div>
+          </div>
+        </>
       ) : (
         <>
           <div className="screen-position-card__compact-grid">
@@ -1455,8 +1454,8 @@ function PositionTargetCard({
             <PositionCompactReadout label={t("positionPilotDistance", { ns: "screen" })} value={formatPositionDistance(target.pilotDistanceM)} />
           </div>
 
-          {allowWhitelist ? (
-            <div className="screen-position-card__footer">
+          <div className={cx("screen-position-card__footer", !allowWhitelist && "screen-position-card__footer--solo")}>
+            {allowWhitelist ? (
               <button
                 className={cx("screen-whitelist-button", whitelisted && "screen-whitelist-button--active")}
                 type="button"
@@ -1470,8 +1469,11 @@ function PositionTargetCard({
                 {whitelisted ? <ShieldMinus size={11} aria-hidden="true" /> : <ShieldPlus size={11} aria-hidden="true" />}
                 <span>{whitelisted ? t("removeFromWhitelistShort", { ns: "screen" }) : t("addToWhitelist", { ns: "screen" })}</span>
               </button>
-            </div>
-          ) : null}
+            ) : null}
+            <span className="screen-position-card__footer-meta">
+              {t("firstSeen", { ns: "screen" })}: {formatTargetTime(target.firstSeen)}
+            </span>
+          </div>
         </>
       )}
     </article>

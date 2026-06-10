@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
 import type { TFunction } from "i18next";
-import { ArrowDown, ArrowUp, Cable, CircleAlert, Eye, EyeOff, Plus, RadioTower, RefreshCw, Save, Trash2, Wifi } from "lucide-react";
+import { ArrowDown, ArrowUp, Cable, CircleAlert, Eye, EyeOff, Plus, RadioTower, RefreshCw, Save, Trash2, Wifi, WifiOff } from "lucide-react";
 
 import {
   connectCellular,
   connectWiFi,
+  disconnectWiFi,
   getNetworkInterfaces,
   getWiFiNetworks,
   updateNetworkInterface,
@@ -293,6 +294,13 @@ function cellularSIMLabel(item: NetworkInterface, t: TFunction) {
   return "-";
 }
 
+function defaultRouteLabel(item: NetworkInterface, t: TFunction) {
+  if (item.defaultRoute) {
+    return t("networkDefaultRouteActive", { ns: "settings" });
+  }
+  return t("networkDefaultRouteInactive", { ns: "settings" });
+}
+
 function interfaceSortScore(item: NetworkInterface) {
   if (item.managed && item.state === "connected") {
     return 0;
@@ -320,7 +328,7 @@ function sortedInterfacePickerItems(items: NetworkInterface[]) {
 
 function sortedPriorityInterfaces(items: NetworkInterface[]) {
   return [...items]
-    .filter((item) => hasCapability(item, "priority") && item.connectionName && item.connectionName !== "--")
+    .filter((item) => hasCapability(item, "priority") && (hasConnectionName(item) || item.defaultRoute))
     .sort((a, b) => {
       const left = typeof a.routeMetric === "number" ? a.routeMetric : Number.MAX_SAFE_INTEGER;
       const right = typeof b.routeMetric === "number" ? b.routeMetric : Number.MAX_SAFE_INTEGER;
@@ -335,6 +343,10 @@ function sortedPriorityInterfaces(items: NetworkInterface[]) {
       }
       return a.name.localeCompare(b.name);
     });
+}
+
+function hasConnectionName(item: NetworkInterface) {
+  return Boolean(item.connectionName && item.connectionName !== "--");
 }
 
 function InterfaceCard({
@@ -361,7 +373,8 @@ function InterfaceCard({
   onCellularConnect: () => void;
 }) {
   const validation = validateDraft(draft, t);
-  const cellularValidation = validateCellularDraft(cellularDraft, t);
+  const cellularAPNMissing = !cellularDraft.apn.trim();
+  const cellularValidation = cellularAPNMissing ? "" : validateCellularDraft(cellularDraft, t);
   const editable = canEditIPv4(item);
   const cellularEditable = canConnectCellular(item);
 
@@ -391,6 +404,11 @@ function InterfaceCard({
             >
               {statusLabel}
             </span>
+            {item.defaultRoute ? (
+              <span className="badge badge-info badge-sm shrink-0 border-0 font-semibold">
+                {t("networkDefaultRouteActive", { ns: "settings" })}
+              </span>
+            ) : null}
           </div>
 
           <div className="mt-3 grid gap-2">
@@ -420,6 +438,7 @@ function InterfaceCard({
             <DetailItem label={t("networkMAC", { ns: "settings" })} value={item.hardwareAddress || "-"} mono />
             <DetailItem label={t("networkMTU", { ns: "settings" })} value={item.mtu ? String(item.mtu) : "-"} />
             <DetailItem label={t("networkMethod", { ns: "settings" })} value={item.ipv4Method || "-"} />
+            <DetailItem label={t("networkDefaultRoute", { ns: "settings" })} value={defaultRouteLabel(item, t)} />
             <DetailItem label={t("networkSource", { ns: "settings" })} value={item.source || "NetworkManager"} />
             <DetailItem label={t("networkCapabilities", { ns: "settings" })} value={item.capabilities?.join(", ") || "-"} />
             {item.modem ? (
@@ -508,7 +527,7 @@ function InterfaceCard({
             <button
               className={cx("btn btn-primary btn-sm", cellularBusy && "app-busy-button")}
               type="button"
-              disabled={!cellularEditable || Boolean(cellularValidation) || cellularBusy}
+              disabled={!cellularEditable || cellularAPNMissing || Boolean(cellularValidation) || cellularBusy}
               onClick={onCellularConnect}
             >
               {cellularBusy ? <LoadingSpinner size={15} /> : <RadioTower size={15} />}
@@ -691,13 +710,16 @@ function InterfacePicker({
             <span className="min-w-0 flex-1">
               <span className="flex min-w-0 items-center justify-between gap-2">
                 <strong className="truncate text-sm font-semibold">{item.name}</strong>
-                <span
-                  className={cx(
-                    "badge badge-xs shrink-0 border-0 font-semibold",
-                    item.state === "connected" ? "badge-success" : item.managed ? "badge-warning" : "badge-error",
-                  )}
-                >
-                  {item.managed || isCellularInterface(item) ? item.state || "-" : t("networkUnmanaged", { ns: "settings" })}
+                <span className="flex shrink-0 items-center gap-1">
+                  {item.defaultRoute ? <span className="badge badge-info badge-xs">{t("networkDefaultRouteBadge", { ns: "settings" })}</span> : null}
+                  <span
+                    className={cx(
+                      "badge badge-xs shrink-0 border-0 font-semibold",
+                      item.state === "connected" ? "badge-success" : item.managed ? "badge-warning" : "badge-error",
+                    )}
+                  >
+                    {item.managed || isCellularInterface(item) ? item.state || "-" : t("networkUnmanaged", { ns: "settings" })}
+                  </span>
                 </span>
               </span>
               <span className="mt-0.5 block truncate text-xs text-base-content/55">
@@ -785,6 +807,7 @@ function NetworkPriorityPanel({
                     <strong className="truncate text-sm font-semibold text-base-content">{item.name}</strong>
                     <span className="badge badge-xs border-0 bg-base-300 text-base-content/70">{interfaceTypeLabel(item, t)}</span>
                     {item.state === "connected" ? <span className="badge badge-success badge-xs">{t("active", { ns: "common" })}</span> : null}
+                    {item.defaultRoute ? <span className="badge badge-info badge-xs">{t("networkDefaultRouteBadge", { ns: "settings" })}</span> : null}
                   </div>
                   <p className="mt-1 truncate text-xs text-base-content/50">
                     {item.connectionName || "-"} · {t("networkRouteMetric", { ns: "settings" })}: {formatRouteMetric(item.routeMetric)}
@@ -932,6 +955,7 @@ function WiFiPanel({
   onSSIDChange,
   onPasswordChange,
   onConnect,
+  onDisconnect,
 }: {
   networks: WiFiNetwork[];
   available: boolean;
@@ -944,8 +968,10 @@ function WiFiPanel({
   onSSIDChange: (value: string) => void;
   onPasswordChange: (value: string) => void;
   onConnect: (device?: string) => void;
+  onDisconnect: (device?: string) => void;
 }) {
   const selected = networks.find((item) => item.ssid === selectedSSID);
+  const activeNetwork = networks.find((item) => item.active);
   const requiresPassword = Boolean(selected?.security && selected.security !== "--");
   const passwordDisabled = busy || Boolean(selected && !requiresPassword);
   const [showPassword, setShowPassword] = useState(true);
@@ -957,10 +983,23 @@ function WiFiPanel({
           title={t("wifiTitle", { ns: "settings" })}
           description={t("wifiDescription", { ns: "settings" })}
           action={
-            <button className={cx("btn btn-sm btn-outline btn-info", busy && "app-busy-button")} type="button" disabled={busy} onClick={onScan}>
-              {busy ? <LoadingSpinner size={16} /> : <RefreshCw size={16} />}
-              <span>{t("wifiScan", { ns: "settings" })}</span>
-            </button>
+            <>
+              {activeNetwork ? (
+                <button
+                  className={cx("btn btn-sm btn-outline btn-error", busy && "app-busy-button")}
+                  type="button"
+                  disabled={busy}
+                  onClick={() => onDisconnect(activeNetwork.device)}
+                >
+                  {busy ? <LoadingSpinner size={16} /> : <WifiOff size={16} />}
+                  <span>{t("wifiDisconnect", { ns: "settings" })}</span>
+                </button>
+              ) : null}
+              <button className={cx("btn btn-sm btn-outline btn-info", busy && "app-busy-button")} type="button" disabled={busy} onClick={onScan}>
+                {busy ? <LoadingSpinner size={16} /> : <RefreshCw size={16} />}
+                <span>{t("wifiScan", { ns: "settings" })}</span>
+              </button>
+            </>
           }
         />
 
@@ -1280,6 +1319,24 @@ export function NetworkSettingsPage({
                 developerToken,
               );
               setBanner({ kind: "success", message: response.message });
+              setWifiPassword("");
+              await scanWiFi();
+              await load({ silent: true });
+            } catch (error) {
+              setBanner({ kind: "error", message: extractErrorMessage(error, t("unexpectedError", { ns: "common" })) });
+            } finally {
+              setWifiBusy(false);
+            }
+          })();
+        }}
+        onDisconnect={(device) => {
+          void (async () => {
+            setWifiBusy(true);
+            setBanner({ kind: "loading", message: t("loading", { ns: "common" }) });
+            try {
+              const response = await disconnectWiFi({ device }, locale, developerToken);
+              setBanner({ kind: "success", message: response.message });
+              setSelectedSSID("");
               setWifiPassword("");
               await scanWiFi();
               await load({ silent: true });

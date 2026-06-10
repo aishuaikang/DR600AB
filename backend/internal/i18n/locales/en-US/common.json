@@ -22,6 +22,7 @@
   "network.updated": "Network interface configuration updated",
   "network.priority_updated": "Network priority updated",
   "wifi.connected": "Wi-Fi connection request submitted",
+  "wifi.disconnected": "Wi-Fi disconnected",
   "cellular.connected": "4G connection request submitted",
   "deception.session.connecting": "Spoofing serial session is connecting",
   "deception.session.started": "Spoofing serial session started",

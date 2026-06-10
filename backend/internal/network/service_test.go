@@ -75,6 +75,64 @@ func TestParseDeviceStatusEscapedConnection(t *testing.T) {
 	}
 }
 
+func TestParseRouteDevice(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{
+			name:  "preferred route",
+			input: "1.1.1.1 via 10.64.64.64 dev usb0 src 10.64.64.10 uid 1000\n    cache",
+			want:  "usb0",
+		},
+		{
+			name:  "direct route",
+			input: "1.1.1.1 dev wlan0 src 192.168.1.23 uid 1000",
+			want:  "wlan0",
+		},
+		{
+			name:  "missing device",
+			input: "unreachable 1.1.1.1",
+			want:  "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := parseRouteDevice(tt.input); got != tt.want {
+				t.Fatalf("parseRouteDevice() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestParseDefaultIPv4Routes(t *testing.T) {
+	got := parseDefaultIPv4Routes(stringsJoinLines(
+		"default via 192.168.10.1 dev wlan0 proto dhcp src 192.168.10.142 metric 600",
+		"default via 10.64.64.64 dev usb0 proto static src 10.64.64.10 metric 100",
+		"default dev usb1 proto static scope link metric 700",
+	))
+
+	if len(got) != 3 {
+		t.Fatalf("routes len = %d, want 3", len(got))
+	}
+	if got[0].Device != "wlan0" || got[0].Via != "192.168.10.1" || got[0].Proto != "dhcp" ||
+		got[0].Src != "192.168.10.142" ||
+		got[0].Metric == nil || *got[0].Metric != 600 {
+		t.Fatalf("first route = %+v, want wlan0 route", got[0])
+	}
+	if got[1].Device != "usb0" || got[1].Via != "10.64.64.64" || got[1].Proto != "static" ||
+		got[1].Src != "10.64.64.10" ||
+		got[1].Metric == nil || *got[1].Metric != 100 {
+		t.Fatalf("second route = %+v, want usb0 route", got[1])
+	}
+	if got[2].Device != "usb1" || got[2].Proto != "static" || got[2].Scope != "link" ||
+		got[2].Metric == nil || *got[2].Metric != 700 {
+		t.Fatalf("third route = %+v, want usb1 link route", got[2])
+	}
+}
+
 func TestParseModemList(t *testing.T) {
 	got := parseModemList(stringsJoinLines(
 		`modem-list.length   : 1`,
@@ -83,6 +141,38 @@ func TestParseModemList(t *testing.T) {
 
 	if len(got) != 1 || got[0] != "0" {
 		t.Fatalf("parseModemList() = %+v, want [0]", got)
+	}
+}
+
+func TestSelectWiFiDisconnectDeviceUsesConnectedWiFi(t *testing.T) {
+	runner := newScriptedNetworkRunner()
+	runner.responses["nmcli -t -f DEVICE,TYPE,STATE device status"] = stringsJoinLines(
+		"eth0:ethernet:connected",
+		"wlan0:wifi:connected (externally)",
+		"wlan1:wifi:disconnected",
+	)
+	svc := NewService(runner, nil)
+
+	got, err := svc.selectWiFiDisconnectDevice(context.Background(), "")
+	if err != nil {
+		t.Fatalf("selectWiFiDisconnectDevice() error = %v", err)
+	}
+	if got != "wlan0" {
+		t.Fatalf("selectWiFiDisconnectDevice() = %q, want wlan0", got)
+	}
+}
+
+func TestSelectWiFiDisconnectDeviceRejectsNonWiFiDevice(t *testing.T) {
+	runner := newScriptedNetworkRunner()
+	runner.responses["nmcli -t -f DEVICE,TYPE,STATE device status"] = stringsJoinLines(
+		"eth0:ethernet:connected",
+		"wlan0:wifi:connected",
+	)
+	svc := NewService(runner, nil)
+
+	_, err := svc.selectWiFiDisconnectDevice(context.Background(), "eth0")
+	if !errors.Is(err, ErrInvalidWiFiConfig) {
+		t.Fatalf("selectWiFiDisconnectDevice() error = %v, want %v", err, ErrInvalidWiFiConfig)
 	}
 }
 
@@ -119,7 +209,7 @@ func TestParseModemDetailQuectelEC200U(t *testing.T) {
 func TestApplyCellularModemsMarksUsbNetPort(t *testing.T) {
 	interfaces := parseDeviceStatus(stringsJoinLines(
 		`wlan0:wifi:connected:Office`,
-		`ttyUSB5:gsm:unavailable:--`,
+		`ttyUSB5:gsm:connected:4g`,
 	))
 	interfaces["usb0"] = model.NetworkInterface{
 		Name:       "usb0",
@@ -151,15 +241,36 @@ func TestApplyCellularModemsMarksUsbNetPort(t *testing.T) {
 	if usb.Kind != "cellular" || usb.Type != "gsm" || !usb.ReadOnly {
 		t.Fatalf("usb0 = %+v, want readonly cellular gsm", usb)
 	}
+	if usb.ConnectionName != "4g" {
+		t.Fatalf("usb0 ConnectionName = %q, want copied control connection 4g", usb.ConnectionName)
+	}
+	if usb.State != "unavailable" {
+		t.Fatalf("usb0 State = %q, want unavailable when modem reports sim-missing", usb.State)
+	}
 	if usb.Modem == nil || usb.Modem.Model != "EC200U" || usb.Modem.FailedReason != "sim-missing" {
 		t.Fatalf("usb0 modem = %+v, want EC200U sim-missing", usb.Modem)
 	}
 	if !hasCapability(model.NetworkInterface{Capabilities: interfaceCapabilities(usb)}, "cellular-connect") {
 		t.Fatalf("usb0 capabilities = %+v, want cellular-connect", interfaceCapabilities(usb))
 	}
-	tty := interfaces["ttyUSB5"]
-	if tty.Kind != "cellular" || tty.Modem == nil || tty.Modem.DataInterface != "usb0" {
-		t.Fatalf("ttyUSB5 = %+v, want cellular control port with usb0 modem", tty)
+	if _, ok := interfaces["ttyUSB5"]; ok {
+		t.Fatalf("ttyUSB5 should be merged into usb0 instead of shown as another 4G interface")
+	}
+}
+
+func TestApplyDefaultRouteMarksOnlySelectedDevice(t *testing.T) {
+	interfaces := parseDeviceStatus(stringsJoinLines(
+		"wlan0:wifi:connected:Office",
+		"usb0:ethernet:connected:4g",
+	))
+
+	applyDefaultRoute(interfaces, "usb0")
+
+	if !interfaces["usb0"].DefaultRoute {
+		t.Fatalf("usb0 DefaultRoute = false, want true")
+	}
+	if interfaces["wlan0"].DefaultRoute {
+		t.Fatalf("wlan0 DefaultRoute = true, want false")
 	}
 }
 
@@ -536,6 +647,125 @@ func TestResolvePriorityTargets(t *testing.T) {
 	}
 	if got[1].item.Name != "eth0" || got[1].routeMetric != 300 {
 		t.Fatalf("second target = %+v, want eth0 metric 300", got[1])
+	}
+}
+
+func TestResolvePriorityTargetsAllowsReadOnlyCellularDataInterface(t *testing.T) {
+	items := []model.NetworkInterface{
+		{
+			Name:           "usb0",
+			Kind:           "cellular",
+			State:          "connected",
+			ConnectionName: "4g",
+			ReadOnly:       true,
+			Capabilities:   []string{"status", "cellular", "cellular-connect", "priority"},
+			Modem: &model.CellularModem{
+				PrimaryPort:   "ttyUSB5",
+				DataInterface: "usb0",
+			},
+		},
+	}
+
+	got, err := resolvePriorityTargets(items, []model.NetworkPriorityBatchItem{
+		{InterfaceName: "usb0", RouteMetric: 100},
+	})
+	if err != nil {
+		t.Fatalf("resolvePriorityTargets() error = %v", err)
+	}
+	if len(got) != 1 || got[0].item.Name != "usb0" || got[0].item.ConnectionName != "4g" {
+		t.Fatalf("targets = %+v, want usb0 4g", got)
+	}
+}
+
+func TestResolvePriorityTargetsAllowsCellularDefaultRouteWithoutConnection(t *testing.T) {
+	items := []model.NetworkInterface{
+		{
+			Name:         "usb0",
+			Kind:         "cellular",
+			State:        "up",
+			ReadOnly:     true,
+			DefaultRoute: true,
+			Capabilities: []string{"status", "cellular", "cellular-connect", "priority"},
+			Modem: &model.CellularModem{
+				PrimaryPort:   "ttyUSB5",
+				DataInterface: "usb0",
+			},
+		},
+	}
+
+	got, err := resolvePriorityTargets(items, []model.NetworkPriorityBatchItem{
+		{InterfaceName: "usb0", RouteMetric: 100},
+	})
+	if err != nil {
+		t.Fatalf("resolvePriorityTargets() error = %v", err)
+	}
+	if len(got) != 1 || got[0].item.Name != "usb0" || got[0].item.ConnectionName != "" {
+		t.Fatalf("targets = %+v, want runtime-only usb0 target", got)
+	}
+}
+
+func TestReapplyConnectedConnectionReplacesRuntimeDefaultRouteMetric(t *testing.T) {
+	runner := newScriptedNetworkRunner()
+	runner.responses["nmcli device modify usb0 ipv4.route-metric 100"] = ""
+	runner.responses["nmcli device reapply usb0"] = ""
+	runner.responses["ip -4 route show default"] = stringsJoinLines(
+		"default via 192.168.10.1 dev wlan0 proto dhcp src 192.168.10.142 metric 600",
+		"default via 10.64.64.64 dev usb0 proto static src 10.64.64.10 metric 700",
+	)
+	runner.responses["ip -4 route delete default via 10.64.64.64 dev usb0 proto static src 10.64.64.10 metric 700"] = ""
+	runner.responses["ip -4 route add default via 10.64.64.64 dev usb0 proto static src 10.64.64.10 metric 100"] = ""
+	svc := NewService(runner, nil)
+
+	err := svc.reapplyConnectedConnection(context.Background(), model.NetworkInterface{
+		Name:           "usb0",
+		Kind:           "cellular",
+		State:          "connected",
+		ConnectionName: "4g",
+		Modem: &model.CellularModem{
+			PrimaryPort:   "ttyUSB5",
+			DataInterface: "usb0",
+		},
+	}, 100)
+	if err != nil {
+		t.Fatalf("reapplyConnectedConnection() error = %v", err)
+	}
+	if !runner.called("ip -4 route delete default via 10.64.64.64 dev usb0 proto static src 10.64.64.10 metric 700") {
+		t.Fatalf("reapplyConnectedConnection() did not delete old usb0 default route metric; calls = %+v", runner.calls)
+	}
+	if !runner.called("ip -4 route add default via 10.64.64.64 dev usb0 proto static src 10.64.64.10 metric 100") {
+		t.Fatalf("reapplyConnectedConnection() did not add new usb0 default route metric; calls = %+v", runner.calls)
+	}
+}
+
+func TestReapplyConnectedConnectionHandlesRuntimeOnlyCellularDefaultRoute(t *testing.T) {
+	runner := newScriptedNetworkRunner()
+	runner.responses["nmcli device modify usb0 ipv4.route-metric 100"] = ""
+	runner.responses["ip -4 route show default"] = "default via 10.64.64.64 dev usb0 proto static src 10.64.64.10 metric 700"
+	runner.responses["ip -4 route delete default via 10.64.64.64 dev usb0 proto static src 10.64.64.10 metric 700"] = ""
+	runner.responses["ip -4 route add default via 10.64.64.64 dev usb0 proto static src 10.64.64.10 metric 100"] = ""
+	svc := NewService(runner, nil)
+
+	err := svc.reapplyConnectedConnection(context.Background(), model.NetworkInterface{
+		Name:         "usb0",
+		Kind:         "cellular",
+		State:        "up",
+		DefaultRoute: true,
+		Modem: &model.CellularModem{
+			PrimaryPort:   "ttyUSB5",
+			DataInterface: "usb0",
+		},
+	}, 100)
+	if err != nil {
+		t.Fatalf("reapplyConnectedConnection() error = %v", err)
+	}
+	if runner.called("nmcli device reapply") || runner.called("nmcli connection up") {
+		t.Fatalf("runtime-only default route should not reapply a missing connection; calls = %+v", runner.calls)
+	}
+	if !runner.called("ip -4 route delete default via 10.64.64.64 dev usb0 proto static src 10.64.64.10 metric 700") {
+		t.Fatalf("reapplyConnectedConnection() did not delete old runtime-only usb0 route metric; calls = %+v", runner.calls)
+	}
+	if !runner.called("ip -4 route add default via 10.64.64.64 dev usb0 proto static src 10.64.64.10 metric 100") {
+		t.Fatalf("reapplyConnectedConnection() did not add new runtime-only usb0 route metric; calls = %+v", runner.calls)
 	}
 }
 

@@ -17,6 +17,7 @@ func (s *Server) registerNetworkRoutes(api fiber.Router) {
 	api.Put("/network/priorities", s.handleUpdateNetworkInterfacePriorities)
 	api.Get("/network/wifi", s.handleWiFiNetworks)
 	api.Post("/network/wifi/connect", s.handleConnectWiFi)
+	api.Post("/network/wifi/disconnect", s.handleDisconnectWiFi)
 	api.Post("/network/cellular/connect", s.handleConnectCellular)
 }
 
@@ -151,6 +152,32 @@ func (s *Server) handleConnectWiFi(c *fiber.Ctx) error {
 
 	return c.JSON(model.WiFiConnectResponse{
 		Message: s.translator.T(locale, "common", "wifi.connected"),
+	})
+}
+
+// handleDisconnectWiFi 断开当前无线网络。
+func (s *Server) handleDisconnectWiFi(c *fiber.Ctx) error {
+	locale := s.resolveLocale(c)
+
+	var req model.WiFiDisconnectRequest
+	if len(c.Body()) > 0 {
+		if err := c.BodyParser(&req); err != nil {
+			return s.respondError(
+				c,
+				fiber.StatusBadRequest,
+				"invalid_request",
+				s.translator.T(locale, "errors", "invalid_request"),
+				err.Error(),
+			)
+		}
+	}
+
+	if err := s.network.DisconnectWiFi(c.Context(), req); err != nil {
+		return s.respondNetworkError(c, locale, err)
+	}
+
+	return c.JSON(model.WiFiDisconnectResponse{
+		Message: s.translator.T(locale, "common", "wifi.disconnected"),
 	})
 }
 

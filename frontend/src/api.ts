@@ -73,6 +73,8 @@ import type {
   UserSettings,
   WiFiConnectRequest,
   WiFiConnectResponse,
+  WiFiDisconnectRequest,
+  WiFiDisconnectResponse,
   WiFiNetworksResponse,
 } from "./types";
 import i18n from "./i18n";
@@ -570,6 +572,18 @@ export function connectWiFi(
   developerToken: string,
 ): Promise<WiFiConnectResponse> {
   return requestJson<WiFiConnectResponse>("/network/wifi/connect", {
+    method: "POST",
+    headers: developerHeaders(developerToken),
+    body: JSON.stringify(payload),
+  }, locale);
+}
+
+export function disconnectWiFi(
+  payload: WiFiDisconnectRequest,
+  locale: string,
+  developerToken: string,
+): Promise<WiFiDisconnectResponse> {
+  return requestJson<WiFiDisconnectResponse>("/network/wifi/disconnect", {
     method: "POST",
     headers: developerHeaders(developerToken),
     body: JSON.stringify(payload),

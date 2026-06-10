@@ -890,6 +890,7 @@ export interface NetworkInterface {
   routeMetric?: number;
   managed: boolean;
   readOnly?: boolean;
+  defaultRoute: boolean;
   source?: string;
   capabilities?: string[];
   modem?: CellularModem;
@@ -982,6 +983,14 @@ export interface WiFiConnectRequest {
 }
 
 export interface WiFiConnectResponse {
+  message: string;
+}
+
+export interface WiFiDisconnectRequest {
+  device?: string;
+}
+
+export interface WiFiDisconnectResponse {
   message: string;
 }
 
