@@ -1350,13 +1350,19 @@ function PositionTargetCard({
 
   return (
     <article
-      className={cx("screen-position-card", selected && "screen-position-card--selected")}
+      className={cx(
+        "screen-position-card",
+        pendingEncrypted && "screen-position-card--pending",
+        selected && "screen-position-card--selected",
+      )}
       onClick={() => onSelect(target)}
     >
       <div className="screen-position-card__head">
-        <div className={cx("screen-position-card__profile", pendingEncrypted && "screen-position-card__profile--text-only")}>
-          {!pendingEncrypted ? (
-            <span className="screen-position-card__image">
+        <div className="screen-position-card__profile">
+          <span className="screen-position-card__image">
+            {pendingEncrypted ? (
+              <Radar className="screen-position-card__pending-icon" size={24} aria-hidden="true" />
+            ) : (
               <img
                 src={imageUrl}
                 alt=""
@@ -1366,9 +1372,9 @@ function PositionTargetCard({
                   event.currentTarget.src = mini2Image;
                 }}
               />
-              <span className="screen-position-card__image-glow" />
-            </span>
-          ) : null}
+            )}
+            <span className="screen-position-card__image-glow" />
+          </span>
           <span className="screen-position-card__identity">
             <span className="screen-position-card__title-row">
               {whitelisted ? (
