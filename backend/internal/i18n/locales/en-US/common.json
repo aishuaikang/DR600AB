@@ -15,6 +15,8 @@
   "gpio.disabled": "Interference channel disabled",
   "strike.started": "Interference started",
   "strike.stopped": "Interference stopped",
+  "direction.started": "Direction finding started",
+  "direction.stopped": "Direction finding stopped",
   "developer.login": "Developer login is active",
   "license.uploaded": "License uploaded and activated",
   "network.updated": "Network interface configuration updated",

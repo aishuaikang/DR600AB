@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, ReactNode } from "react";
 import type { TFunction } from "i18next";
 import type L from "leaflet";
-import { Activity, BellRing, ChevronDown, ChevronLeft, ChevronRight, Cpu, Eye, Globe2, Inbox, Loader2, MapPin, Orbit, QrCode, Radar, Radio, RadioTower, RefreshCw, Route, SatelliteDish, ScanSearch, Settings2, Shield, ShieldCheck, ShieldMinus, ShieldPlus, Square, Thermometer, TimerReset, Volume2, VolumeX, X, Zap } from "lucide-react";
+import { Activity, BellRing, Check, ChevronDown, ChevronLeft, ChevronRight, Cpu, Eye, Globe2, Inbox, Loader2, MapPin, Orbit, QrCode, Radar, Radio, RadioTower, RefreshCw, Route, SatelliteDish, ScanSearch, Settings2, Shield, ShieldCheck, ShieldMinus, ShieldPlus, Square, Thermometer, TimerReset, Volume2, VolumeX, X, Zap } from "lucide-react";
 import * as QRCode from "qrcode";
 
 import {
@@ -10,12 +10,14 @@ import {
   getScreenDeception,
   getScreenDeceptionStatus,
   getScreenDeviceLocation,
+  getScreenDirection,
   getScreenPositions,
   getScreenStatus,
   getScreenStrike,
   openScreenFpvVideo,
   openScreenStream,
   updateScreenDeception,
+  updateScreenDirection,
   updateScreenStrike,
 } from "../api";
 import type {
@@ -25,6 +27,7 @@ import type {
   ScreenDeceptionMode,
   ScreenDeceptionSignalWorkStatus,
   ScreenDeceptionState,
+  ScreenDirectionState,
   ScreenDeviceLocationResponse,
   ScreenAlarmSettings,
   ScreenFpvFrame,
@@ -46,7 +49,7 @@ import i18n from "../i18n";
 import { noFlyZonePresets } from "../data/noFlyZones";
 import type { NoFlyZonePreset } from "../data/noFlyZones";
 import { gps84ToGcj02 } from "../utils/leafletCoordConverter";
-import { compactLocaleName } from "../utils/locales";
+import { compactLocaleName, fullLocaleName } from "../utils/locales";
 import { resolveDisplayModel } from "../utils/models";
 import { extractErrorMessage } from "../utils/session";
 import {
@@ -75,6 +78,8 @@ const screenDeceptionDefaultMode: ScreenDeceptionMode = "fixed_point";
 const screenDeceptionMinAltitudeM = -500;
 const screenDeceptionMaxAltitudeM = 10000;
 const manualNoFlyZonePresetId = "__manual__";
+const inactiveScreenDirectionState: ScreenDirectionState = { active: false };
+const screenDirectionStopBusyId = "__direction_stop__";
 const screenDeceptionModeOptions: Array<{
   id: ScreenDeceptionMode;
   labelKey: string;
@@ -891,7 +896,8 @@ function ScreenHeader({
                     setLanguageOpen(false);
                   }}
                 >
-                  {compactLocaleName(option)}
+                  <span>{fullLocaleName(option)}</span>
+                  {option === locale ? <Check size={14} /> : null}
                 </button>
               ))}
             </div>
@@ -908,15 +914,21 @@ function ScreenHeader({
 function DetectionTargetCard({
   target,
   selected,
+  directionState,
+  directionBusyTargetId,
   t,
   now,
   onSelect,
+  onToggleDirection,
 }: {
   target: ScreenDetectionTarget;
   selected: boolean;
+  directionState: ScreenDirectionState;
+  directionBusyTargetId: string;
   t: TFunction;
   now: Date;
   onSelect: (target: ScreenDetectionTarget) => void;
+  onToggleDirection: (target: ScreenDetectionTarget) => void;
 }) {
   const title = resolveDisplayModel(target) || t("unknownTarget", { ns: "screen" });
   const imageUrl = getDroneImageUrl(target.model);
@@ -929,6 +941,11 @@ function DetectionTargetCard({
     ? `${timeToneTitle}，${t("targetDisappearCountdown", { ns: "screen" })} ${countdownText}`
     : timeToneTitle;
   const [freshnessOpen, setFreshnessOpen] = useState(false);
+  const directionActive = Boolean(directionState.active && directionState.targetId === target.id);
+  const directionBusy = directionBusyTargetId === target.id;
+  const directionDisabled = directionBusy || (directionState.active && !directionActive) || !Number.isFinite(target.frequency);
+  const directionLabel = directionActive ? t("stopDirection", { ns: "screen" }) : t("startDirection", { ns: "screen" });
+  const signalPercent = getRSSIPercent(target.rssi);
 
   return (
     <article
@@ -984,9 +1001,14 @@ function DetectionTargetCard({
             <em>{t("frequency", { ns: "screen" })}</em>
             <strong>{formatFrequency(target.frequency)}</strong>
           </span>
-          <span className="screen-target-readout">
-            <em>{t("rssi", { ns: "screen" })}</em>
-            <strong>{formatRSSI(target.rssi)}</strong>
+          <span className="screen-target-readout screen-target-readout--signal">
+            <span className="screen-target-signal-head">
+              <em>{t("rssi", { ns: "screen" })}</em>
+              <strong>{formatRSSI(target.rssi)}</strong>
+            </span>
+            <span className="screen-target-signal-meter" aria-hidden="true">
+              <span style={{ width: `${signalPercent}%` }} />
+            </span>
           </span>
         </div>
 
@@ -995,6 +1017,30 @@ function DetectionTargetCard({
             {timeToneTitle}
           </span>
         ) : null}
+
+        <div className="screen-detection-card__actions">
+          <button
+            className={cx(
+              "screen-direction-button",
+              directionActive && "screen-direction-button--active",
+              directionBusy && "screen-direction-button--busy",
+            )}
+            type="button"
+            disabled={directionDisabled}
+            aria-pressed={directionActive}
+            aria-label={`${directionLabel} ${formatFrequency(target.frequency)}`}
+            onClick={(event) => {
+              event.stopPropagation();
+              if (directionDisabled) {
+                return;
+              }
+              onToggleDirection(target);
+            }}
+          >
+            {directionBusy ? <Loader2 size={12} aria-hidden="true" /> : directionActive ? <Square size={11} aria-hidden="true" /> : <ScanSearch size={12} aria-hidden="true" />}
+            <span>{directionLabel}</span>
+          </button>
+        </div>
       </div>
     </article>
   );
@@ -1004,6 +1050,7 @@ function FpvTargetTable({
   targets,
   selectedId,
   activeVideoTargetId,
+  directionActive,
   t,
   onSelect,
   onOpenVideo,
@@ -1011,6 +1058,7 @@ function FpvTargetTable({
   targets: ScreenDetectionTarget[];
   selectedId: string;
   activeVideoTargetId: string;
+  directionActive: boolean;
   t: TFunction;
   onSelect: (target: ScreenDetectionTarget) => void;
   onOpenVideo: (target: ScreenDetectionTarget) => void;
@@ -1028,7 +1076,8 @@ function FpvTargetTable({
         {targets.map((target) => {
           const signalPercent = getRSSIPercent(target.rssi);
           const activeVideo = activeVideoTargetId === target.id;
-          const videoDisabled = Boolean(activeVideoTargetId) && !activeVideo;
+          const directionLocked = directionActive && !activeVideo;
+          const videoDisabled = directionLocked || (Boolean(activeVideoTargetId) && !activeVideo);
 
           return (
             <div
@@ -1037,6 +1086,7 @@ function FpvTargetTable({
                 "screen-fpv-row",
                 selectedId === target.id && "screen-fpv-row--selected",
                 activeVideo && "screen-fpv-row--playing",
+                directionLocked && "screen-fpv-row--locked",
               )}
               role="button"
               tabIndex={0}
@@ -1073,7 +1123,7 @@ function FpvTargetTable({
                   type="button"
                   disabled={videoDisabled}
                   aria-disabled={activeVideo || videoDisabled}
-                  aria-label={`${t("viewVideo", { ns: "screen" })} ${formatFrequency(target.frequency)}`}
+                  aria-label={`${directionLocked ? t("directionStopBeforeVideo", { ns: "screen" }) : t("viewVideo", { ns: "screen" })} ${formatFrequency(target.frequency)}`}
                   onClick={(event) => {
                     event.stopPropagation();
                     if (videoDisabled || activeVideo) {
@@ -1083,7 +1133,7 @@ function FpvTargetTable({
                   }}
                 >
                   <Eye size={12} aria-hidden="true" />
-                  <span>{activeVideo ? t("viewingVideo", { ns: "screen" }) : t("viewVideo", { ns: "screen" })}</span>
+                  <span>{directionLocked ? t("directionActive", { ns: "screen" }) : activeVideo ? t("viewingVideo", { ns: "screen" }) : t("viewVideo", { ns: "screen" })}</span>
                 </button>
               </span>
             </div>
@@ -2632,10 +2682,11 @@ const screenAlarmOptionSpecs: Array<{
   key: ScreenAlarmSettingKey;
   labelKey: string;
   Icon: typeof BellRing;
+  tone: "sky" | "emerald" | "amber";
 }> = [
-  { key: "detection", labelKey: "screenAlarmDetection", Icon: BellRing },
-  { key: "position", labelKey: "screenAlarmPosition", Icon: ShieldCheck },
-  { key: "fpv", labelKey: "screenAlarmFpv", Icon: Radio },
+  { key: "detection", labelKey: "screenAlarmDetection", Icon: BellRing, tone: "sky" },
+  { key: "position", labelKey: "screenAlarmPosition", Icon: ShieldCheck, tone: "emerald" },
+  { key: "fpv", labelKey: "screenAlarmFpv", Icon: Radio, tone: "amber" },
 ];
 
 function ScreenAlarmSettingsPanel({
@@ -2657,12 +2708,12 @@ function ScreenAlarmSettingsPanel({
         <strong>{t("screenAlarmTitle", { ns: "settings" })}</strong>
       </div>
       <div className="screen-alarm-settings-grid">
-        {screenAlarmOptionSpecs.map(({ key, labelKey, Icon }) => {
+        {screenAlarmOptionSpecs.map(({ key, labelKey, Icon, tone }) => {
           const active = settings[key];
           return (
             <button
               key={key}
-              className={cx("screen-alarm-setting", active && "screen-alarm-setting--active")}
+              className={cx("screen-alarm-setting", `screen-alarm-setting--${tone}`, active && "screen-alarm-setting--active")}
               type="button"
               aria-pressed={active}
               disabled={saving}
@@ -2743,9 +2794,14 @@ function RightList({
   now,
   collapsed,
   activeVideoTargetId,
+  directionState,
+  directionBusyTargetId,
+  directionError,
   onSelectTarget,
   onSelectPosition,
   onOpenFpvVideo,
+  onToggleDirection,
+  onStopDirection,
   onToggleWhitelist,
   onToggleAlarmSetting,
   onOpenNavigationQRCode,
@@ -2765,9 +2821,14 @@ function RightList({
   now: Date;
   collapsed: boolean;
   activeVideoTargetId: string;
+  directionState: ScreenDirectionState;
+  directionBusyTargetId: string;
+  directionError: string;
   onSelectTarget: (target: ScreenDetectionTarget) => void;
   onSelectPosition: (target: ScreenPositionTarget) => void;
   onOpenFpvVideo: (target: ScreenDetectionTarget) => void;
+  onToggleDirection: (target: ScreenDetectionTarget) => void;
+  onStopDirection: () => void;
   onToggleWhitelist: (target: ScreenPositionTarget) => void;
   onToggleAlarmSetting: (key: ScreenAlarmSettingKey, value: boolean) => void;
   onOpenNavigationQRCode: (label: string, point: ScreenPositionPoint) => void;
@@ -2782,6 +2843,13 @@ function RightList({
   const availableTabs: ScreenAlertKind[] = detectionConfigured ? ["detection", "position", "fpv"] : [];
   const fpvTargets = targets.filter(isFpvTarget);
   const visibleTargets = tab === "fpv" ? fpvTargets : tab === "detection" ? targets : [];
+  const activeDirectionVisible = Boolean(
+    directionState.active &&
+    directionState.targetId &&
+    targets.some((target) => target.id === directionState.targetId),
+  );
+  const showDirectionStatus = tab === "detection" && directionState.active && !activeDirectionVisible;
+  const directionStatusBusy = directionBusyTargetId === screenDirectionStopBusyId;
 
   const getTabCount = (item: ScreenAlertKind) => {
     if (item === "detection") {
@@ -2874,6 +2942,7 @@ function RightList({
               targets={visibleTargets}
               selectedId={selectedId}
               activeVideoTargetId={activeVideoTargetId}
+              directionActive={directionState.active}
               t={t}
               onSelect={onSelectTarget}
               onOpenVideo={onOpenFpvVideo}
@@ -2893,17 +2962,40 @@ function RightList({
                 onOpenNavigationQRCode={onOpenNavigationQRCode}
               />
             ))
-          ) : visibleTargets.length ? (
-            visibleTargets.map((target) => (
-              <DetectionTargetCard
-                key={target.id}
-                target={target}
-                selected={selectedId === target.id}
-                t={t}
-                now={now}
-                onSelect={onSelectTarget}
-              />
-            ))
+          ) : tab === "detection" && (visibleTargets.length || showDirectionStatus || directionError) ? (
+            <>
+              {showDirectionStatus ? (
+                <div className={cx("screen-direction-status", !activeDirectionVisible && "screen-direction-status--orphan")}>
+                  <span>
+                    <em>{t("directionActive", { ns: "screen" })}</em>
+                    <strong>{formatFrequency(directionState.frequency ?? 0)}</strong>
+                  </span>
+                  <button
+                    className="screen-direction-button screen-direction-button--active"
+                    type="button"
+                    disabled={directionStatusBusy}
+                    onClick={() => onStopDirection()}
+                  >
+                    {directionStatusBusy ? <Loader2 size={12} aria-hidden="true" /> : <Square size={11} aria-hidden="true" />}
+                    <span>{t("stopDirection", { ns: "screen" })}</span>
+                  </button>
+                </div>
+              ) : null}
+              {directionError ? <p className="screen-direction-error">{directionError}</p> : null}
+              {visibleTargets.length ? visibleTargets.map((target) => (
+                <DetectionTargetCard
+                  key={target.id}
+                  target={target}
+                  selected={selectedId === target.id}
+                  directionState={directionState}
+                  directionBusyTargetId={directionBusyTargetId}
+                  t={t}
+                  now={now}
+                  onSelect={onSelectTarget}
+                  onToggleDirection={onToggleDirection}
+                />
+              )) : <EmptyState t={t} />}
+            </>
           ) : <EmptyState t={t} />}
         </div>
 
@@ -3036,6 +3128,9 @@ export function ScreenPage({
   const [screenStatus, setScreenStatus] = useState<ScreenRuntimeStatus | null>(null);
   const [liveCompassHeading, setLiveCompassHeading] = useState<{ headingDeg: number; updatedAt: string } | null>(null);
   const [strikeState, setStrikeState] = useState<ScreenStrikeState | null>(null);
+  const [directionState, setDirectionState] = useState<ScreenDirectionState>(inactiveScreenDirectionState);
+  const [directionBusyTargetId, setDirectionBusyTargetId] = useState("");
+  const [directionError, setDirectionError] = useState("");
   const [deceptionState, setDeceptionState] = useState<ScreenDeceptionState | null>(null);
   const [rightCollapsed, setRightCollapsed] = useState(false);
   const [strikeCollapsed, setStrikeCollapsed] = useState(false);
@@ -3230,12 +3325,49 @@ export function ScreenPage({
   }, []);
 
   const handleOpenFpvVideo = useCallback((target: ScreenDetectionTarget) => {
+    if (directionState.active) {
+      setDirectionError(t("directionStopBeforeVideo", { ns: "screen" }));
+      return;
+    }
     setFpvVideoTarget(target);
-  }, []);
+  }, [directionState.active, t]);
 
   const handleCloseFpvVideo = useCallback(() => {
     setFpvVideoTarget(null);
   }, []);
+
+  const submitDirection = useCallback(async (
+    payload: { enabled: false } | { enabled: true; targetId: string; frequency: number },
+    busyTargetId: string,
+  ) => {
+    setDirectionError("");
+    setDirectionBusyTargetId(busyTargetId);
+    try {
+      const response = await updateScreenDirection(payload, locale);
+      setDirectionState(response.state);
+    } catch (error) {
+      setDirectionError(extractErrorMessage(error, t("unexpectedError", { ns: "common" })));
+    } finally {
+      setDirectionBusyTargetId("");
+    }
+  }, [locale, t]);
+
+  const handleToggleDirection = useCallback((target: ScreenDetectionTarget) => {
+    const activeTarget = directionState.active && directionState.targetId === target.id;
+    if (activeTarget) {
+      void submitDirection({ enabled: false }, target.id);
+      return;
+    }
+    void submitDirection({
+      enabled: true,
+      targetId: target.id,
+      frequency: target.frequency,
+    }, target.id);
+  }, [directionState.active, directionState.targetId, submitDirection]);
+
+  const handleStopDirection = useCallback(() => {
+    void submitDirection({ enabled: false }, screenDirectionStopBusyId);
+  }, [submitDirection]);
 
   const syncDeceptionDeviceStatus = useCallback(async () => {
     if (deceptionStatusSyncingRef.current) {
@@ -3290,6 +3422,12 @@ export function ScreenPage({
         }
         const payload = event.payload;
         setPositions((items) => removeScreenPosition(items, payload));
+      },
+      onDirectionUpdated: (event) => {
+        if (!event.payload) {
+          return;
+        }
+        setDirectionState(event.payload);
       },
       onStrikeUpdated: (event) => {
         if (!event.payload) {
@@ -3464,6 +3602,37 @@ export function ScreenPage({
     let cancelled = false;
     let syncing = false;
 
+    const syncDirection = async () => {
+      if (syncing) {
+        return;
+      }
+      syncing = true;
+      try {
+        const response = await getScreenDirection(locale);
+        if (!cancelled) {
+          setDirectionState(response);
+        }
+      } catch {
+        // Keep the last visible direction state during a transient polling failure.
+      } finally {
+        syncing = false;
+      }
+    };
+
+    void syncDirection();
+    const timer = window.setInterval(() => {
+      void syncDirection();
+    }, 1000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [locale]);
+
+  useEffect(() => {
+    let cancelled = false;
+    let syncing = false;
+
     const syncStrike = async () => {
       if (syncing) {
         return;
@@ -3557,6 +3726,8 @@ export function ScreenPage({
       setTargets([]);
       setPositions([]);
       setSelectedId("");
+      setDirectionState(inactiveScreenDirectionState);
+      setDirectionError("");
     }
   }, [screenStatus?.detection.configured]);
 
@@ -3669,9 +3840,14 @@ export function ScreenPage({
         now={now}
         collapsed={rightCollapsed}
         activeVideoTargetId={fpvVideoTarget?.id || ""}
+        directionState={directionState}
+        directionBusyTargetId={directionBusyTargetId}
+        directionError={directionError}
         onSelectTarget={handleSelectTarget}
         onSelectPosition={handleSelectPosition}
         onOpenFpvVideo={handleOpenFpvVideo}
+        onToggleDirection={handleToggleDirection}
+        onStopDirection={handleStopDirection}
         onToggleWhitelist={handleToggleWhitelist}
         onToggleAlarmSetting={(key, value) => void handleToggleAlarmSetting(key, value)}
         onOpenNavigationQRCode={handleOpenNavigationQRCode}

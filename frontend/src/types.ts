@@ -301,6 +301,25 @@ export interface ScreenStrikeResponse {
   message: string;
 }
 
+export interface ScreenDirectionRequest {
+  enabled: boolean;
+  targetId?: string;
+  frequency?: number;
+}
+
+export interface ScreenDirectionState {
+  active: boolean;
+  targetId?: string;
+  frequency?: number;
+  startedAt?: string;
+  lastError?: string;
+}
+
+export interface ScreenDirectionResponse {
+  state: ScreenDirectionState;
+  message: string;
+}
+
 export interface ScreenStrikeRequest {
   enabled: boolean;
   channelIds: string[];
@@ -1018,6 +1037,7 @@ export interface ScreenStreamHandlers {
   onDetectionUpdated?: (event: EventMessage<ScreenDetectionTarget>) => void;
   onPositionUpdated?: (event: EventMessage<ScreenPositionTarget>) => void;
   onPositionRemoved?: (event: EventMessage<ScreenPositionTarget>) => void;
+  onDirectionUpdated?: (event: EventMessage<ScreenDirectionState>) => void;
   onStrikeUpdated?: (event: EventMessage<ScreenStrikeState>) => void;
   onDeceptionUpdated?: (event: EventMessage<ScreenDeceptionState>) => void;
   onCompassRecord?: (event: EventMessage<CompassRecord>) => void;

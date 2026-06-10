@@ -272,6 +272,155 @@ func TestScreenFPVVideoRejectsBusyPlayback(t *testing.T) {
 	}
 }
 
+func TestScreenDirectionReturnsSerialOffline(t *testing.T) {
+	detectionSvc := newScreenFPVDetectionService(t)
+	fpvSvc := fpv.NewService(fpv.Options{Host: "192.168.8.10", Port: 49600})
+	server := newScreenFPVTestServer(t, detectionSvc, fpvSvc)
+
+	req, err := http.NewRequest(http.MethodPost, "/api/v1/screen/direction", strings.NewReader(`{"enabled":true,"targetId":"target-1","frequency":1360}`))
+	if err != nil {
+		t.Fatalf("NewRequest() error = %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := server.app.Test(req)
+	if err != nil {
+		t.Fatalf("app.Test() error = %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != fiber.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503", resp.StatusCode)
+	}
+	var payload model.ApiError
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if payload.Code != "detection_serial_offline" {
+		t.Fatalf("error code = %q, want detection_serial_offline", payload.Code)
+	}
+}
+
+func TestScreenDirectionRejectsInvalidFrequency(t *testing.T) {
+	detectionSvc := newScreenFPVDetectionService(t)
+	fpvSvc := fpv.NewService(fpv.Options{Host: "192.168.8.10", Port: 49600})
+	server := newScreenFPVTestServer(t, detectionSvc, fpvSvc)
+
+	req, err := http.NewRequest(http.MethodPost, "/api/v1/screen/direction", strings.NewReader(`{"enabled":true,"targetId":"target-1","frequency":0}`))
+	if err != nil {
+		t.Fatalf("NewRequest() error = %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := server.app.Test(req)
+	if err != nil {
+		t.Fatalf("app.Test() error = %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != fiber.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+	var payload model.ApiError
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if payload.Code != "invalid_request" {
+		t.Fatalf("error code = %q, want invalid_request", payload.Code)
+	}
+}
+
+func TestScreenDirectionRejectsBusyFPVPlayback(t *testing.T) {
+	detectionSvc := newScreenFPVDetectionService(t)
+	fpvSvc := fpv.NewService(fpv.Options{Host: "192.168.8.10", Port: 49600})
+	playback, err := fpvSvc.BeginPlayback(1360)
+	if err != nil {
+		t.Fatalf("BeginPlayback() error = %v", err)
+	}
+	defer fpvSvc.EndPlayback(playback)
+
+	server := newScreenFPVTestServer(t, detectionSvc, fpvSvc)
+	req, err := http.NewRequest(http.MethodPost, "/api/v1/screen/direction", strings.NewReader(`{"enabled":true,"targetId":"target-1","frequency":1360}`))
+	if err != nil {
+		t.Fatalf("NewRequest() error = %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := server.app.Test(req)
+	if err != nil {
+		t.Fatalf("app.Test() error = %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != fiber.StatusConflict {
+		t.Fatalf("status = %d, want 409", resp.StatusCode)
+	}
+	var payload model.ApiError
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if payload.Code != "fpv_video_busy" {
+		t.Fatalf("error code = %q, want fpv_video_busy", payload.Code)
+	}
+}
+
+func TestScreenFPVVideoRejectsActiveDirection(t *testing.T) {
+	detectionSvc := newScreenFPVDetectionService(t)
+	ports := map[string]*screenFPVSerialPort{}
+	detectionSvc.SetSerialOpener(func(cfg *serialport.Config) (serial.Port, error) {
+		port := newScreenFPVSerialPort()
+		ports[cfg.PortName] = port
+		return port, nil
+	})
+
+	_, err := detectionSvc.Start(model.DetectionSessionRequest{
+		RxPortName: "/dev/fpv-rx",
+		TxPortName: "/dev/fpv-tx",
+		RxBaudRate: 115200,
+		TxBaudRate: 460800,
+	}, "zh-CN")
+	if err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+	defer detectionSvc.Stop("zh-CN")
+
+	if _, err := detectionSvc.SetScreenDirection(model.ScreenDirectionRequest{
+		Enabled:   true,
+		TargetID:  "target-1",
+		Frequency: 1360,
+	}); err != nil {
+		t.Fatalf("SetScreenDirection() error = %v", err)
+	}
+
+	fpvSvc := fpv.NewService(fpv.Options{Host: "192.168.8.10", Port: 49600})
+	server := newScreenFPVTestServer(t, detectionSvc, fpvSvc)
+	req, err := http.NewRequest(http.MethodGet, "/api/v1/screen/fpv/video?frequency=1360", nil)
+	if err != nil {
+		t.Fatalf("NewRequest() error = %v", err)
+	}
+
+	resp, err := server.app.Test(req)
+	if err != nil {
+		t.Fatalf("app.Test() error = %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != fiber.StatusConflict {
+		t.Fatalf("status = %d, want 409", resp.StatusCode)
+	}
+	var payload model.ApiError
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if payload.Code != "direction_active" {
+		t.Fatalf("error code = %q, want direction_active", payload.Code)
+	}
+	assertScreenFPVPortWrites(t, ports["/dev/fpv-tx"],
+		"start -freq 1\n",
+		"start -freq 1360\n",
+	)
+}
+
 func TestScreenFPVPlaybackCommandOrder(t *testing.T) {
 	detectionSvc := newScreenFPVDetectionService(t)
 	ports := map[string]*screenFPVSerialPort{}
@@ -430,6 +579,8 @@ func newScreenFPVTestServer(t *testing.T, detectionSvc *detection.Service, fpvSv
 		fpv:        fpvSvc,
 	}
 	server.app.Get("/api/v1/screen/fpv/video", server.handleScreenFPVVideo)
+	server.app.Get("/api/v1/screen/direction", server.handleScreenDirection)
+	server.app.Post("/api/v1/screen/direction", server.handleSetScreenDirection)
 	return server
 }
 

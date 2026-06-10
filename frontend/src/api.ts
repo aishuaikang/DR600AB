@@ -57,6 +57,9 @@ import type {
   ScreenDeceptionRequest,
   ScreenDeceptionResponse,
   ScreenDeceptionState,
+  ScreenDirectionRequest,
+  ScreenDirectionResponse,
+  ScreenDirectionState,
   ScreenFpvFrame,
   ScreenFpvStatus,
   ScreenFpvVideoHandlers,
@@ -463,6 +466,10 @@ export function getScreenStrike(locale?: string): Promise<ScreenStrikeState> {
   return requestJson<ScreenStrikeState>("/screen/strike", {}, locale);
 }
 
+export function getScreenDirection(locale?: string): Promise<ScreenDirectionState> {
+  return requestJson<ScreenDirectionState>("/screen/direction", {}, locale);
+}
+
 export function getScreenDeception(locale?: string): Promise<ScreenDeceptionState> {
   return requestJson<ScreenDeceptionState>("/screen/deception", {}, locale);
 }
@@ -476,6 +483,16 @@ export function updateScreenStrike(
   locale: string,
 ): Promise<ScreenStrikeResponse> {
   return requestJson<ScreenStrikeResponse>("/screen/strike", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  }, locale);
+}
+
+export function updateScreenDirection(
+  payload: ScreenDirectionRequest,
+  locale: string,
+): Promise<ScreenDirectionResponse> {
+  return requestJson<ScreenDirectionResponse>("/screen/direction", {
     method: "POST",
     body: JSON.stringify(payload),
   }, locale);
@@ -739,6 +756,13 @@ export function openScreenStream(handlers: ScreenStreamHandlers): () => void {
     const event = parseStreamEvent<ScreenPositionTarget>((message as MessageEvent<string>).data);
     if (event) {
       handlers.onPositionRemoved?.(event);
+    }
+  });
+
+  source.addEventListener("screen.direction.updated", (message) => {
+    const event = parseStreamEvent<ScreenDirectionState>((message as MessageEvent<string>).data);
+    if (event) {
+      handlers.onDirectionUpdated?.(event);
     }
   });
 

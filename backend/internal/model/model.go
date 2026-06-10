@@ -667,6 +667,28 @@ type ScreenStrikeResponse struct {
 	Message string            `json:"message"`
 }
 
+// ScreenDirectionRequest 控制大屏侦测目标测向锁频。
+type ScreenDirectionRequest struct {
+	Enabled   bool    `json:"enabled"`
+	TargetID  string  `json:"targetId,omitempty"`
+	Frequency float64 `json:"frequency,omitempty"`
+}
+
+// ScreenDirectionState 描述当前测向锁频状态。
+type ScreenDirectionState struct {
+	Active    bool       `json:"active"`
+	TargetID  string     `json:"targetId,omitempty"`
+	Frequency float64    `json:"frequency,omitempty"`
+	StartedAt *time.Time `json:"startedAt,omitempty"`
+	LastError string     `json:"lastError,omitempty"`
+}
+
+// ScreenDirectionResponse 返回测向锁频状态和用户提示。
+type ScreenDirectionResponse struct {
+	State   ScreenDirectionState `json:"state"`
+	Message string               `json:"message"`
+}
+
 // InterferenceReportStatus 描述干扰报告生命周期状态。
 type InterferenceReportStatus string
 

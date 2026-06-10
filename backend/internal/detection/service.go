@@ -57,13 +57,35 @@ type O3PlusO4Decoder interface {
 }
 
 const (
-	startDetectionCommand = "start -freq 1"
-	defaultRxBaudRate     = 115200
-	defaultTxBaudRate     = 460800
-	defaultBaudRate       = defaultRxBaudRate
+	startDetectionCommand    = "start -freq 1"
+	screenDirectionEventType = "screen.direction.updated"
+	maxDirectionFrequencyMHz = 10000
+	defaultRxBaudRate        = 115200
+	defaultTxBaudRate        = 460800
+	defaultBaudRate          = defaultRxBaudRate
 )
 
-var ErrCommandSerialOffline = errors.New("detection command serial offline")
+type commandControlMode string
+
+const (
+	commandControlModeIdle      commandControlMode = ""
+	commandControlModeDirection commandControlMode = "direction"
+	commandControlModeFPV       commandControlMode = "fpv"
+)
+
+type commandControlResetPolicy int
+
+const (
+	commandControlResetAlways commandControlResetPolicy = iota
+	commandControlResetIfCurrent
+)
+
+var (
+	ErrCommandSerialOffline      = errors.New("detection command serial offline")
+	ErrCommandModeConflict       = errors.New("detection command mode conflict")
+	ErrDirectionTargetRequired   = errors.New("direction target required")
+	ErrInvalidDirectionFrequency = errors.New("invalid direction frequency")
+)
 
 // SettingsStore 持久化最近一次侦测会话请求和公开用户设置。
 type SettingsStore interface {
@@ -85,6 +107,8 @@ type Service struct {
 	o3Decoder  O3PlusO4Decoder
 	listPorts  func() ([]string, error)
 	current    *session
+	direction  model.ScreenDirectionState
+	mode       commandControlMode
 	sequence   uint64
 }
 
@@ -254,7 +278,7 @@ func (s *Service) Start(req model.DetectionSessionRequest, locale string) (model
 
 	if prev != nil {
 		prev.cancel()
-		s.closeSessionClient(prev)
+		s.closeSessionClient(prev, commandControlResetAlways)
 	}
 
 	client, err := s.connectOnce(&sess.config, sess.txPortName, sess.txBaudRate, locale)
@@ -296,7 +320,7 @@ func (s *Service) Stop(locale string) model.DetectionSessionResponse {
 	}
 
 	prev.cancel()
-	s.closeSessionClient(prev)
+	s.closeSessionClient(prev, commandControlResetAlways)
 
 	response := s.responseForSession(prev, locale, s.translator.T(locale, "common", "session.stopped"))
 	response.Active = false
@@ -342,11 +366,126 @@ func (s *Service) ScreenPositionsWithDeviceLocation(limit int, deviceLocation *m
 	return s.store.ListScreenPositionsWithDeviceLocation(limit, deviceLocation)
 }
 
+// ScreenDirectionState 返回当前大屏测向锁频状态。
+func (s *Service) ScreenDirectionState() model.ScreenDirectionState {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return cloneScreenDirectionState(s.direction)
+}
+
+// SetScreenDirection 更新大屏测向锁频状态，并向侦测 TX 串口发送锁频或复位命令。
+func (s *Service) SetScreenDirection(req model.ScreenDirectionRequest) (model.ScreenDirectionState, error) {
+	if !req.Enabled {
+		return s.stopScreenDirection()
+	}
+
+	targetID := strings.TrimSpace(req.TargetID)
+	if targetID == "" {
+		return s.ScreenDirectionState(), ErrDirectionTargetRequired
+	}
+	frequency, err := normalizeDirectionFrequency(req.Frequency)
+	if err != nil {
+		return s.ScreenDirectionState(), err
+	}
+
+	s.commandMu.Lock()
+	defer s.commandMu.Unlock()
+
+	if s.mode != commandControlModeIdle {
+		return s.ScreenDirectionState(), ErrCommandModeConflict
+	}
+	if err := s.sendCommandsLocked(fmt.Sprintf("start -freq %d", frequency)); err != nil {
+		return s.setScreenDirectionError(err), err
+	}
+	s.mode = commandControlModeDirection
+
+	startedAt := time.Now()
+	return s.setScreenDirectionState(model.ScreenDirectionState{
+		Active:    true,
+		TargetID:  targetID,
+		Frequency: float64(frequency),
+		StartedAt: &startedAt,
+	}, true), nil
+}
+
+func (s *Service) stopScreenDirection() (model.ScreenDirectionState, error) {
+	s.commandMu.Lock()
+	defer s.commandMu.Unlock()
+
+	if s.mode == commandControlModeFPV {
+		return s.ScreenDirectionState(), ErrCommandModeConflict
+	}
+	if err := s.sendCommandsLocked(startDetectionCommand); err != nil {
+		return s.setScreenDirectionError(err), err
+	}
+	s.mode = commandControlModeIdle
+	return s.clearScreenDirectionState(true), nil
+}
+
 // SendCommands writes text commands to the active detection TX serial port in order.
 func (s *Service) SendCommands(commands ...string) error {
 	s.commandMu.Lock()
 	defer s.commandMu.Unlock()
 
+	if s.mode != commandControlModeIdle {
+		return ErrCommandModeConflict
+	}
+	return s.sendCommandsLocked(commands...)
+}
+
+// BeginScreenFPVPlayback switches the detector into FPV image mode.
+func (s *Service) BeginScreenFPVPlayback(imageAddress string, bandStart, bandEnd int) error {
+	imageAddress = strings.TrimSpace(imageAddress)
+	if imageAddress == "" {
+		return fmt.Errorf("fpv image address is required")
+	}
+	if bandStart <= 0 || bandEnd <= 0 || bandEnd < bandStart {
+		return fmt.Errorf("invalid fpv band: %d,%d", bandStart, bandEnd)
+	}
+
+	s.commandMu.Lock()
+	defer s.commandMu.Unlock()
+
+	if s.mode != commandControlModeIdle {
+		return ErrCommandModeConflict
+	}
+	s.mode = commandControlModeFPV
+	if err := s.sendCommandsLocked(fmt.Sprintf("start -imag %s\r\n", imageAddress)); err != nil {
+		s.mode = commandControlModeIdle
+		return err
+	}
+	if err := s.sendCommandsLocked(fmt.Sprintf("start -band %d,%d\r\n", bandStart, bandEnd)); err != nil {
+		if stopErr := s.endScreenFPVPlaybackLocked(); stopErr != nil {
+			return errors.Join(err, stopErr)
+		}
+		return err
+	}
+	return nil
+}
+
+// EndScreenFPVPlayback restores the detector to the default frequency mode.
+func (s *Service) EndScreenFPVPlayback() error {
+	s.commandMu.Lock()
+	defer s.commandMu.Unlock()
+
+	if s.mode == commandControlModeDirection {
+		return ErrCommandModeConflict
+	}
+	return s.endScreenFPVPlaybackLocked()
+}
+
+func (s *Service) endScreenFPVPlaybackLocked() error {
+	if err := s.sendCommandsLocked(
+		"start -imag 0\r\n",
+		"start -freq 1\r\n",
+	); err != nil {
+		return err
+	}
+	s.mode = commandControlModeIdle
+	return nil
+}
+
+func (s *Service) sendCommandsLocked(commands ...string) error {
 	s.mu.RLock()
 	current := s.current
 	var serialClient *client.SerialClient
@@ -373,17 +512,27 @@ func (s *Service) sessionClient(sess *session) *client.SerialClient {
 	return sess.client
 }
 
-func (s *Service) closeSessionClient(sess *session) {
+func (s *Service) closeSessionClient(sess *session, resetPolicy commandControlResetPolicy) {
 	s.commandMu.Lock()
 	defer s.commandMu.Unlock()
 
 	s.mu.Lock()
 	serialClient := sess.client
 	sess.client = nil
+	resetControl := resetPolicy == commandControlResetAlways ||
+		(resetPolicy == commandControlResetIfCurrent && s.current == sess)
+	publishDirectionClear := false
+	if resetControl {
+		s.mode = commandControlModeIdle
+		publishDirectionClear = s.clearScreenDirectionStateLocked()
+	}
 	s.mu.Unlock()
 
 	if serialClient != nil {
 		serialClient.Close()
+	}
+	if publishDirectionClear {
+		s.publishScreenDirection(model.ScreenDirectionState{})
 	}
 }
 
@@ -509,7 +658,7 @@ func (s *Service) manageSession(seq uint64, sess *session, connected bool) {
 		serialClient.ReadLoop(func(line string) {
 			s.IngestLine(sess.id, sess.config.PortName, line)
 		})
-		s.closeSessionClient(sess)
+		s.closeSessionClient(sess, commandControlResetIfCurrent)
 
 		if !s.isCurrentSession(seq, sess) {
 			return
@@ -662,6 +811,82 @@ func (s *Service) setSessionFailure(seq uint64, sess *session, state, lastErr st
 	sess.state = state
 	sess.lastError = lastErr
 	sess.retryCount++
+}
+
+func normalizeDirectionFrequency(value float64) (int, error) {
+	if math.IsNaN(value) || math.IsInf(value, 0) {
+		return 0, ErrInvalidDirectionFrequency
+	}
+	frequency := int(math.Round(value))
+	if frequency <= 0 || frequency > maxDirectionFrequencyMHz {
+		return 0, ErrInvalidDirectionFrequency
+	}
+	return frequency, nil
+}
+
+func (s *Service) setScreenDirectionError(err error) model.ScreenDirectionState {
+	if err == nil {
+		return s.ScreenDirectionState()
+	}
+
+	s.mu.Lock()
+	state := cloneScreenDirectionState(s.direction)
+	if state.Active {
+		state.LastError = err.Error()
+		s.direction = cloneScreenDirectionState(state)
+	}
+	s.mu.Unlock()
+
+	if state.Active {
+		s.publishScreenDirection(state)
+	}
+	return state
+}
+
+func (s *Service) setScreenDirectionState(state model.ScreenDirectionState, publish bool) model.ScreenDirectionState {
+	state = cloneScreenDirectionState(state)
+	s.mu.Lock()
+	s.direction = cloneScreenDirectionState(state)
+	s.mu.Unlock()
+
+	if publish {
+		s.publishScreenDirection(state)
+	}
+	return state
+}
+
+func (s *Service) clearScreenDirectionState(publish bool) model.ScreenDirectionState {
+	s.mu.Lock()
+	changed := s.clearScreenDirectionStateLocked()
+	s.mu.Unlock()
+
+	state := model.ScreenDirectionState{}
+	if publish && changed {
+		s.publishScreenDirection(state)
+	}
+	return state
+}
+
+func (s *Service) clearScreenDirectionStateLocked() bool {
+	changed := s.direction.Active || s.direction.TargetID != "" || s.direction.Frequency != 0 || s.direction.LastError != ""
+	s.direction = model.ScreenDirectionState{}
+	return changed
+}
+
+func (s *Service) publishScreenDirection(state model.ScreenDirectionState) {
+	if s.store == nil {
+		return
+	}
+	s.store.Publish(model.Event{Type: screenDirectionEventType, Time: time.Now(), Payload: state})
+}
+
+func cloneScreenDirectionState(state model.ScreenDirectionState) model.ScreenDirectionState {
+	if state.StartedAt == nil {
+		return state
+	}
+	startedAt := *state.StartedAt
+	state.StartedAt = &startedAt
+	return state
 }
 
 // isCurrentSession 判断序号和会话指针是否仍对应当前会话。

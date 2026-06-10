@@ -803,6 +803,8 @@ body.virtual-keyboard-open .app-loading-overlay {
 @media (max-width: 1366px), (pointer: coarse) {
   .admin-shell {
     --app-touch-target: 2.75rem;
+    --app-mobile-body-size: 0.875rem;
+    --app-mobile-caption-size: 0.75rem;
   }
 
   .admin-shell :where(.btn-sm, .btn-xs, .btn-square) {
@@ -829,6 +831,18 @@ body.virtual-keyboard-open .app-loading-overlay {
   .admin-sidebar__header :where(a, button),
   .admin-sidebar__footer :where(button) {
     min-width: var(--app-touch-target);
+  }
+
+  .admin-shell :where(.text-\[10px\], .text-\[11px\]) {
+    font-size: var(--app-mobile-caption-size);
+  }
+
+  .admin-shell :where(.text-\[12px\], .text-xs) {
+    font-size: 0.8125rem;
+  }
+
+  .admin-shell :where(.text-\[13px\], .text-sm) {
+    font-size: var(--app-mobile-body-size);
   }
 }
 
@@ -972,11 +986,11 @@ body.virtual-keyboard-open .app-loading-overlay {
   }
 
   .admin-shell :where(.btn-sm, .input-sm, .select-sm) {
-    min-height: 2.25rem;
+    min-height: var(--app-touch-target);
   }
 
   .admin-shell :where(.btn-xs) {
-    min-height: 2rem;
+    min-height: var(--app-touch-target);
   }
 
   .app-page-shell {
@@ -1866,27 +1880,30 @@ body.virtual-keyboard-open .app-loading-overlay {
   align-items: center;
   color: var(--screen-primary);
   line-height: 1;
+  text-shadow: none;
 }
 
 .screen-language-switch__button {
   display: inline-flex;
   height: 100%;
-  min-width: 6.2em;
+  min-width: 6.35em;
   align-items: center;
   justify-content: center;
-  gap: 0.32em;
-  border: 1px solid var(--screen-line-strong);
+  gap: 0.42em;
+  border: 1px solid rgba(186, 211, 222, 0.2);
   border-radius: 999px;
-  padding: 0 0.58em;
+  padding: 0 0.62em;
   color: inherit;
-  background: linear-gradient(
-    180deg,
-    rgba(12, 32, 50, 0.58),
-    rgba(5, 12, 24, 0.36)
-  );
-  box-shadow: inset 0 0 0 1px rgba(143, 232, 255, 0.06);
-  backdrop-filter: blur(6px);
+  background: #0d1a26;
+  box-shadow:
+    0 0.55rem 1.2rem rgba(0, 0, 0, 0.24),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  backdrop-filter: blur(10px);
   cursor: pointer;
+}
+
+.screen-language-switch__button svg {
+  flex: none;
 }
 
 .screen-language-switch__button span {
@@ -1912,36 +1929,38 @@ body.virtual-keyboard-open .app-loading-overlay {
 
 .screen-language-menu {
   position: absolute;
-  top: calc(100% + 0.45em);
+  top: calc(100% + 0.4rem);
   right: 0;
-  z-index: 30;
+  z-index: 40;
   display: grid;
-  min-width: 7em;
-  gap: 0.22em;
-  border: 1px solid var(--screen-line-strong);
-  border-radius: var(--screen-panel-radius-sm);
-  padding: 0.3em;
-  background: rgba(5, 12, 24, 0.9);
-  box-shadow:
-    0 0.75em 1.6em rgba(0, 0, 0, 0.34),
-    inset 0 0 1.2em rgba(255, 255, 255, 0.035);
-  backdrop-filter: blur(10px);
+  width: max-content;
+  min-width: 9.2em;
+  gap: 0.24em;
+  border: 1px solid rgba(38, 201, 255, 0.25);
+  border-radius: 1.35em;
+  padding: 0.38em;
+  background: rgba(11, 17, 24, 0.95);
+  box-shadow: 0 1.1em 2.5em rgba(0, 0, 0, 0.35);
+  backdrop-filter: blur(14px);
   animation: screen-menu-in 0.14s ease-out both;
+  transform-origin: top right;
 }
 
 .screen-language-menu__item {
   display: flex;
-  min-height: var(--screen-touch-target-sm);
+  min-height: 2.65em;
   align-items: center;
-  justify-content: center;
+  justify-content: space-between;
+  gap: 0.5em;
   border: 0;
-  border-radius: var(--screen-panel-radius-xs);
-  padding: 0 0.75em;
-  color: rgba(226, 252, 255, 0.78);
+  border-radius: 1.1em;
+  padding: 0 0.66em;
+  color: rgba(226, 252, 255, 0.72);
   background: transparent;
   font: inherit;
-  font-size: 0.76em;
-  font-weight: 700;
+  font-size: 0.75em;
+  font-weight: 650;
+  line-height: 1;
   white-space: nowrap;
   cursor: pointer;
   transition:
@@ -1950,18 +1969,27 @@ body.virtual-keyboard-open .app-loading-overlay {
     box-shadow 0.14s ease;
 }
 
-.screen-language-menu__item:hover,
+.screen-language-menu__item svg {
+  flex: none;
+  width: 1em;
+  height: 1em;
+}
+
 .screen-language-menu__item--active {
-  color: #ffffff;
-  background: var(--screen-primary-soft);
-  box-shadow: inset 0 0 0 1px rgba(38, 201, 255, 0.18);
+  color: var(--screen-primary);
+  background: rgba(38, 201, 255, 0.15);
+}
+
+.screen-language-menu__item:hover:not(.screen-language-menu__item--active) {
+  color: rgba(245, 251, 255, 0.96);
+  background: rgba(24, 36, 52, 0.7);
 }
 
 .screen-language-switch__button:hover,
 .screen-language-switch--open .screen-language-switch__button,
 .screen-admin-link:hover {
-  border-color: rgba(38, 201, 255, 0.58);
-  filter: drop-shadow(0 0 8px rgba(38, 201, 255, 0.72));
+  border-color: rgba(38, 201, 255, 0.56);
+  background: #122638;
 }
 
 .screen-right-panel {
@@ -3093,11 +3121,11 @@ body.virtual-keyboard-open .app-loading-overlay {
   border-radius: var(--screen-panel-radius);
   color: #ffffff;
   background:
-    linear-gradient(180deg, rgba(24, 41, 54, 0.96), rgba(8, 19, 31, 0.94)),
+    linear-gradient(180deg, rgba(16, 28, 40, 0.96), rgba(7, 15, 25, 0.95)),
     rgba(12, 22, 42, 0.72);
   box-shadow:
-    0 1.1em 2.5em rgba(0, 0, 0, 0.34),
-    inset 0 1px 0 rgba(255, 255, 255, 0.095);
+    0 1.05em 2.25em rgba(0, 0, 0, 0.3),
+    inset 0 1px 0 rgba(255, 255, 255, 0.075);
   backdrop-filter: blur(10px) saturate(1.08);
   animation: screen-panel-in 0.28s ease-out both;
 }
@@ -3124,12 +3152,12 @@ body.virtual-keyboard-open .app-loading-overlay {
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
   gap: 0.56em;
-  min-height: 3.1em;
-  padding: 0.48em 0.58em 0.46em;
+  min-height: 2.9em;
+  padding: 0.42em 0.56em 0.38em;
   border-bottom: 1px solid var(--screen-line);
   background:
-    radial-gradient(circle at 1.4em 50%, rgba(38, 201, 255, 0.18), transparent 2.8em),
-    linear-gradient(180deg, rgba(255, 255, 255, 0.07), rgba(255, 255, 255, 0.018));
+    radial-gradient(circle at 1.3em 50%, rgba(38, 201, 255, 0.16), transparent 2.8em),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0.014));
 }
 
 .screen-info-list__counts {
@@ -3241,20 +3269,38 @@ body.virtual-keyboard-open .app-loading-overlay {
 }
 
 .screen-alarm-settings-panel {
+  position: relative;
   display: grid;
   flex: none;
-  gap: 0.44em;
-  margin: 0.48em 0.48em 0;
-  border: 1px solid rgba(125, 211, 252, 0.24);
-  border-radius: var(--screen-panel-radius);
-  padding: 0.5em;
+  gap: 0.4em;
+  margin: 0.36em 0.48em 0;
+  border: 1px solid rgba(125, 211, 252, 0.18);
+  border-radius: calc(var(--screen-panel-radius) - 0.38em);
+  padding: 0.42em 0.44em 0.46em;
   color: #f4fbff;
   background:
-    linear-gradient(180deg, rgba(19, 37, 54, 0.94), rgba(8, 18, 31, 0.92)),
-    rgba(12, 22, 42, 0.82);
+    linear-gradient(180deg, rgba(12, 22, 34, 0.84), rgba(6, 14, 24, 0.76)),
+    rgba(12, 22, 42, 0.44);
   box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.065),
-    0 0.5em 1.2em rgba(0, 0, 0, 0.18);
+    inset 0 1px 0 rgba(255, 255, 255, 0.06),
+    0 0.45em 1em rgba(0, 0, 0, 0.16);
+  overflow: hidden;
+}
+
+.screen-alarm-settings-panel::before {
+  position: absolute;
+  inset: 0 0 auto;
+  height: 1px;
+  content: "";
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgba(38, 201, 255, 0.5),
+    rgba(124, 219, 122, 0.38),
+    rgba(244, 201, 93, 0.42),
+    transparent
+  );
+  pointer-events: none;
 }
 
 .screen-alarm-settings-panel__head {
@@ -3262,91 +3308,141 @@ body.virtual-keyboard-open .app-loading-overlay {
   align-items: center;
   justify-content: space-between;
   gap: 0.5em;
+  min-height: 1.3em;
 }
 
 .screen-alarm-settings-panel__head strong {
   min-width: 0;
   overflow: hidden;
   color: rgba(247, 252, 255, 0.94);
-  font-size: 0.72em;
+  font-size: 0.69em;
   font-weight: 900;
-  line-height: 1.1;
+  line-height: 1.15;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .screen-alarm-settings-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 0.32em;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.28em;
 }
 
 .screen-alarm-setting {
-  display: flex;
+  --screen-alarm-tone: var(--screen-primary);
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
   min-width: 0;
-  min-height: var(--screen-touch-target-sm);
+  min-height: 2.28em;
   align-items: center;
-  gap: 0.34em;
-  border: 1px solid rgba(148, 163, 184, 0.2);
-  border-radius: var(--screen-panel-radius-xs);
-  padding: 0 1em;
-  color: rgba(226, 241, 246, 0.72);
-  background: rgba(148, 163, 184, 0.08);
+  gap: 0.42em;
+  border: 1px solid color-mix(in oklab, var(--screen-alarm-tone) 18%, var(--screen-line));
+  border-radius: 1.05em;
+  padding: 0.42em 0.56em 0.42em 0.6em;
+  color: rgba(226, 241, 246, 0.84);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.03), rgba(2, 8, 14, 0.16)),
+    rgba(148, 163, 184, 0.04);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
   font: inherit;
-  font-size: 0.66em;
+  font-size: 0.64em;
   font-weight: 850;
   text-align: left;
   cursor: pointer;
+  transition:
+    border-color 0.16s ease,
+    background-color 0.16s ease,
+    box-shadow 0.16s ease,
+    color 0.16s ease,
+    transform 0.16s ease;
+}
+
+.screen-alarm-setting--sky {
+  --screen-alarm-tone: #5edbff;
+}
+
+.screen-alarm-setting--emerald {
+  --screen-alarm-tone: #7cdb7a;
+}
+
+.screen-alarm-setting--amber {
+  --screen-alarm-tone: #f4c95d;
 }
 
 .screen-alarm-setting svg {
   flex: none;
-  opacity: 0.82;
+  color: var(--screen-alarm-tone);
+  opacity: 0.94;
+  transition: color 0.16s ease, opacity 0.16s ease;
 }
 
 .screen-alarm-setting span {
   min-width: 0;
-  flex: 1 1 auto;
   overflow: hidden;
+  font-size: 1em;
+  line-height: 1.08;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .screen-alarm-setting em {
-  display: block;
-  width: 0.72em;
-  height: 0.72em;
+  width: 0.74em;
+  height: 0.74em;
   flex: none;
-  border: 1px solid rgba(226, 241, 246, 0.3);
+  margin-left: auto;
+  border: 1px solid color-mix(in oklab, var(--screen-alarm-tone) 34%, rgba(255, 255, 255, 0.28));
   border-radius: 999px;
-  background: rgba(15, 23, 42, 0.58);
+  background: rgba(8, 16, 28, 0.68);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.02);
+}
+
+.screen-alarm-setting:hover {
+  border-color: color-mix(in oklab, var(--screen-alarm-tone) 42%, var(--screen-line-strong));
+  color: rgba(246, 255, 253, 0.96);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.05), rgba(2, 8, 14, 0.2)),
+    rgba(148, 163, 184, 0.06);
+  transform: translateY(-0.02em);
 }
 
 .screen-alarm-setting--active {
-  border-color: rgba(244, 63, 94, 0.42);
-  color: #ffe4e6;
-  background: rgba(244, 63, 94, 0.12);
+  border-color: color-mix(in oklab, var(--screen-alarm-tone) 58%, rgba(255, 255, 255, 0.18));
+  color: #f8fbff;
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in oklab, var(--screen-alarm-tone) 13%, rgba(2, 8, 14, 0.06)),
+      rgba(2, 8, 14, 0.12)
+    );
+  box-shadow:
+    0 0.45em 1em rgba(0, 0, 0, 0.12),
+    inset 0 0 0 1px color-mix(in oklab, var(--screen-alarm-tone) 18%, transparent);
 }
 
 .screen-alarm-setting--active em {
-  border-color: rgba(255, 255, 255, 0.42);
-  background: #fb7185;
-  box-shadow: 0 0 0.65em rgba(251, 113, 133, 0.45);
+  border-color: color-mix(in oklab, var(--screen-alarm-tone) 42%, rgba(255, 255, 255, 0.4));
+  background: linear-gradient(180deg, var(--screen-alarm-tone), color-mix(in oklab, var(--screen-alarm-tone) 68%, white));
+  box-shadow: 0 0 0.55em color-mix(in oklab, var(--screen-alarm-tone) 40%, transparent);
+}
+
+.screen-alarm-setting--active svg {
+  color: #f8fbff;
 }
 
 .screen-alarm-setting:disabled {
   cursor: wait;
   opacity: 0.62;
+  transform: none;
 }
 
 .screen-alarm-settings-panel__message {
   margin: 0;
-  border: 1px solid rgba(34, 197, 94, 0.26);
-  border-radius: var(--screen-panel-radius-xs);
-  padding: 0.36em 0.48em;
+  border: 1px solid rgba(34, 197, 94, 0.22);
+  border-radius: 0.9em;
+  padding: 0.34em 0.5em;
   color: #bbf7d0;
-  background: rgba(34, 197, 94, 0.1);
-  font-size: 0.64em;
+  background: rgba(34, 197, 94, 0.08);
+  font-size: 0.62em;
   font-weight: 750;
   line-height: 1.35;
 }
@@ -3355,6 +3451,25 @@ body.virtual-keyboard-open .app-loading-overlay {
   border-color: rgba(248, 113, 113, 0.32);
   color: #fecdd3;
   background: rgba(248, 113, 113, 0.12);
+}
+
+@media (max-width: 720px) {
+  .screen-alarm-settings-panel__head strong {
+    font-size: 0.78em;
+  }
+
+  .screen-alarm-settings-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .screen-alarm-setting {
+    min-height: var(--screen-touch-target-sm);
+    font-size: 0.75em;
+  }
+
+  .screen-alarm-settings-panel__message {
+    font-size: 0.75em;
+  }
 }
 
 .screen-tabs {
@@ -4026,6 +4141,10 @@ body.virtual-keyboard-open .app-loading-overlay {
   gap: 0.16em;
 }
 
+.screen-detection-card__readouts {
+  grid-template-columns: minmax(0, 0.82fr) minmax(0, 1.18fr);
+}
+
 .screen-target-readout {
   display: grid;
   min-width: 0;
@@ -4057,6 +4176,189 @@ body.virtual-keyboard-open .app-loading-overlay {
   line-height: 1.1;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.screen-target-readout--signal {
+  align-content: center;
+  gap: 0.12em;
+  padding-bottom: 0.24em;
+}
+
+.screen-target-signal-head {
+  display: flex;
+  min-width: 0;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.34em;
+}
+
+.screen-target-signal-head em,
+.screen-target-signal-head strong {
+  min-width: 0;
+}
+
+.screen-target-signal-head strong {
+  flex: none;
+}
+
+.screen-target-signal-meter {
+  display: block;
+  width: 100%;
+  height: 0.24em;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.1);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.035);
+  overflow: hidden;
+}
+
+.screen-target-signal-meter span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #ef6f7f, #d6b957 45%, #26c9ff);
+  box-shadow: 0 0 0.48em rgba(38, 201, 255, 0.18);
+}
+
+.screen-detection-card__actions {
+  display: flex;
+  min-width: 0;
+  justify-content: flex-end;
+  margin-top: 0.08em;
+}
+
+.screen-direction-button {
+  display: inline-flex;
+  max-width: 100%;
+  min-width: 0;
+  min-height: 2.12em;
+  align-items: center;
+  justify-content: center;
+  gap: 0.28em;
+  border: 1px solid rgba(38, 201, 255, 0.32);
+  border-radius: 999px;
+  padding: 0 0.62em;
+  color: #dff8ff;
+  font: inherit;
+  font-size: 0.62em;
+  font-weight: 800;
+  line-height: 1;
+  background: rgba(38, 201, 255, 0.11);
+  cursor: pointer;
+  transition:
+    border-color 0.16s ease,
+    background-color 0.16s ease,
+    color 0.16s ease,
+    box-shadow 0.16s ease;
+}
+
+.screen-direction-button svg {
+  flex: none;
+  width: 1em;
+  height: 1em;
+}
+
+.screen-direction-button span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.screen-direction-button:hover,
+.screen-direction-button:focus-visible {
+  border-color: rgba(244, 201, 93, 0.72);
+  color: #fff8df;
+  background: rgba(244, 201, 93, 0.16);
+  box-shadow: 0 0 0.72em rgba(244, 201, 93, 0.1);
+}
+
+.screen-direction-button--active {
+  border-color: rgba(251, 113, 133, 0.62);
+  color: #ffe4e6;
+  background: rgba(244, 63, 94, 0.15);
+}
+
+.screen-direction-button--active:hover,
+.screen-direction-button--active:focus-visible {
+  border-color: rgba(251, 113, 133, 0.82);
+  color: #ffffff;
+  background: rgba(244, 63, 94, 0.22);
+  box-shadow: 0 0 0.72em rgba(244, 63, 94, 0.14);
+}
+
+.screen-direction-button--busy svg {
+  animation: app-spin 0.86s linear infinite;
+}
+
+.screen-direction-button:disabled {
+  border-color: rgba(148, 163, 184, 0.18);
+  color: rgba(194, 214, 220, 0.36);
+  background: rgba(148, 163, 184, 0.06);
+  box-shadow: none;
+  cursor: not-allowed;
+}
+
+.screen-direction-button:disabled:hover {
+  border-color: rgba(148, 163, 184, 0.18);
+  color: rgba(194, 214, 220, 0.36);
+  background: rgba(148, 163, 184, 0.06);
+  box-shadow: none;
+}
+
+.screen-direction-status {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.42em;
+  border: 1px solid rgba(244, 201, 93, 0.24);
+  border-left: 3px solid rgba(244, 201, 93, 0.72);
+  border-radius: var(--screen-panel-radius);
+  padding: 0.42em 0.5em;
+  color: #f8fbfc;
+  background: rgba(244, 201, 93, 0.08);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.045);
+}
+
+.screen-direction-status > span {
+  display: grid;
+  min-width: 0;
+  gap: 0.08em;
+}
+
+.screen-direction-status em {
+  min-width: 0;
+  overflow: hidden;
+  color: rgba(252, 231, 170, 0.72);
+  font-size: 0.58em;
+  font-style: normal;
+  font-weight: 800;
+  line-height: 1.1;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.screen-direction-status strong {
+  min-width: 0;
+  overflow: hidden;
+  color: #ffffff;
+  font-family: var(--font-mono);
+  font-size: 0.72em;
+  font-weight: 850;
+  line-height: 1.1;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.screen-direction-error {
+  margin: 0;
+  border: 1px solid rgba(251, 113, 133, 0.2);
+  border-radius: var(--screen-panel-radius-xs);
+  padding: 0.34em 0.5em;
+  color: #fecdd3;
+  background: rgba(244, 63, 94, 0.08);
+  font-size: 0.62em;
+  line-height: 1.35;
 }
 
 .screen-position-card {
@@ -5400,6 +5702,11 @@ body.virtual-keyboard-open .app-loading-overlay {
     inset 0 0 0 1px rgba(244, 201, 93, 0.08);
 }
 
+.screen-fpv-row--locked {
+  color: rgba(194, 214, 220, 0.62);
+  background: rgba(148, 163, 184, 0.035);
+}
+
 .screen-fpv-row > span {
   display: flex;
   min-width: 0;
@@ -5481,55 +5788,126 @@ body.virtual-keyboard-open .app-loading-overlay {
 }
 
 .screen-fpv-row__action .screen-fpv-row__view-button {
+  position: relative;
   display: inline-flex;
+  isolation: isolate;
   min-width: 0;
   max-width: 100%;
-  min-height: clamp(30px, 2.08em, 34px);
+  min-height: clamp(28px, 2em, 32px);
   align-items: center;
   justify-content: center;
-  gap: 0.24em;
-  border: 1px solid rgba(38, 201, 255, 0.32);
+  gap: 0.34em;
+  overflow: hidden;
+  border: 1px solid rgba(121, 219, 241, 0.28);
   border-radius: 999px;
-  padding: 0 0.56em;
-  color: #dff8ff;
+  padding: 0 0.68em 0 0.42em;
+  color: rgba(229, 251, 255, 0.92);
   font: inherit;
-  font-size: 0.8em;
+  font-size: 0.78em;
   font-weight: 800;
   line-height: 1;
-  background: rgba(38, 201, 255, 0.11);
+  background:
+    linear-gradient(180deg, rgba(20, 45, 56, 0.86), rgba(6, 16, 27, 0.72)),
+    rgba(38, 201, 255, 0.08);
+  box-shadow:
+    0 0.34rem 0.9rem rgba(0, 0, 0, 0.16),
+    inset 0 1px 0 rgba(255, 255, 255, 0.08);
   cursor: pointer;
   transition:
     border-color 0.16s ease,
     background-color 0.16s ease,
-    color 0.16s ease;
+    color 0.16s ease,
+    box-shadow 0.16s ease,
+    transform 0.16s ease;
 }
 
-.screen-fpv-row__action .screen-fpv-row__view-button:hover {
-  border-color: rgba(244, 201, 93, 0.72);
-  color: #fff8df;
-  background: rgba(244, 201, 93, 0.16);
+.screen-fpv-row__action .screen-fpv-row__view-button::before {
+  position: absolute;
+  inset: 1px auto 1px 1px;
+  z-index: 0;
+  width: 2.18em;
+  border-radius: inherit;
+  background: rgba(38, 201, 255, 0.08);
+  content: "";
+  pointer-events: none;
+}
+
+.screen-fpv-row__action .screen-fpv-row__view-button svg {
+  position: relative;
+  z-index: 1;
+  flex: none;
+  width: 1em;
+  height: 1em;
+  color: #9feeff;
+  filter: drop-shadow(0 0 0.32em rgba(38, 201, 255, 0.28));
+}
+
+.screen-fpv-row__action .screen-fpv-row__view-button:hover,
+.screen-fpv-row__action .screen-fpv-row__view-button:focus-visible {
+  border-color: rgba(126, 230, 255, 0.58);
+  color: #ffffff;
+  background:
+    linear-gradient(180deg, rgba(30, 62, 73, 0.94), rgba(8, 22, 36, 0.82)),
+    rgba(38, 201, 255, 0.14);
+  box-shadow:
+    0 0.42rem 1rem rgba(0, 0, 0, 0.18),
+    0 0 0.68em rgba(38, 201, 255, 0.12),
+    inset 0 1px 0 rgba(255, 255, 255, 0.1);
 }
 
 .screen-fpv-row__action .screen-fpv-row__view-button--active {
-  border-color: rgba(244, 201, 93, 0.72);
+  border-color: rgba(244, 201, 93, 0.66);
   color: #fff8df;
-  background: rgba(244, 201, 93, 0.16);
+  background:
+    linear-gradient(180deg, rgba(76, 61, 26, 0.92), rgba(30, 23, 11, 0.8)),
+    rgba(244, 201, 93, 0.16);
+  box-shadow:
+    0 0.42rem 1rem rgba(0, 0, 0, 0.18),
+    0 0 0.74em rgba(244, 201, 93, 0.16),
+    inset 0 1px 0 rgba(255, 255, 255, 0.1);
+  cursor: default;
+}
+
+.screen-fpv-row__action .screen-fpv-row__view-button--active::before {
+  background: rgba(244, 201, 93, 0.12);
+}
+
+.screen-fpv-row__action .screen-fpv-row__view-button--active svg {
+  color: #ffe08a;
+  filter: drop-shadow(0 0 0.32em rgba(244, 201, 93, 0.34));
 }
 
 .screen-fpv-row__action .screen-fpv-row__view-button:disabled {
   border-color: rgba(148, 163, 184, 0.18);
   color: rgba(194, 214, 220, 0.36);
-  background: rgba(148, 163, 184, 0.06);
+  background:
+    linear-gradient(180deg, rgba(24, 33, 42, 0.62), rgba(8, 13, 20, 0.54)),
+    rgba(148, 163, 184, 0.04);
+  box-shadow: none;
   cursor: not-allowed;
 }
 
 .screen-fpv-row__action .screen-fpv-row__view-button:disabled:hover {
   border-color: rgba(148, 163, 184, 0.18);
   color: rgba(194, 214, 220, 0.36);
-  background: rgba(148, 163, 184, 0.06);
+  background:
+    linear-gradient(180deg, rgba(24, 33, 42, 0.62), rgba(8, 13, 20, 0.54)),
+    rgba(148, 163, 184, 0.04);
+  box-shadow: none;
+}
+
+.screen-fpv-row__action .screen-fpv-row__view-button:disabled::before {
+  background: rgba(148, 163, 184, 0.05);
+}
+
+.screen-fpv-row__action .screen-fpv-row__view-button:disabled svg {
+  color: rgba(194, 214, 220, 0.38);
+  filter: none;
 }
 
 .screen-fpv-row__action .screen-fpv-row__view-button span {
+  position: relative;
+  z-index: 1;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -5706,6 +6084,7 @@ body.virtual-keyboard-open .app-loading-overlay {
   .screen-alarm-setting,
   .screen-tab,
   .screen-whitelist-button,
+  .screen-direction-button,
   .screen-fpv-row__view-button,
   .screen-device-status-modal__refresh
 ) {
@@ -5749,7 +6128,7 @@ body.virtual-keyboard-open .app-loading-overlay {
   place-items: center;
   gap: 0.32em;
   border: 1px solid rgba(248, 113, 113, 0.26);
-  border-radius: var(--screen-panel-radius-sm);
+  border-radius: var(--screen-panel-radius);
   padding: 0.82em;
   color: rgba(255, 228, 230, 0.9);
   text-align: center;
@@ -5852,7 +6231,7 @@ body.virtual-keyboard-open .app-loading-overlay {
 
 @media (max-width: 1180px) and (orientation: landscape) {
   .screen-shell {
-    font-size: clamp(13px, 1.45vw, 18px);
+    font-size: clamp(15px, 1.45vw, 18px);
     --screen-content-top: 6.2em;
     --screen-header-title-top: 9px;
     --screen-header-title-size: 29px;
@@ -5874,7 +6253,7 @@ body.virtual-keyboard-open .app-loading-overlay {
 
 @media (max-width: 1100px) {
   .screen-shell {
-    font-size: clamp(13px, 1.65vw, 18px);
+    font-size: clamp(15px, 1.8vw, 18px);
     --screen-content-top: 6.45em;
     --screen-left-edge: 10px;
     --screen-right-edge: 1.25em;
@@ -5915,9 +6294,53 @@ body.virtual-keyboard-open .app-loading-overlay {
   }
 }
 
+@media (min-width: 721px) and (max-width: 1100px) {
+  .screen-alarm-setting,
+  .screen-tab,
+  .screen-direction-button,
+  .screen-whitelist-button,
+  .screen-fpv-row__action .screen-fpv-row__view-button {
+    min-height: var(--screen-touch-target-sm);
+  }
+
+  .screen-tab,
+  .screen-alert-card__details,
+  .screen-fpv-table__head span,
+  .screen-fpv-row > span {
+    font-size: 0.8em;
+  }
+
+  .screen-panel-title__text strong,
+  .screen-alert-card__body strong,
+  .screen-alert-card__meta,
+  .screen-detection-card__title strong {
+    font-size: 0.86em;
+  }
+
+  .screen-alert-card__sn,
+  .screen-target-readout strong,
+  .screen-direction-button,
+  .screen-position-card__point > strong,
+  .screen-whitelist-button {
+    font-size: 0.78em;
+  }
+
+  .screen-target-readout em,
+  .screen-target-countdown,
+  .screen-detection-card__freshness {
+    font-size: 0.72em;
+  }
+
+  .screen-alarm-settings-panel__head strong,
+  .screen-alarm-setting,
+  .screen-alarm-settings-panel__message {
+    font-size: 0.76em;
+  }
+}
+
 @media (max-width: 720px) {
   .screen-shell {
-    font-size: 15px;
+    font-size: 16px;
     --screen-bottom-panel-height: min(38vh, 19em);
     --screen-content-top: 5.85em;
     --screen-left-edge: 10px;
@@ -5934,7 +6357,7 @@ body.virtual-keyboard-open .app-loading-overlay {
     bottom: 0.42em;
     height: 22px;
     gap: 0.45em;
-    font-size: 0.68em;
+    font-size: 0.72em;
   }
 
   .screen-header__right {
@@ -5980,6 +6403,10 @@ body.virtual-keyboard-open .app-loading-overlay {
   .screen-language-menu {
     top: calc(100% + 0.38em);
     min-width: 6em;
+  }
+
+  .screen-language-menu__item {
+    min-height: var(--screen-touch-target-sm);
   }
 
   .screen-header__title {
@@ -6097,20 +6524,20 @@ body.virtual-keyboard-open .app-loading-overlay {
   }
 
   .screen-panel-title__text strong {
-    font-size: 0.8em;
+    font-size: 0.86em;
   }
 
   .screen-info-list__count,
   .screen-strike-panel__status {
     min-width: 2em;
     height: 2em;
-    font-size: 0.76em;
+    font-size: 0.8em;
   }
 
   .screen-tab {
     min-height: var(--screen-touch-target-sm);
     gap: 0.28em;
-    font-size: 0.7em;
+    font-size: 0.8em;
   }
 
   .screen-list {
@@ -6133,11 +6560,11 @@ body.virtual-keyboard-open .app-loading-overlay {
 
   .screen-alert-card__body strong,
   .screen-alert-card__meta {
-    font-size: 0.78em;
+    font-size: 0.84em;
   }
 
   .screen-alert-card__sn {
-    font-size: 0.68em;
+    font-size: 0.75em;
   }
 
   .screen-alert-card__collapse {
@@ -6149,7 +6576,7 @@ body.virtual-keyboard-open .app-loading-overlay {
     grid-template-columns: 1fr;
     gap: 0.2em;
     margin-top: 0.45em;
-    font-size: 0.7em;
+    font-size: 0.78em;
   }
 
   .screen-alert-card__details span:first-child {
@@ -6167,7 +6594,7 @@ body.virtual-keyboard-open .app-loading-overlay {
   }
 
   .screen-detection-card__title strong {
-    font-size: 0.74em;
+    font-size: 0.82em;
   }
 
   .screen-detection-card__title em {
@@ -6186,8 +6613,40 @@ body.virtual-keyboard-open .app-loading-overlay {
     padding: 0.12em 0.18em;
   }
 
+  .screen-target-readout em {
+    font-size: 0.68em;
+  }
+
+  .screen-target-readout--signal {
+    gap: 0.1em;
+    padding-bottom: 0.18em;
+  }
+
+  .screen-target-signal-head {
+    gap: 0.22em;
+  }
+
   .screen-target-readout strong {
-    font-size: 0.62em;
+    font-size: 0.75em;
+  }
+
+  .screen-target-countdown,
+  .screen-detection-card__freshness {
+    font-size: 0.72em;
+  }
+
+  .screen-detection-card__actions {
+    margin-top: 0.06em;
+  }
+
+  .screen-direction-button {
+    min-height: var(--screen-touch-target-sm);
+    padding: 0 0.72em;
+    font-size: 0.75em;
+  }
+
+  .screen-direction-status {
+    padding: 0.36em 0.42em;
   }
 
   .screen-position-card {
@@ -6196,7 +6655,7 @@ body.virtual-keyboard-open .app-loading-overlay {
   }
 
   .screen-position-card__head strong {
-    font-size: 0.72em;
+    font-size: 0.8em;
   }
 
   .screen-position-card__location {
@@ -6219,7 +6678,7 @@ body.virtual-keyboard-open .app-loading-overlay {
   }
 
   .screen-position-card__point > strong {
-    font-size: 0.6em;
+    font-size: 0.75em;
   }
 
   .screen-position-card__metrics {
@@ -6234,8 +6693,8 @@ body.virtual-keyboard-open .app-loading-overlay {
 
   .screen-whitelist-button {
     min-width: 0;
-    min-height: 2.12em;
-    font-size: 0.62em;
+    min-height: var(--screen-touch-target-sm);
+    font-size: 0.75em;
   }
 
   .screen-fpv-table__head,
@@ -6250,7 +6709,7 @@ body.virtual-keyboard-open .app-loading-overlay {
   .screen-fpv-table__head span {
     min-height: 2.28em;
     padding: 0.26em 0.2em;
-    font-size: 0.64em;
+    font-size: 0.74em;
   }
 
   .screen-fpv-row {
@@ -6259,7 +6718,11 @@ body.virtual-keyboard-open .app-loading-overlay {
 
   .screen-fpv-row > span {
     padding: 0.26em 0.22em;
-    font-size: 0.64em;
+    font-size: 0.74em;
+  }
+
+  .screen-fpv-row__action .screen-fpv-row__view-button {
+    min-height: var(--screen-touch-target-sm);
   }
 
   .screen-fpv-video-modal {
@@ -6377,7 +6840,7 @@ body.virtual-keyboard-open .app-loading-overlay {
 
 @media (max-width: 430px) {
   .screen-shell {
-    font-size: 14px;
+    font-size: 15.5px;
     --screen-bottom-panel-height: min(40vh, 19em);
     --screen-content-top: 5.95em;
     --screen-left-edge: 10px;

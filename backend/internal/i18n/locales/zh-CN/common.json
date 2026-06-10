@@ -15,6 +15,8 @@
   "gpio.disabled": "干扰通道已关闭",
   "strike.started": "干扰已开启",
   "strike.stopped": "干扰已停止",
+  "direction.started": "测向已开始",
+  "direction.stopped": "测向已停止",
   "developer.login": "开发者登录已启用",
   "license.uploaded": "License 已上传并激活",
   "network.updated": "网口配置已更新",

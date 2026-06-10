@@ -28,6 +28,8 @@ func (s *Server) registerScreenRoutes(api fiber.Router) {
 	api.Get("/screen/detections", s.handleScreenDetections)
 	api.Get("/screen/positions", s.handleScreenPositions)
 	api.Get("/screen/device-location", s.handleScreenDeviceLocation)
+	api.Get("/screen/direction", s.handleScreenDirection)
+	api.Post("/screen/direction", s.handleSetScreenDirection)
 	api.Get("/screen/strike", s.handleScreenStrike)
 	api.Post("/screen/strike", s.handleSetScreenStrike)
 	api.Get("/screen/deception", s.handleScreenDeception)
@@ -82,6 +84,9 @@ func (s *Server) handleScreenFPVVideo(c *fiber.Ctx) error {
 	if s.fpv == nil {
 		return s.respondError(c, fiber.StatusInternalServerError, "internal", s.translator.T(locale, "errors", "internal"), nil)
 	}
+	if state := s.detection.ScreenDirectionState(); state.Active {
+		return s.respondError(c, fiber.StatusConflict, "direction_active", "测向锁频中，请先停止测向", nil)
+	}
 
 	playback, err := s.fpv.BeginPlayback(frequency)
 	if err != nil {
@@ -93,10 +98,14 @@ func (s *Server) handleScreenFPVVideo(c *fiber.Ctx) error {
 
 	if err := s.startFPVPlayback(playback); err != nil {
 		s.fpv.EndPlayback(playback)
-		if errors.Is(err, detection.ErrCommandSerialOffline) {
+		switch {
+		case errors.Is(err, detection.ErrCommandModeConflict):
+			return s.respondError(c, fiber.StatusConflict, "command_mode_busy", "设备控制命令正在执行，请先停止当前模式", nil)
+		case errors.Is(err, detection.ErrCommandSerialOffline):
 			return s.respondError(c, fiber.StatusServiceUnavailable, "detection_serial_offline", "侦测串口未连接", nil)
+		default:
+			return s.respondError(c, fiber.StatusInternalServerError, "fpv_control_failed", "图传控制命令发送失败", err.Error())
 		}
-		return s.respondError(c, fiber.StatusInternalServerError, "fpv_control_failed", "图传控制命令发送失败", err.Error())
 	}
 
 	sessionRecord := s.startFPVVideoRecord(c.Query("targetId"), playback.Frequency)
@@ -248,23 +257,11 @@ func fpvFramesToRecordFrames(frames []fpv.Frame) []model.FPVVideoRecordFrame {
 }
 
 func (s *Server) startFPVPlayback(playback fpv.Playback) error {
-	if err := s.detection.SendCommands(fmt.Sprintf("start -imag %s\r\n", s.fpv.Address())); err != nil {
-		return err
-	}
-	if err := s.detection.SendCommands(fmt.Sprintf("start -band %d,%d\r\n", playback.BandStart, playback.BandEnd)); err != nil {
-		if stopErr := s.stopFPVPlayback(); stopErr != nil {
-			return errors.Join(err, stopErr)
-		}
-		return err
-	}
-	return nil
+	return s.detection.BeginScreenFPVPlayback(s.fpv.Address(), playback.BandStart, playback.BandEnd)
 }
 
 func (s *Server) stopFPVPlayback() error {
-	return s.detection.SendCommands(
-		"start -imag 0\r\n",
-		"start -freq 1\r\n",
-	)
+	return s.detection.EndScreenFPVPlayback()
 }
 
 func parseFPVFrequency(c *fiber.Ctx) (float64, error) {
@@ -351,6 +348,54 @@ func (s *Server) handleScreenDeviceLocation(c *fiber.Ctx) error {
 // handleScreenStrike 返回大屏干扰控制状态。
 func (s *Server) handleScreenStrike(c *fiber.Ctx) error {
 	return c.JSON(s.interference.ScreenStrikeState())
+}
+
+// handleScreenDirection 返回大屏测向锁频状态。
+func (s *Server) handleScreenDirection(c *fiber.Ctx) error {
+	return c.JSON(s.detection.ScreenDirectionState())
+}
+
+// handleSetScreenDirection 更新大屏测向锁频状态。
+func (s *Server) handleSetScreenDirection(c *fiber.Ctx) error {
+	locale := s.resolveLocale(c)
+
+	var req model.ScreenDirectionRequest
+	if err := c.BodyParser(&req); err != nil {
+		return s.respondError(
+			c,
+			fiber.StatusBadRequest,
+			"invalid_request",
+			s.translator.T(locale, "errors", "invalid_request"),
+			err.Error(),
+		)
+	}
+
+	if req.Enabled && s.fpv != nil && s.fpv.Snapshot().Active {
+		return s.respondError(c, fiber.StatusConflict, "fpv_video_busy", "FPV 图传正在播放，请先停止视频", nil)
+	}
+
+	state, err := s.detection.SetScreenDirection(req)
+	if err != nil {
+		switch {
+		case errors.Is(err, detection.ErrDirectionTargetRequired), errors.Is(err, detection.ErrInvalidDirectionFrequency):
+			return s.respondError(c, fiber.StatusBadRequest, "invalid_request", s.translator.T(locale, "errors", "invalid_request"), err.Error())
+		case errors.Is(err, detection.ErrCommandModeConflict):
+			return s.respondError(c, fiber.StatusConflict, "command_mode_busy", "设备控制命令正在执行，请先停止当前模式", nil)
+		case errors.Is(err, detection.ErrCommandSerialOffline):
+			return s.respondError(c, fiber.StatusServiceUnavailable, "detection_serial_offline", "侦测串口未连接", nil)
+		default:
+			return s.respondError(c, fiber.StatusInternalServerError, "direction_control_failed", "测向控制命令发送失败", err.Error())
+		}
+	}
+
+	messageKey := "direction.stopped"
+	if req.Enabled {
+		messageKey = "direction.started"
+	}
+	return c.JSON(model.ScreenDirectionResponse{
+		State:   state,
+		Message: s.translator.T(locale, "common", messageKey),
+	})
 }
 
 // handleSetScreenStrike 更新大屏干扰控制状态。

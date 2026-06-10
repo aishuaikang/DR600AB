@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -333,9 +334,10 @@ func TestO3DecryptResultKeepsZeroCoordinatesForDisplay(t *testing.T) {
 }
 
 type fakeSerialPort struct {
-	closeCount int
-	closeCh    chan struct{}
-	writes     []string
+	closeCount       int
+	closeCh          chan struct{}
+	writes           []string
+	failOnceContains string
 }
 
 type fakeO3Decoder struct{}
@@ -419,6 +421,10 @@ func (p *fakeSerialPort) Read(b []byte) (int, error) {
 }
 
 func (p *fakeSerialPort) Write(b []byte) (int, error) {
+	if p.failOnceContains != "" && strings.Contains(string(b), p.failOnceContains) {
+		p.failOnceContains = ""
+		return 0, errors.New("forced write failure")
+	}
 	p.writes = append(p.writes, string(b))
 	return len(b), nil
 }
@@ -577,6 +583,303 @@ func TestSendCommandsRequiresConnectedSession(t *testing.T) {
 	if !errors.Is(err, ErrCommandSerialOffline) {
 		t.Fatalf("SendCommands() error = %v, want ErrCommandSerialOffline", err)
 	}
+}
+
+func TestSetScreenDirectionWritesStartAndStopCommands(t *testing.T) {
+	tr, err := i18n.New("zh-CN")
+	if err != nil {
+		t.Fatalf("i18n.New() error = %v", err)
+	}
+	st := store.NewMemoryStore(10, 10)
+	svc := NewService(st, tr, settings.NewStore(filepath.Join(t.TempDir(), "settings.json")), Options{})
+
+	ports := map[string]*fakeSerialPort{}
+	svc.SetSerialOpener(func(cfg *serialport.Config) (serial.Port, error) {
+		port := newFakeSerialPort()
+		ports[cfg.PortName] = port
+		return port, nil
+	})
+
+	if _, err := svc.Start(model.DetectionSessionRequest{
+		RxPortName: "/dev/rx",
+		TxPortName: "/dev/tx",
+		DataBits:   8,
+		StopBits:   1,
+		Parity:     "none",
+	}, "zh-CN"); err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+	defer svc.Stop("zh-CN")
+
+	state, err := svc.SetScreenDirection(model.ScreenDirectionRequest{
+		Enabled:   true,
+		TargetID:  "target-1",
+		Frequency: 1360.4,
+	})
+	if err != nil {
+		t.Fatalf("SetScreenDirection(start) error = %v", err)
+	}
+	if !state.Active || state.TargetID != "target-1" || state.Frequency != 1360 || state.StartedAt == nil {
+		t.Fatalf("start state = %+v, want active target-1 at 1360 MHz", state)
+	}
+
+	state, err = svc.SetScreenDirection(model.ScreenDirectionRequest{Enabled: false})
+	if err != nil {
+		t.Fatalf("SetScreenDirection(stop) error = %v", err)
+	}
+	if state.Active || state.TargetID != "" || state.Frequency != 0 {
+		t.Fatalf("stop state = %+v, want inactive", state)
+	}
+
+	assertPortWrites(
+		t,
+		ports["/dev/tx"],
+		startDetectionCommand+"\n",
+		"start -freq 1360\n",
+		startDetectionCommand+"\n",
+	)
+}
+
+func TestSetScreenDirectionRejectsInvalidInput(t *testing.T) {
+	tr, err := i18n.New("zh-CN")
+	if err != nil {
+		t.Fatalf("i18n.New() error = %v", err)
+	}
+	svc := NewService(store.NewMemoryStore(10, 10), tr, nil, Options{})
+
+	_, err = svc.SetScreenDirection(model.ScreenDirectionRequest{
+		Enabled:   true,
+		TargetID:  "target-1",
+		Frequency: 0,
+	})
+	if !errors.Is(err, ErrInvalidDirectionFrequency) {
+		t.Fatalf("SetScreenDirection() error = %v, want ErrInvalidDirectionFrequency", err)
+	}
+
+	_, err = svc.SetScreenDirection(model.ScreenDirectionRequest{
+		Enabled:   true,
+		Frequency: 1360,
+	})
+	if !errors.Is(err, ErrDirectionTargetRequired) {
+		t.Fatalf("SetScreenDirection() error = %v, want ErrDirectionTargetRequired", err)
+	}
+}
+
+func TestSetScreenDirectionBlocksConflictingCommandsUntilStopped(t *testing.T) {
+	tr, err := i18n.New("zh-CN")
+	if err != nil {
+		t.Fatalf("i18n.New() error = %v", err)
+	}
+	st := store.NewMemoryStore(10, 10)
+	svc := NewService(st, tr, settings.NewStore(filepath.Join(t.TempDir(), "settings.json")), Options{})
+
+	ports := map[string]*fakeSerialPort{}
+	svc.SetSerialOpener(func(cfg *serialport.Config) (serial.Port, error) {
+		port := newFakeSerialPort()
+		ports[cfg.PortName] = port
+		return port, nil
+	})
+
+	if _, err := svc.Start(model.DetectionSessionRequest{
+		RxPortName: "/dev/rx",
+		TxPortName: "/dev/tx",
+		DataBits:   8,
+		StopBits:   1,
+		Parity:     "none",
+	}, "zh-CN"); err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+	defer svc.Stop("zh-CN")
+
+	if _, err := svc.SetScreenDirection(model.ScreenDirectionRequest{
+		Enabled:   true,
+		TargetID:  "target-1",
+		Frequency: 1360,
+	}); err != nil {
+		t.Fatalf("SetScreenDirection(start) error = %v", err)
+	}
+
+	if err := svc.SendCommands("start -imag 192.168.8.10:49600\r\n"); !errors.Is(err, ErrCommandModeConflict) {
+		t.Fatalf("SendCommands() error = %v, want ErrCommandModeConflict", err)
+	}
+	if err := svc.BeginScreenFPVPlayback("192.168.8.10:49600", 1310, 1410); !errors.Is(err, ErrCommandModeConflict) {
+		t.Fatalf("BeginScreenFPVPlayback() error = %v, want ErrCommandModeConflict", err)
+	}
+	if _, err := svc.SetScreenDirection(model.ScreenDirectionRequest{
+		Enabled:   true,
+		TargetID:  "target-2",
+		Frequency: 1490,
+	}); !errors.Is(err, ErrCommandModeConflict) {
+		t.Fatalf("SetScreenDirection(switch) error = %v, want ErrCommandModeConflict", err)
+	}
+
+	if _, err := svc.SetScreenDirection(model.ScreenDirectionRequest{Enabled: false}); err != nil {
+		t.Fatalf("SetScreenDirection(stop) error = %v", err)
+	}
+	if err := svc.BeginScreenFPVPlayback("192.168.8.10:49600", 1310, 1410); err != nil {
+		t.Fatalf("BeginScreenFPVPlayback(after stop) error = %v", err)
+	}
+	if err := svc.EndScreenFPVPlayback(); err != nil {
+		t.Fatalf("EndScreenFPVPlayback() error = %v", err)
+	}
+
+	assertPortWrites(
+		t,
+		ports["/dev/tx"],
+		startDetectionCommand+"\n",
+		"start -freq 1360\n",
+		startDetectionCommand+"\n",
+		"start -imag 192.168.8.10:49600\r\n",
+		"start -band 1310,1410\r\n",
+		"start -imag 0\r\n",
+		"start -freq 1\r\n",
+	)
+}
+
+func TestScreenFPVPlaybackRequiresResetBeforeDirection(t *testing.T) {
+	tr, err := i18n.New("zh-CN")
+	if err != nil {
+		t.Fatalf("i18n.New() error = %v", err)
+	}
+	st := store.NewMemoryStore(10, 10)
+	svc := NewService(st, tr, settings.NewStore(filepath.Join(t.TempDir(), "settings.json")), Options{})
+
+	ports := map[string]*fakeSerialPort{}
+	svc.SetSerialOpener(func(cfg *serialport.Config) (serial.Port, error) {
+		port := newFakeSerialPort()
+		ports[cfg.PortName] = port
+		return port, nil
+	})
+
+	if _, err := svc.Start(model.DetectionSessionRequest{
+		RxPortName: "/dev/rx",
+		TxPortName: "/dev/tx",
+		DataBits:   8,
+		StopBits:   1,
+		Parity:     "none",
+	}, "zh-CN"); err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+	defer svc.Stop("zh-CN")
+
+	if err := svc.BeginScreenFPVPlayback("192.168.8.10:49600", 1310, 1410); err != nil {
+		t.Fatalf("BeginScreenFPVPlayback() error = %v", err)
+	}
+	if _, err := svc.SetScreenDirection(model.ScreenDirectionRequest{
+		Enabled:   true,
+		TargetID:  "target-1",
+		Frequency: 1360,
+	}); !errors.Is(err, ErrCommandModeConflict) {
+		t.Fatalf("SetScreenDirection(active fpv) error = %v, want ErrCommandModeConflict", err)
+	}
+
+	txPort := ports["/dev/tx"]
+	txPort.failOnceContains = "start -freq 1"
+	if err := svc.EndScreenFPVPlayback(); err == nil {
+		t.Fatal("EndScreenFPVPlayback() error = nil, want reset failure")
+	}
+	if _, err := svc.SetScreenDirection(model.ScreenDirectionRequest{
+		Enabled:   true,
+		TargetID:  "target-1",
+		Frequency: 1360,
+	}); !errors.Is(err, ErrCommandModeConflict) {
+		t.Fatalf("SetScreenDirection(after failed reset) error = %v, want ErrCommandModeConflict", err)
+	}
+
+	if err := svc.EndScreenFPVPlayback(); err != nil {
+		t.Fatalf("EndScreenFPVPlayback(retry) error = %v", err)
+	}
+	if _, err := svc.SetScreenDirection(model.ScreenDirectionRequest{
+		Enabled:   true,
+		TargetID:  "target-1",
+		Frequency: 1360,
+	}); err != nil {
+		t.Fatalf("SetScreenDirection(after reset) error = %v", err)
+	}
+
+	assertPortWrites(
+		t,
+		txPort,
+		startDetectionCommand+"\n",
+		"start -imag 192.168.8.10:49600\r\n",
+		"start -band 1310,1410\r\n",
+		"start -imag 0\r\n",
+		"start -imag 0\r\n",
+		"start -freq 1\r\n",
+		"start -freq 1360\n",
+	)
+}
+
+func TestStaleSessionCloseDoesNotClearActiveCommandMode(t *testing.T) {
+	tr, err := i18n.New("zh-CN")
+	if err != nil {
+		t.Fatalf("i18n.New() error = %v", err)
+	}
+	st := store.NewMemoryStore(10, 10)
+	svc := NewService(st, tr, settings.NewStore(filepath.Join(t.TempDir(), "settings.json")), Options{})
+
+	ports := map[string]*fakeSerialPort{}
+	svc.SetSerialOpener(func(cfg *serialport.Config) (serial.Port, error) {
+		port := newFakeSerialPort()
+		ports[cfg.PortName] = port
+		return port, nil
+	})
+
+	if _, err := svc.Start(model.DetectionSessionRequest{
+		RxPortName: "/dev/rx-old",
+		TxPortName: "/dev/tx-old",
+		DataBits:   8,
+		StopBits:   1,
+		Parity:     "none",
+	}, "zh-CN"); err != nil {
+		t.Fatalf("Start(old) error = %v", err)
+	}
+	svc.mu.RLock()
+	staleSession := svc.current
+	svc.mu.RUnlock()
+	if staleSession == nil {
+		t.Fatal("current session is nil after old start")
+	}
+
+	if _, err := svc.Start(model.DetectionSessionRequest{
+		RxPortName: "/dev/rx-new",
+		TxPortName: "/dev/tx-new",
+		DataBits:   8,
+		StopBits:   1,
+		Parity:     "none",
+	}, "zh-CN"); err != nil {
+		t.Fatalf("Start(new) error = %v", err)
+	}
+	defer svc.Stop("zh-CN")
+
+	if _, err := svc.SetScreenDirection(model.ScreenDirectionRequest{
+		Enabled:   true,
+		TargetID:  "target-new",
+		Frequency: 1360,
+	}); err != nil {
+		t.Fatalf("SetScreenDirection(start) error = %v", err)
+	}
+
+	svc.closeSessionClient(staleSession, commandControlResetIfCurrent)
+
+	state := svc.ScreenDirectionState()
+	if !state.Active || state.TargetID != "target-new" || state.Frequency != 1360 {
+		t.Fatalf("direction state after stale close = %+v, want active target-new at 1360 MHz", state)
+	}
+	if err := svc.BeginScreenFPVPlayback("192.168.8.10:49600", 1310, 1410); !errors.Is(err, ErrCommandModeConflict) {
+		t.Fatalf("BeginScreenFPVPlayback() error = %v, want ErrCommandModeConflict", err)
+	}
+	if _, err := svc.SetScreenDirection(model.ScreenDirectionRequest{Enabled: false}); err != nil {
+		t.Fatalf("SetScreenDirection(stop) error = %v", err)
+	}
+
+	assertPortWrites(
+		t,
+		ports["/dev/tx-new"],
+		startDetectionCommand+"\n",
+		"start -freq 1360\n",
+		startDetectionCommand+"\n",
+	)
 }
 
 func TestStartSessionSupportsSeparateReceiveAndSendBaudRates(t *testing.T) {
