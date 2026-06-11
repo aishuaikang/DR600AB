@@ -108,3 +108,44 @@ func TestAppendTrajectoryRestartsOnGPSJump(t *testing.T) {
 		t.Fatalf("trajectory point = %#v, want jump point as new start", points[0])
 	}
 }
+
+func TestAppendTrajectoryDefaultKeepsAllPoints(t *testing.T) {
+	base := time.Unix(1700000000, 0)
+	var points []model.TrackPoint
+	for i := range 130 {
+		points = AppendTrajectory(
+			points,
+			&model.Point{Latitude: 31.2 + float64(i)*0.0001, Longitude: 121.4},
+			base.Add(time.Duration(i)*time.Second),
+			nil,
+			nil,
+			TrajectoryOptions{},
+		)
+	}
+
+	if len(points) != 130 {
+		t.Fatalf("trajectory count = %d, want all points retained", len(points))
+	}
+}
+
+func TestAppendTrajectoryHonorsExplicitLimit(t *testing.T) {
+	base := time.Unix(1700000000, 0)
+	var points []model.TrackPoint
+	for i := range 10 {
+		points = AppendTrajectory(
+			points,
+			&model.Point{Latitude: 31.2 + float64(i)*0.0001, Longitude: 121.4},
+			base.Add(time.Duration(i)*time.Second),
+			nil,
+			nil,
+			TrajectoryOptions{Limit: 5},
+		)
+	}
+
+	if len(points) != 5 {
+		t.Fatalf("trajectory count = %d, want explicit limit", len(points))
+	}
+	if !points[0].Time.Equal(base.Add(5*time.Second)) || !points[4].Time.Equal(base.Add(9*time.Second)) {
+		t.Fatalf("trajectory range = %#v, want latest limited points", points)
+	}
+}

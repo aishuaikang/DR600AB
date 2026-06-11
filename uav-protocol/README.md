@@ -151,7 +151,7 @@ relations := merge.PositionRelations(devicePoint, incoming.Drone, incoming.Pilot
 
 - `<= 3m`: 抖动合并。
 - `> 500m`: GPS 跳变，丢弃旧轨迹并从新点重新开始。
-- `120` 点上限。
+- 默认不按数量裁剪；如显式设置 `TrajectoryOptions.Limit > 0`，只保留最新的 `Limit` 个点。
 
 ```go
 trajectory = merge.AppendTrajectory(

@@ -739,6 +739,50 @@ func TestMemoryStoreScreenPositionsMergeRIDSerialPrefixDifference(t *testing.T) 
 	}
 }
 
+func TestMemoryStoreScreenPositionsKeepsProtectedPositionAndTrajectoryAligned(t *testing.T) {
+	st := NewMemoryStore(10, 10)
+	base := time.Now()
+
+	decoded := screenPositionTarget("sn-1", "device-a", "DJI O4", base)
+	decoded.Source = "did_encrypted"
+	decoded.Cracked = true
+	decoded.Pilot = &model.ScreenPositionPoint{Latitude: 31.1, Longitude: 121.3}
+
+	laterRID := screenPositionTarget("sn-1", "device-b", "DJI Mini", base.Add(time.Second))
+	laterRID.Source = "rid"
+	laterRID.Drone = &model.ScreenPositionPoint{Latitude: 31.21, Longitude: 121.41}
+	laterRID.Pilot = &model.ScreenPositionPoint{Latitude: 31.11, Longitude: 121.31}
+
+	st.AddScreenPosition(decoded)
+	st.AddScreenPosition(laterRID)
+
+	items := st.ListScreenPositions(10)
+	if len(items) != 1 {
+		t.Fatalf("screen positions count = %d, want 1", len(items))
+	}
+	item := items[0]
+	if item.Drone == nil || item.Drone.Latitude != 31.2 || item.Drone.Longitude != 121.4 {
+		t.Fatalf("drone point = %#v, want decoded point preserved", item.Drone)
+	}
+	if len(item.DroneTrajectory) != 1 {
+		t.Fatalf("drone trajectory count = %d, want protected incoming point skipped: %#v", len(item.DroneTrajectory), item.DroneTrajectory)
+	}
+	droneHead := item.DroneTrajectory[0]
+	if droneHead.Latitude != item.Drone.Latitude || droneHead.Longitude != item.Drone.Longitude {
+		t.Fatalf("drone trajectory head = %#v, want aligned with drone point %#v", droneHead, item.Drone)
+	}
+	if item.Pilot == nil || item.Pilot.Latitude != 31.1 || item.Pilot.Longitude != 121.3 {
+		t.Fatalf("pilot point = %#v, want decoded pilot point preserved", item.Pilot)
+	}
+	if len(item.PilotTrajectory) != 1 {
+		t.Fatalf("pilot trajectory count = %d, want protected incoming point skipped: %#v", len(item.PilotTrajectory), item.PilotTrajectory)
+	}
+	pilotHead := item.PilotTrajectory[0]
+	if pilotHead.Latitude != item.Pilot.Latitude || pilotHead.Longitude != item.Pilot.Longitude {
+		t.Fatalf("pilot trajectory head = %#v, want aligned with pilot point %#v", pilotHead, item.Pilot)
+	}
+}
+
 func TestMemoryStoreScreenPositionsMergeCorruptedSerialPrefix(t *testing.T) {
 	st := NewMemoryStore(10, 10)
 	base := time.Now()

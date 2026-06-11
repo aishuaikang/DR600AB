@@ -8,7 +8,6 @@ import (
 )
 
 const (
-	DefaultTrajectoryLimit   = 120
 	DefaultTrajectoryJitterM = 3.0
 	DefaultTrajectoryJumpM   = 500.0
 )
@@ -20,10 +19,7 @@ type TrajectoryOptions struct {
 }
 
 func (o TrajectoryOptions) limit() int {
-	if o.Limit > 0 {
-		return o.Limit
-	}
-	return DefaultTrajectoryLimit
+	return o.Limit
 }
 
 func (o TrajectoryOptions) jitterM() float64 {
@@ -138,7 +134,7 @@ func deduplicateAndRestartTrajectory(points []model.TrackPoint, opts TrajectoryO
 }
 
 func trimTrajectory(points []model.TrackPoint, limit int) []model.TrackPoint {
-	if len(points) <= limit {
+	if limit <= 0 || len(points) <= limit {
 		return points
 	}
 	return points[len(points)-limit:]

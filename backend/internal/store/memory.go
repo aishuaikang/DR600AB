@@ -549,9 +549,9 @@ func (s *MemoryStore) addScreenPositionLocked(target model.ScreenPositionTarget)
 	if target.Device != "" {
 		merged.Device = target.Device
 	}
-	merged.DroneTrajectory = mergeScreenPositionTrajectories(merged.DroneTrajectory, target.DroneTrajectory)
-	merged.PilotTrajectory = mergeScreenPositionTrajectories(merged.PilotTrajectory, target.PilotTrajectory)
 	if !keepDecodedFields {
+		merged.DroneTrajectory = mergeScreenPositionTrajectories(merged.DroneTrajectory, target.DroneTrajectory)
+		merged.PilotTrajectory = mergeScreenPositionTrajectories(merged.PilotTrajectory, target.PilotTrajectory)
 		merged.Drone = mergeScreenPositionPoint(merged.Drone, target.Drone)
 		merged.Pilot = mergeScreenPositionPoint(merged.Pilot, target.Pilot)
 		merged.Home = mergeScreenPositionPoint(merged.Home, target.Home)
