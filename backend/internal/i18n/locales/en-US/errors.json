@@ -23,7 +23,7 @@
   "cellular_unavailable": "No available 4G modem was detected, or the modem cannot dial now",
   "cellular_invalid_config": "4G connection configuration is invalid",
   "license_unavailable": "License service is unavailable",
-  "device_sn_missing": "Device SN is missing. Connect the detection device first",
+  "device_sn_missing": "Device SN is missing. Check whether the backend can read local hardware information",
   "license_not_found": "License file was not found. Upload a license",
   "license_expired": "License has expired. Upload a new license",
   "license_sn_mismatch": "License does not match the current device SN",

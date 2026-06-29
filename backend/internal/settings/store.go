@@ -246,12 +246,15 @@ func (s *Store) SaveEditableUser(req model.UserSettings) (model.UserSettings, er
 	return model.UserSettingsWithDefaults(settings.User), nil
 }
 
-// SaveUserDeviceSN 保存侦测板卡上报的设备唯一 SN，并保留其他用户设置。
-func (s *Store) SaveUserDeviceSN(hardwareID string) error {
+// EnsureUserDeviceSN 保存整机硬件指纹对应的设备唯一 SN，并保留其他用户设置。
+func (s *Store) EnsureUserDeviceSN(hardwareID string) (model.UserSettings, error) {
 	hardwareID = strings.TrimSpace(hardwareID)
 	deviceSN := StandardDeviceSN(hardwareID)
-	if s == nil || s.path == "" || deviceSN == "" {
-		return nil
+	if s == nil || s.path == "" {
+		return model.UserSettingsWithDefaults(model.UserSettings{
+			DeviceSN:         deviceSN,
+			DeviceHardwareID: hardwareID,
+		}), nil
 	}
 
 	s.mu.Lock()
@@ -259,14 +262,20 @@ func (s *Store) SaveUserDeviceSN(hardwareID string) error {
 
 	settings, _, err := s.load()
 	if err != nil {
-		return err
+		return model.UserSettings{}, err
+	}
+	if deviceSN == "" {
+		return model.UserSettingsWithDefaults(settings.User), nil
 	}
 	if settings.User.DeviceSN == deviceSN && settings.User.DeviceHardwareID == hardwareID {
-		return nil
+		return model.UserSettingsWithDefaults(settings.User), nil
 	}
 	settings.User.DeviceSN = deviceSN
 	settings.User.DeviceHardwareID = hardwareID
-	return s.save(settings)
+	if err := s.save(settings); err != nil {
+		return model.UserSettings{}, err
+	}
+	return model.UserSettingsWithDefaults(settings.User), nil
 }
 
 const (
@@ -275,7 +284,7 @@ const (
 	standardDeviceSNHashLength = 16
 )
 
-// StandardDeviceSN 将侦测板卡上报的硬件 ID 转换为标准设备 SN。
+// StandardDeviceSN 将整机硬件指纹转换为标准设备 SN。
 func StandardDeviceSN(value string) string {
 	value = strings.TrimSpace(value)
 	if value == "" {

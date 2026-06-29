@@ -23,7 +23,7 @@
   "cellular_unavailable": "未检测到可用 4G 模块，或模块当前不可拨号",
   "cellular_invalid_config": "4G 连接配置参数不合法",
   "license_unavailable": "授权服务不可用",
-  "device_sn_missing": "设备 SN 未获取，请先连接侦测设备生成 SN",
+  "device_sn_missing": "设备 SN 未获取，请检查后端服务是否能读取本机硬件信息",
   "license_not_found": "未找到授权文件，请上传 License",
   "license_expired": "授权已过期，请更新 License",
   "license_sn_mismatch": "License 与当前设备 SN 不匹配",

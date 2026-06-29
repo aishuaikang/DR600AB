@@ -13,7 +13,7 @@ func TestServiceActivateValidLicense(t *testing.T) {
 	deviceSN := "SL67CB3FC848FA0E795P"
 	path := filepath.Join(t.TempDir(), "license.lic")
 	service := NewService(path, func() (string, error) { return deviceSN, nil })
-	raw, err := service.Generate(deviceSN, 24*time.Hour, "test", time.Date(2026, 6, 9, 10, 0, 0, 0, time.UTC))
+	raw, err := service.Generate(deviceSN, 24*time.Hour, "test", time.Now())
 	if err != nil {
 		t.Fatalf("Generate() error = %v", err)
 	}

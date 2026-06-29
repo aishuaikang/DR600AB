@@ -35,7 +35,7 @@
   "license.remainingDays": "{{count}} days remaining",
   "license.permanent": "Permanent",
   "license.recoveryTitle": "Get device SN",
-  "license.recoveryDescription": "If the device SN is unavailable, connect the detection board serial port first. The system saves the SN after receiving board messages and refreshes license status automatically.",
+  "license.recoveryDescription": "The device SN is generated automatically from this machine's hardware fingerprint. If it is still unavailable, check whether the backend can read local hardware information.",
   "license.detectionState": "Detection connection",
   "license.currentReceivePort": "Current receive port",
   "license.currentSendPort": "Current send port",

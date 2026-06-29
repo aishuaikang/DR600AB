@@ -279,8 +279,8 @@ func TestStandardDeviceSN(t *testing.T) {
 
 func TestStoreSavesEditableUserSettingsWithoutOverwritingDeviceSN(t *testing.T) {
 	store := NewStore(filepath.Join(t.TempDir(), "settings.json"))
-	if err := store.SaveUserDeviceSN("10125"); err != nil {
-		t.Fatalf("SaveUserDeviceSN() error = %v", err)
+	if _, err := store.EnsureUserDeviceSN("10125"); err != nil {
+		t.Fatalf("EnsureUserDeviceSN() error = %v", err)
 	}
 	wantDeviceSN := StandardDeviceSN("10125")
 	wantHardwareID := "10125"

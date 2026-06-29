@@ -8,7 +8,7 @@
   "preview": "预览",
   "restoreDefault": "恢复默认",
   "deviceSnTitle": "设备唯一 SN",
-  "deviceSnDescription": "由硬件自动获取；硬件 ID 会转换为标准化 SN 并自动保存。",
+  "deviceSnDescription": "由本机硬件指纹自动生成；硬件 ID 会转换为标准化 SN 并自动保存。",
   "deviceSnField": "标准化 SN",
   "deviceHardwareIdField": "硬件 ID",
   "deviceSnQrField": "SN 二维码",

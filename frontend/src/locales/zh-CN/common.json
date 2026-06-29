@@ -35,7 +35,7 @@
   "license.remainingDays": "剩余 {{count}} 天",
   "license.permanent": "永久授权",
   "license.recoveryTitle": "获取设备 SN",
-  "license.recoveryDescription": "未获取设备 SN 时，请先连接侦测板串口。系统收到侦测板消息后会自动保存 SN，并刷新授权状态。",
+  "license.recoveryDescription": "设备 SN 会根据本机硬件指纹自动生成。若仍未显示，请检查后端服务是否能读取本机硬件信息。",
   "license.detectionState": "侦测连接状态",
   "license.currentReceivePort": "当前接收串口",
   "license.currentSendPort": "当前发送串口",

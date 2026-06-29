@@ -1341,26 +1341,24 @@ func TestIngestLineStoresHeartbeatAsParsedOnly(t *testing.T) {
 		t.Fatalf("detection count = %d, want 0", got)
 	}
 	userSettings, ok, err := settingsStore.LoadUser()
-	if err != nil || !ok {
-		t.Fatalf("LoadUser() = %+v, %v, %v", userSettings, ok, err)
+	if err != nil {
+		t.Fatalf("LoadUser() error = %v", err)
 	}
-	if userSettings.DeviceSN != settings.StandardDeviceSN("10125") {
-		t.Fatalf("device SN = %q, want %q", userSettings.DeviceSN, settings.StandardDeviceSN("10125"))
-	}
-	if userSettings.DeviceHardwareID != "10125" {
-		t.Fatalf("hardware ID = %q, want 10125", userSettings.DeviceHardwareID)
+	if ok || userSettings.DeviceSN != "" || userSettings.DeviceHardwareID != "" {
+		t.Fatalf("LoadUser() = %+v, %v; want no user device SN from heartbeat", userSettings, ok)
 	}
 }
 
-func TestIngestLineUpdatesDeviceSNFromDeviceMessages(t *testing.T) {
+func TestIngestLineDoesNotUpdateDeviceSNFromDeviceMessages(t *testing.T) {
 	tr, err := i18n.New("zh-CN")
 	if err != nil {
 		t.Fatalf("i18n.New() error = %v", err)
 	}
 	settingsStore := settings.NewStore(filepath.Join(t.TempDir(), "settings.json"))
+	initialHardwareID := "machine-hardware-id"
 	initial := model.UserSettings{
-		DeviceSN:                  "old-sn",
-		DeviceHardwareID:          "old-hardware-id",
+		DeviceSN:                  settings.StandardDeviceSN(initialHardwareID),
+		DeviceHardwareID:          initialHardwareID,
 		ManualDeviceLocation:      &model.GeoPoint{Latitude: 23.12911, Longitude: 113.264385},
 		ScreenStrikeChannelLabels: []string{"2.4G", "5.2G"},
 	}
@@ -1372,32 +1370,22 @@ func TestIngestLineUpdatesDeviceSNFromDeviceMessages(t *testing.T) {
 	tests := []struct {
 		name string
 		line string
-		want string
-		raw  string
 	}{
 		{
 			name: "detect",
 			line: "device=10125, model=PAL Analog, freq=5865.0, rssi=-56.9",
-			want: settings.StandardDeviceSN("10125"),
-			raw:  "10125",
 		},
 		{
 			name: "did plain",
 			line: "num=672/3/1, device=20250, serial=0M6CH6AR0A100L, model=41-Mavic 2, uuid=176344372408408473, drone_GPS=121.400000,31.200000, home_GPS=121.390000,31.190000, pilot_GPS=121.410000,31.210000, Height=50, Altitude=110.0,EastV=3.0, NothV=4.0,UpV=0.0, freq=5796.5, rssi=-78, distance=0.0km,",
-			want: settings.StandardDeviceSN("20250"),
-			raw:  "20250",
 		},
 		{
 			name: "did encrypted",
 			line: "#=632/3/1, device=30375, Encypted Mavic_O4_ID=875bb45f, freq=2429.5, rssi=-64, byte,15,1b,9b,58,f0,d9",
-			want: settings.StandardDeviceSN("30375"),
-			raw:  "30375",
 		},
 		{
 			name: "heartbeat",
 			line: "#=84, device=40400, Heart Beat, 879,  0",
-			want: settings.StandardDeviceSN("40400"),
-			raw:  "40400",
 		},
 	}
 
@@ -1409,11 +1397,11 @@ func TestIngestLineUpdatesDeviceSNFromDeviceMessages(t *testing.T) {
 			if err != nil || !ok {
 				t.Fatalf("LoadUser() = %+v, %v, %v", got, ok, err)
 			}
-			if got.DeviceSN != tt.want {
-				t.Fatalf("device SN = %q, want %q", got.DeviceSN, tt.want)
+			if got.DeviceSN != initial.DeviceSN {
+				t.Fatalf("device SN = %q, want preserved %q", got.DeviceSN, initial.DeviceSN)
 			}
-			if got.DeviceHardwareID != tt.raw {
-				t.Fatalf("hardware ID = %q, want %q", got.DeviceHardwareID, tt.raw)
+			if got.DeviceHardwareID != initial.DeviceHardwareID {
+				t.Fatalf("hardware ID = %q, want preserved %q", got.DeviceHardwareID, initial.DeviceHardwareID)
 			}
 			if got.ManualDeviceLocation == nil ||
 				got.ManualDeviceLocation.Latitude != initial.ManualDeviceLocation.Latitude ||

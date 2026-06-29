@@ -41,9 +41,16 @@ func New(cfg config.Config) (*App, error) {
 
 	state := store.NewMemoryStore(cfg.MaxDetectionRecords, cfg.MaxParsedMessages)
 	settingsStore := settings.NewStore(cfg.SettingsPath)
+	machineHardwareID, err := settings.MachineHardwareID()
+	if err != nil {
+		return nil, err
+	}
+	if _, err := settingsStore.EnsureUserDeviceSN(machineHardwareID); err != nil {
+		return nil, err
+	}
 	licenseSvc := license.NewService(cfg.LicensePath, func() (string, error) {
-		userSettings, ok, err := settingsStore.LoadUser()
-		if err != nil || !ok {
+		userSettings, err := settingsStore.EnsureUserDeviceSN(machineHardwareID)
+		if err != nil {
 			return "", err
 		}
 		return userSettings.DeviceSN, nil

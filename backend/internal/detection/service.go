@@ -91,7 +91,6 @@ var (
 type SettingsStore interface {
 	Load() (model.DetectionSessionRequest, bool, error)
 	Save(model.DetectionSessionRequest) error
-	SaveUserDeviceSN(string) error
 }
 
 // Service 管理侦测串口会话并存储解析记录。
@@ -578,7 +577,6 @@ func (s *Service) IngestLine(sessionID, portName, line string) {
 
 	parsed := toParsedMessage(msg)
 	s.store.AddParsed(parsed)
-	s.saveDeviceSNFromMessage(msg)
 	s.ingestScreenPosition(parsed, msg)
 
 	record, ok := detectionRecordFromMessage(sessionID, portName, parsed, msg)
@@ -586,19 +584,6 @@ func (s *Service) IngestLine(sessionID, portName, line string) {
 		return
 	}
 	s.store.AddDetection(record)
-}
-
-func (s *Service) saveDeviceSNFromMessage(msg *parser.Message) {
-	if s.settings == nil {
-		return
-	}
-
-	deviceSN := deviceSNFromMessage(msg)
-	if deviceSN == "" {
-		return
-	}
-
-	_ = s.settings.SaveUserDeviceSN(deviceSN)
 }
 
 // manageSession 保持单个串口会话运行，直到被停止或替换。
@@ -1048,21 +1033,6 @@ func detectionRecordFromMessage(sessionID, portName string, parsed model.ParsedM
 	record.RSSI = data.RSSI
 	record.Summary = buildSummary(record)
 	return record, true
-}
-
-func deviceSNFromMessage(msg *parser.Message) string {
-	switch data := msg.Data.(type) {
-	case *parser.Detect:
-		return strings.TrimSpace(data.Device)
-	case *parser.DIDPlain:
-		return strings.TrimSpace(data.Device)
-	case *parser.DIDEncrypted:
-		return strings.TrimSpace(data.Device)
-	case *parser.Heartbeat:
-		return strings.TrimSpace(data.Device)
-	default:
-		return ""
-	}
 }
 
 func (s *Service) ingestScreenPosition(parsed model.ParsedMessage, msg *parser.Message) {

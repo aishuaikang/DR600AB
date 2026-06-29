@@ -8,7 +8,7 @@
   "preview": "Preview",
   "restoreDefault": "Restore Default",
   "deviceSnTitle": "Device Unique SN",
-  "deviceSnDescription": "Automatically captured from the detection board message device field. The hardware ID is converted to a standardized SN and saved.",
+  "deviceSnDescription": "Generated automatically from this machine's hardware fingerprint. The hardware ID is converted to a standardized SN and saved.",
   "deviceSnField": "Standardized SN",
   "deviceHardwareIdField": "Hardware ID",
   "deviceSnQrField": "SN QR Code",
