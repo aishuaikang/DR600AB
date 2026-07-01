@@ -20,6 +20,7 @@ const (
 	screenStrikeEventType          = "screen.strike.updated"
 	screenStrikeMinDurationSeconds = 10
 	screenStrikeMaxDurationSeconds = 60
+	directionSwitchChannelID       = "io4"
 )
 
 type codedError struct {
@@ -222,6 +223,12 @@ func (s *Service) SetState(id string, enabled bool, locale string) (model.GpioCh
 		s.publishScreenStrikeLocked(s.screenStrikeStateLocked(time.Now()))
 	}
 	return channel, err
+}
+
+// SetDirectionSwitch 控制第四路 GPIO 上的测向射频开关。
+func (s *Service) SetDirectionSwitch(enabled bool) error {
+	_, err := s.SetState(directionSwitchChannelID, enabled, "")
+	return err
 }
 
 // ScreenStrikeState 返回大屏干扰控制当前状态。

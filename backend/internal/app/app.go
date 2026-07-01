@@ -113,6 +113,7 @@ func New(cfg config.Config) (*App, error) {
 		},
 	})
 	interferenceSvc := interference.NewService(state, translator, interference.DefaultChannels(), nil)
+	detectionSvc.SetDirectionSwitch(interferenceSvc)
 	interferenceSvc.SetReportStore(interferenceReportStore)
 	interferenceSvc.SetUserSettingsStore(settingsStore)
 	developerSvc, err := developer.NewService(cfg.DeveloperTOTPSecret, cfg.DeveloperSessionTTL)

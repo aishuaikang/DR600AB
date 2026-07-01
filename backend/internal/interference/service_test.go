@@ -281,6 +281,43 @@ func TestReservedChannelAllowsStateChanges(t *testing.T) {
 	}
 }
 
+func TestSetDirectionSwitchControlsFourthGPIO(t *testing.T) {
+	tr, err := i18n.New("zh-CN")
+	if err != nil {
+		t.Fatalf("i18n.New() error = %v", err)
+	}
+	fake := &fakePin{}
+	var requestedPins []int
+	svc := NewService(store.NewMemoryStore(10, 10), tr, []ChannelDefinition{
+		{ID: "io4", Label: "IO4", Pin: 4, Reserved: true},
+	}, func(number int) GPIOPin {
+		requestedPins = append(requestedPins, number)
+		return fake
+	})
+
+	if err := svc.SetDirectionSwitch(true); err != nil {
+		t.Fatalf("SetDirectionSwitch(true) error = %v", err)
+	}
+	if err := svc.SetDirectionSwitch(false); err != nil {
+		t.Fatalf("SetDirectionSwitch(false) error = %v", err)
+	}
+
+	for _, pin := range requestedPins {
+		if pin != 4 {
+			t.Fatalf("requested pins = %v, want only pin 4", requestedPins)
+		}
+	}
+	if fake.setup != 1 || fake.high != 1 || fake.low != 1 || fake.cleanup != 1 {
+		t.Fatalf(
+			"pin calls = setup:%d high:%d low:%d cleanup:%d, want 1 each",
+			fake.setup,
+			fake.high,
+			fake.low,
+			fake.cleanup,
+		)
+	}
+}
+
 func TestListChannelsReturnsEmptyBandsForReservedChannel(t *testing.T) {
 	tr, err := i18n.New("zh-CN")
 	if err != nil {

@@ -108,8 +108,8 @@ func TestScanSerialRecords(t *testing.T) {
 	}{
 		{
 			name:  "crlf records",
-			input: "received: start -freq 1\r\nsample_rate=61440000\r\n",
-			want:  []string{"received: start -freq 1", "sample_rate=61440000"},
+			input: "received: start -freq 1, -pathb 1, -gain 60\r\nsample_rate=61440000\r\n",
+			want:  []string{"received: start -freq 1, -pathb 1, -gain 60", "sample_rate=61440000"},
 		},
 		{
 			name: "detect records without separators",

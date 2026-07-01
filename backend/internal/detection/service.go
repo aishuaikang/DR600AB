@@ -56,8 +56,13 @@ type O3PlusO4Decoder interface {
 	ParseO3PlusO4PacketMQTT(ctx context.Context, packet parser.DIDEncrypted, deviceSN string, receivedAt time.Time) (model.ScreenPositionTarget, bool)
 }
 
+// DirectionSwitch 控制测向链路使用的射频开关。
+type DirectionSwitch interface {
+	SetDirectionSwitch(enabled bool) error
+}
+
 const (
-	startDetectionCommand    = "start -freq 1"
+	startDetectionCommand    = "start -freq 1, -pathb 1, -gain 60"
 	screenDirectionEventType = "screen.direction.updated"
 	maxDirectionFrequencyMHz = 10000
 	defaultRxBaudRate        = 115200
@@ -104,6 +109,7 @@ type Service struct {
 	options    Options
 	openPort   SerialOpener
 	o3Decoder  O3PlusO4Decoder
+	dirSwitch  DirectionSwitch
 	listPorts  func() ([]string, error)
 	current    *session
 	direction  model.ScreenDirectionState
@@ -165,6 +171,13 @@ func (s *Service) SetO3PlusO4Decoder(decoder O3PlusO4Decoder) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.o3Decoder = decoder
+}
+
+// SetDirectionSwitch 替换测向射频开关控制器，主要用于接入 GPIO 服务和测试。
+func (s *Service) SetDirectionSwitch(directionSwitch DirectionSwitch) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.dirSwitch = directionSwitch
 }
 
 // SetPortLister 替换串口枚举函数，主要用于测试。
@@ -393,7 +406,13 @@ func (s *Service) SetScreenDirection(req model.ScreenDirectionRequest) (model.Sc
 	if s.mode != commandControlModeIdle {
 		return s.ScreenDirectionState(), ErrCommandModeConflict
 	}
+	if err := s.setDirectionSwitch(true); err != nil {
+		return s.setScreenDirectionError(err), err
+	}
 	if err := s.sendCommandsLocked(fmt.Sprintf("start -freq %d", frequency)); err != nil {
+		if switchErr := s.setDirectionSwitch(false); switchErr != nil {
+			err = errors.Join(err, switchErr)
+		}
 		return s.setScreenDirectionError(err), err
 	}
 	s.mode = commandControlModeDirection
@@ -413,6 +432,9 @@ func (s *Service) stopScreenDirection() (model.ScreenDirectionState, error) {
 
 	if s.mode == commandControlModeFPV {
 		return s.ScreenDirectionState(), ErrCommandModeConflict
+	}
+	if err := s.setDirectionSwitch(false); err != nil {
+		return s.setScreenDirectionError(err), err
 	}
 	if err := s.sendCommandsLocked(startDetectionCommand); err != nil {
 		return s.setScreenDirectionError(err), err
@@ -476,7 +498,7 @@ func (s *Service) EndScreenFPVPlayback() error {
 func (s *Service) endScreenFPVPlaybackLocked() error {
 	if err := s.sendCommandsLocked(
 		"start -imag 0\r\n",
-		"start -freq 1\r\n",
+		startDetectionCommand+"\r\n",
 	); err != nil {
 		return err
 	}
@@ -520,6 +542,7 @@ func (s *Service) closeSessionClient(sess *session, resetPolicy commandControlRe
 	sess.client = nil
 	resetControl := resetPolicy == commandControlResetAlways ||
 		(resetPolicy == commandControlResetIfCurrent && s.current == sess)
+	resetDirectionSwitch := resetControl && s.mode == commandControlModeDirection
 	publishDirectionClear := false
 	if resetControl {
 		s.mode = commandControlModeIdle
@@ -529,6 +552,9 @@ func (s *Service) closeSessionClient(sess *session, resetPolicy commandControlRe
 
 	if serialClient != nil {
 		serialClient.Close()
+	}
+	if resetDirectionSwitch {
+		_ = s.setDirectionSwitch(false)
 	}
 	if publishDirectionClear {
 		s.publishScreenDirection(model.ScreenDirectionState{})
@@ -796,6 +822,16 @@ func (s *Service) setSessionFailure(seq uint64, sess *session, state, lastErr st
 	sess.state = state
 	sess.lastError = lastErr
 	sess.retryCount++
+}
+
+func (s *Service) setDirectionSwitch(enabled bool) error {
+	s.mu.RLock()
+	directionSwitch := s.dirSwitch
+	s.mu.RUnlock()
+	if directionSwitch == nil {
+		return nil
+	}
+	return directionSwitch.SetDirectionSwitch(enabled)
 }
 
 func normalizeDirectionFrequency(value float64) (int, error) {

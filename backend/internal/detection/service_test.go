@@ -338,6 +338,14 @@ type fakeSerialPort struct {
 	closeCh          chan struct{}
 	writes           []string
 	failOnceContains string
+	writeHook        func(string)
+}
+
+type fakeDirectionSwitch struct {
+	events     *[]string
+	calls      []bool
+	enableErr  error
+	disableErr error
 }
 
 type fakeO3Decoder struct{}
@@ -425,7 +433,11 @@ func (p *fakeSerialPort) Write(b []byte) (int, error) {
 		p.failOnceContains = ""
 		return 0, errors.New("forced write failure")
 	}
-	p.writes = append(p.writes, string(b))
+	write := string(b)
+	if p.writeHook != nil {
+		p.writeHook(write)
+	}
+	p.writes = append(p.writes, write)
 	return len(b), nil
 }
 
@@ -456,6 +468,24 @@ func (p *fakeSerialPort) Close() error {
 }
 
 func (p *fakeSerialPort) Break(duration time.Duration) error { return nil }
+
+func (s *fakeDirectionSwitch) SetDirectionSwitch(enabled bool) error {
+	s.calls = append(s.calls, enabled)
+	if s.events != nil {
+		state := "off"
+		if enabled {
+			state = "on"
+		}
+		*s.events = append(*s.events, "switch:"+state)
+	}
+	if enabled && s.enableErr != nil {
+		return s.enableErr
+	}
+	if !enabled && s.disableErr != nil {
+		return s.disableErr
+	}
+	return nil
+}
 
 func TestStartSessionSupportsSeparateReceiveAndSendPorts(t *testing.T) {
 	tr, err := i18n.New("zh-CN")
@@ -611,6 +641,14 @@ func TestSetScreenDirectionWritesStartAndStopCommands(t *testing.T) {
 	}
 	defer svc.Stop("zh-CN")
 
+	events := []string{}
+	txPort := ports["/dev/tx"]
+	txPort.writeHook = func(write string) {
+		events = append(events, "serial:"+write)
+	}
+	directionSwitch := &fakeDirectionSwitch{events: &events}
+	svc.SetDirectionSwitch(directionSwitch)
+
 	state, err := svc.SetScreenDirection(model.ScreenDirectionRequest{
 		Enabled:   true,
 		TargetID:  "target-1",
@@ -633,10 +671,17 @@ func TestSetScreenDirectionWritesStartAndStopCommands(t *testing.T) {
 
 	assertPortWrites(
 		t,
-		ports["/dev/tx"],
+		txPort,
 		startDetectionCommand+"\n",
 		"start -freq 1360\n",
 		startDetectionCommand+"\n",
+	)
+	assertDirectionSwitchCalls(t, directionSwitch, true, false)
+	assertEvents(t, events,
+		"switch:on",
+		"serial:start -freq 1360\n",
+		"switch:off",
+		"serial:"+startDetectionCommand+"\n",
 	)
 }
 
@@ -663,6 +708,166 @@ func TestSetScreenDirectionRejectsInvalidInput(t *testing.T) {
 	if !errors.Is(err, ErrDirectionTargetRequired) {
 		t.Fatalf("SetScreenDirection() error = %v, want ErrDirectionTargetRequired", err)
 	}
+}
+
+func TestSetScreenDirectionRollsBackSwitchWhenLockCommandFails(t *testing.T) {
+	tr, err := i18n.New("zh-CN")
+	if err != nil {
+		t.Fatalf("i18n.New() error = %v", err)
+	}
+	st := store.NewMemoryStore(10, 10)
+	svc := NewService(st, tr, settings.NewStore(filepath.Join(t.TempDir(), "settings.json")), Options{})
+
+	var txPort *fakeSerialPort
+	svc.SetSerialOpener(func(cfg *serialport.Config) (serial.Port, error) {
+		port := newFakeSerialPort()
+		if cfg.PortName == "/dev/tx" {
+			txPort = port
+		}
+		return port, nil
+	})
+
+	if _, err := svc.Start(model.DetectionSessionRequest{
+		RxPortName: "/dev/rx",
+		TxPortName: "/dev/tx",
+		DataBits:   8,
+		StopBits:   1,
+		Parity:     "none",
+	}, "zh-CN"); err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+	defer svc.Stop("zh-CN")
+
+	txPort.failOnceContains = "start -freq 1360"
+	directionSwitch := &fakeDirectionSwitch{}
+	svc.SetDirectionSwitch(directionSwitch)
+
+	_, err = svc.SetScreenDirection(model.ScreenDirectionRequest{
+		Enabled:   true,
+		TargetID:  "target-1",
+		Frequency: 1360,
+	})
+	if err == nil {
+		t.Fatal("SetScreenDirection() error = nil, want lock command failure")
+	}
+	assertDirectionSwitchCalls(t, directionSwitch, true, false)
+	if state := svc.ScreenDirectionState(); state.Active {
+		t.Fatalf("direction state = %+v, want inactive after lock failure", state)
+	}
+	if svc.mode != commandControlModeIdle {
+		t.Fatalf("command mode = %q, want idle", svc.mode)
+	}
+	assertPortWrites(t, txPort, startDetectionCommand+"\n")
+}
+
+func TestStopScreenDirectionDoesNotSendDefaultCommandWhenSwitchOffFails(t *testing.T) {
+	tr, err := i18n.New("zh-CN")
+	if err != nil {
+		t.Fatalf("i18n.New() error = %v", err)
+	}
+	st := store.NewMemoryStore(10, 10)
+	svc := NewService(st, tr, settings.NewStore(filepath.Join(t.TempDir(), "settings.json")), Options{})
+
+	var txPort *fakeSerialPort
+	svc.SetSerialOpener(func(cfg *serialport.Config) (serial.Port, error) {
+		port := newFakeSerialPort()
+		if cfg.PortName == "/dev/tx" {
+			txPort = port
+		}
+		return port, nil
+	})
+
+	if _, err := svc.Start(model.DetectionSessionRequest{
+		RxPortName: "/dev/rx",
+		TxPortName: "/dev/tx",
+		DataBits:   8,
+		StopBits:   1,
+		Parity:     "none",
+	}, "zh-CN"); err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+
+	directionSwitch := &fakeDirectionSwitch{}
+	svc.SetDirectionSwitch(directionSwitch)
+	defer func() {
+		directionSwitch.disableErr = nil
+		svc.Stop("zh-CN")
+	}()
+
+	if _, err := svc.SetScreenDirection(model.ScreenDirectionRequest{
+		Enabled:   true,
+		TargetID:  "target-1",
+		Frequency: 1360,
+	}); err != nil {
+		t.Fatalf("SetScreenDirection(start) error = %v", err)
+	}
+
+	directionSwitch.disableErr = errors.New("forced switch off failure")
+	_, err = svc.SetScreenDirection(model.ScreenDirectionRequest{Enabled: false})
+	if err == nil {
+		t.Fatal("SetScreenDirection(stop) error = nil, want switch off failure")
+	}
+	assertDirectionSwitchCalls(t, directionSwitch, true, false)
+	if state := svc.ScreenDirectionState(); !state.Active || state.LastError == "" {
+		t.Fatalf("direction state = %+v, want active with last error after switch off failure", state)
+	}
+	if svc.mode != commandControlModeDirection {
+		t.Fatalf("command mode = %q, want direction after switch off failure", svc.mode)
+	}
+	assertPortWrites(
+		t,
+		txPort,
+		startDetectionCommand+"\n",
+		"start -freq 1360\n",
+	)
+}
+
+func TestStopSessionTurnsOffActiveDirectionSwitch(t *testing.T) {
+	tr, err := i18n.New("zh-CN")
+	if err != nil {
+		t.Fatalf("i18n.New() error = %v", err)
+	}
+	st := store.NewMemoryStore(10, 10)
+	svc := NewService(st, tr, settings.NewStore(filepath.Join(t.TempDir(), "settings.json")), Options{})
+
+	ports := map[string]*fakeSerialPort{}
+	svc.SetSerialOpener(func(cfg *serialport.Config) (serial.Port, error) {
+		port := newFakeSerialPort()
+		ports[cfg.PortName] = port
+		return port, nil
+	})
+
+	if _, err := svc.Start(model.DetectionSessionRequest{
+		RxPortName: "/dev/rx",
+		TxPortName: "/dev/tx",
+		DataBits:   8,
+		StopBits:   1,
+		Parity:     "none",
+	}, "zh-CN"); err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+
+	directionSwitch := &fakeDirectionSwitch{}
+	svc.SetDirectionSwitch(directionSwitch)
+	if _, err := svc.SetScreenDirection(model.ScreenDirectionRequest{
+		Enabled:   true,
+		TargetID:  "target-1",
+		Frequency: 1360,
+	}); err != nil {
+		t.Fatalf("SetScreenDirection(start) error = %v", err)
+	}
+
+	stopped := svc.Stop("zh-CN")
+	if stopped.Active {
+		t.Fatalf("stopped session = %+v, want inactive", stopped)
+	}
+	assertDirectionSwitchCalls(t, directionSwitch, true, false)
+	assertPortWrites(
+		t,
+		ports["/dev/tx"],
+		startDetectionCommand+"\n",
+		"start -freq 1360\n",
+	)
 }
 
 func TestSetScreenDirectionBlocksConflictingCommandsUntilStopped(t *testing.T) {
@@ -732,7 +937,7 @@ func TestSetScreenDirectionBlocksConflictingCommandsUntilStopped(t *testing.T) {
 		"start -imag 192.168.8.10:49600\r\n",
 		"start -band 1310,1410\r\n",
 		"start -imag 0\r\n",
-		"start -freq 1\r\n",
+		startDetectionCommand+"\r\n",
 	)
 }
 
@@ -774,7 +979,7 @@ func TestScreenFPVPlaybackRequiresResetBeforeDirection(t *testing.T) {
 	}
 
 	txPort := ports["/dev/tx"]
-	txPort.failOnceContains = "start -freq 1"
+	txPort.failOnceContains = startDetectionCommand
 	if err := svc.EndScreenFPVPlayback(); err == nil {
 		t.Fatal("EndScreenFPVPlayback() error = nil, want reset failure")
 	}
@@ -805,7 +1010,7 @@ func TestScreenFPVPlaybackRequiresResetBeforeDirection(t *testing.T) {
 		"start -band 1310,1410\r\n",
 		"start -imag 0\r\n",
 		"start -imag 0\r\n",
-		"start -freq 1\r\n",
+		startDetectionCommand+"\r\n",
 		"start -freq 1360\n",
 	)
 }
@@ -1466,6 +1671,33 @@ func assertPortWrites(t *testing.T, port *fakeSerialPort, want ...string) {
 	for i, got := range port.writes {
 		if got != want[i] {
 			t.Fatalf("write[%d] = %q, want %q", i, got, want[i])
+		}
+	}
+}
+
+func assertDirectionSwitchCalls(t *testing.T, directionSwitch *fakeDirectionSwitch, want ...bool) {
+	t.Helper()
+	if directionSwitch == nil {
+		t.Fatal("direction switch is nil")
+	}
+	if len(directionSwitch.calls) != len(want) {
+		t.Fatalf("direction switch calls = %v, want %v", directionSwitch.calls, want)
+	}
+	for i, got := range directionSwitch.calls {
+		if got != want[i] {
+			t.Fatalf("direction switch call[%d] = %v, want %v", i, got, want[i])
+		}
+	}
+}
+
+func assertEvents(t *testing.T, got []string, want ...string) {
+	t.Helper()
+	if len(got) != len(want) {
+		t.Fatalf("events = %v, want %v", got, want)
+	}
+	for i := range got {
+		if got[i] != want[i] {
+			t.Fatalf("event[%d] = %q, want %q", i, got[i], want[i])
 		}
 	}
 }

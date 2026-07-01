@@ -117,7 +117,7 @@ func main() {
 	s1Port := flag.String("s1", "", "S1 串口，可收可发")
 	s2Port := flag.String("s2", "", "S2 串口，仅接收")
 	baudRate := flag.Int("baud", 115200, "波特率")
-	command := flag.String("cmd", "start -freq 1", "启动后发送到 S1 的命令，留空则不发送")
+	command := flag.String("cmd", "start -freq 1, -pathb 1, -gain 60", "启动后发送到 S1 的命令，留空则不发送")
 	duration := flag.Duration("duration", 30*time.Second, "采样时长，0 表示直到 Ctrl+C")
 	interval := flag.Duration("interval", 5*time.Second, "摘要输出间隔，0 表示不输出周期摘要")
 	showUnknown := flag.Bool("unknown", false, "实时打印未知记录")
