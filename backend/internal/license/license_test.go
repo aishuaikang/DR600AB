@@ -50,8 +50,8 @@ func TestServiceActivateRejectsSNMismatchWithoutReplacingCurrentFile(t *testing.
 	if !errors.Is(err, ErrSNMismatch) {
 		t.Fatalf("Activate(mismatch) error = %v, want ErrSNMismatch", err)
 	}
-	if status.Valid || status.Code != "license_sn_mismatch" {
-		t.Fatalf("status = %#v, want mismatch invalid status", status)
+	if status.Valid || status.Code != "license_sn_mismatch" || status.DeviceSN != deviceSN {
+		t.Fatalf("status = %#v, want mismatch invalid status with current device SN", status)
 	}
 	current, err := os.ReadFile(path)
 	if err != nil {
@@ -62,6 +62,28 @@ func TestServiceActivateRejectsSNMismatchWithoutReplacingCurrentFile(t *testing.
 	}
 	if !service.IsValid() {
 		t.Fatal("runtime state should keep previous valid license")
+	}
+}
+
+func TestServiceStatusReturnsCurrentDeviceSNWhenLicenseMismatches(t *testing.T) {
+	deviceSN := "SL67CB3FC848FA0E795P"
+	mismatchSN := "SL6FFFFFFFFFFFFFFFFP"
+	path := filepath.Join(t.TempDir(), "license.lic")
+	service := NewService(path, func() (string, error) { return deviceSN, nil })
+	raw, err := service.Generate(mismatchSN, 24*time.Hour, "test", time.Now())
+	if err != nil {
+		t.Fatalf("Generate(mismatch) error = %v", err)
+	}
+	if err := os.WriteFile(path, raw, 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	status, err := service.Status()
+	if !errors.Is(err, ErrSNMismatch) {
+		t.Fatalf("Status() error = %v, want ErrSNMismatch", err)
+	}
+	if status.Valid || status.Code != "license_sn_mismatch" || status.DeviceSN != deviceSN {
+		t.Fatalf("status = %#v, want mismatch status with current device SN", status)
 	}
 }
 

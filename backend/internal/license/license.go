@@ -84,51 +84,49 @@ func (s *Service) IsValid() bool {
 // Status verifies and returns the current license status.
 func (s *Service) Status() (model.LicenseInfo, error) {
 	if s == nil {
-		return licenseStatus(nil, ErrLicenseNotFound), ErrLicenseNotFound
+		return licenseStatus(nil, ErrLicenseNotFound, ""), ErrLicenseNotFound
 	}
 	deviceSN, err := s.currentDeviceSN()
 	if err != nil {
-		return licenseStatus(nil, err), err
+		return licenseStatus(nil, err, ""), err
 	}
 	info, err := s.load(s.filePath)
 	if err != nil {
-		status := licenseStatus(nil, err)
-		status.DeviceSN = deviceSN
-		return status, err
+		return licenseStatus(nil, err, deviceSN), err
 	}
 	err = s.verifyInfo(info, deviceSN, time.Now())
-	return licenseStatus(info, err), err
+	return licenseStatus(info, err, deviceSN), err
 }
 
 // Activate validates uploaded license content and atomically replaces the active file.
 func (s *Service) Activate(src io.Reader) (model.LicenseInfo, error) {
 	if s == nil {
-		return licenseStatus(nil, ErrLicenseNotFound), ErrLicenseNotFound
+		return licenseStatus(nil, ErrLicenseNotFound, ""), ErrLicenseNotFound
 	}
 	if src == nil {
-		return licenseStatus(nil, ErrInvalidLicense), ErrInvalidLicense
+		return licenseStatus(nil, ErrInvalidLicense, ""), ErrInvalidLicense
 	}
 	deviceSN, err := s.currentDeviceSN()
 	if err != nil {
-		return licenseStatus(nil, err), err
+		return licenseStatus(nil, err, ""), err
 	}
 
 	data, err := io.ReadAll(src)
 	if err != nil {
-		return licenseStatus(nil, err), err
+		return licenseStatus(nil, err, deviceSN), err
 	}
 	info, err := s.decode(data)
 	if err != nil {
-		return licenseStatus(nil, ErrInvalidLicense), err
+		return licenseStatus(nil, ErrInvalidLicense, deviceSN), err
 	}
 	if err := s.verifyInfo(info, deviceSN, time.Now()); err != nil {
-		return licenseStatus(info, err), err
+		return licenseStatus(info, err, deviceSN), err
 	}
 	if err := s.replaceFile(data); err != nil {
-		return licenseStatus(info, err), err
+		return licenseStatus(info, err, deviceSN), err
 	}
 	s.setValid(true)
-	return licenseStatus(info, nil), nil
+	return licenseStatus(info, nil, deviceSN), nil
 }
 
 // Generate returns encoded license bytes for tests and local tooling.
@@ -286,10 +284,15 @@ func (s *Service) verifyInfo(info *Info, deviceSN string, now time.Time) error {
 	if err != nil {
 		return err
 	}
-	if info.Signature != expectedSignature {
+	expectedSignatureBytes, err := base64.StdEncoding.DecodeString(expectedSignature)
+	if err != nil {
+		return err
+	}
+	signatureBytes, err := base64.StdEncoding.DecodeString(stringsTrim(info.Signature))
+	if err != nil || !hmac.Equal(signatureBytes, expectedSignatureBytes) {
 		return ErrInvalidSignature
 	}
-	if info.DeviceSN != deviceSN {
+	if stringsTrim(info.DeviceSN) != deviceSN {
 		return ErrSNMismatch
 	}
 	if !info.IsPermanent && now.After(info.ExpiresAt) {
@@ -303,7 +306,7 @@ func (s *Service) signature(info *Info) (string, error) {
 		return "", ErrInvalidLicense
 	}
 	data := fmt.Sprintf("%s|%d|%d|%t",
-		info.DeviceSN,
+		stringsTrim(info.DeviceSN),
 		info.IssuedAt.Unix(),
 		info.ExpiresAt.Unix(),
 		info.IsPermanent,
@@ -368,14 +371,17 @@ func (s *Service) key() []byte {
 	return hash[:]
 }
 
-func licenseStatus(info *Info, err error) model.LicenseInfo {
+func licenseStatus(info *Info, err error, currentDeviceSN string) model.LicenseInfo {
 	status := model.LicenseInfo{
-		Valid: err == nil,
+		DeviceSN: stringsTrim(currentDeviceSN),
+		Valid:    err == nil,
 	}
 	if info != nil {
 		issuedAt := info.IssuedAt
 		expiresAt := info.ExpiresAt
-		status.DeviceSN = info.DeviceSN
+		if status.DeviceSN == "" {
+			status.DeviceSN = info.DeviceSN
+		}
 		status.Customer = info.Customer
 		status.IssuedAt = &issuedAt
 		status.ExpiresAt = &expiresAt

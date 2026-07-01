@@ -131,6 +131,9 @@ func TestLicenseStatusLocalizesInvalidMessage(t *testing.T) {
 	if body.Valid || body.Code != "license_sn_mismatch" {
 		t.Fatalf("body = %#v, want license_sn_mismatch status", body)
 	}
+	if body.DeviceSN != deviceSN {
+		t.Fatalf("device SN = %q, want current device SN %q", body.DeviceSN, deviceSN)
+	}
 	if body.Message != "License 与当前设备 SN 不匹配" {
 		t.Fatalf("Message = %q, want localized mismatch message", body.Message)
 	}
