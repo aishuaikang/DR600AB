@@ -353,6 +353,9 @@ func (s *Service) handleConnection(ctx context.Context, conn net.Conn) error {
 
 		frameCount++
 		frameBytes := int64(4 + imageDataSize)
+		if !s.hasActivePlayback() {
+			continue
+		}
 		totalBytes += frameBytes
 
 		var rateKB float64
@@ -361,7 +364,7 @@ func (s *Service) handleConnection(ctx context.Context, conn net.Conn) error {
 		}
 
 		img := buildDisplayImage(imageData, rows, cols)
-		imageURL, err := encodePNGDataURL(img)
+		imageURL, err := encodePNGDataURLFunc(img)
 		if err != nil {
 			return fmt.Errorf("encode fpv image: %w", err)
 		}
@@ -377,6 +380,12 @@ func (s *Service) handleConnection(ctx context.Context, conn net.Conn) error {
 			Image:      imageURL,
 		})
 	}
+}
+
+func (s *Service) hasActivePlayback() bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.playback != nil
 }
 
 func (s *Service) setListenerState(listening bool, listenError string) {
@@ -556,6 +565,8 @@ func encodePNGDataURL(img image.Image) (string, error) {
 	}
 	return "data:image/png;base64," + base64.StdEncoding.EncodeToString(buffer.Bytes()), nil
 }
+
+var encodePNGDataURLFunc = encodePNGDataURL
 
 func readFullWithTimeout(conn net.Conn, buffer []byte, timeout time.Duration) error {
 	deadline := time.Time{}

@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"errors"
+	"image"
 	"net"
 	"strings"
 	"testing"
@@ -170,6 +171,46 @@ func TestRunRetriesBindAndPublishesFrame(t *testing.T) {
 	}
 	if !strings.HasPrefix(frame.Image, "data:image/png;base64,") {
 		t.Fatalf("frame image = %q, want PNG data URL", frame.Image)
+	}
+}
+
+func TestHandleConnectionSkipsEncodingWhenInactive(t *testing.T) {
+	called := false
+	previous := encodePNGDataURLFunc
+	encodePNGDataURLFunc = func(image.Image) (string, error) {
+		called = true
+		return "", errors.New("unexpected encode")
+	}
+	t.Cleanup(func() {
+		encodePNGDataURLFunc = previous
+	})
+
+	svc := NewService(Options{
+		FirstFrameTimeout: time.Second,
+		ReadIdleTimeout:   time.Second,
+	})
+	server, client := net.Pipe()
+	defer server.Close()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	go func() {
+		defer client.Close()
+		defer cancel()
+		var header [4]byte
+		binary.BigEndian.PutUint16(header[0:2], 2)
+		binary.BigEndian.PutUint16(header[2:4], 2)
+		_, _ = client.Write(append(header[:], 0, 64, 128, 255))
+	}()
+
+	if err := svc.handleConnection(ctx, server); err != nil {
+		t.Fatalf("handleConnection() error = %v", err)
+	}
+	if called {
+		t.Fatal("encodePNGDataURL was called without active playback")
+	}
+	if frame := svc.LastFrame(); frame != nil {
+		t.Fatalf("LastFrame() = %+v, want nil without active playback", frame)
 	}
 }
 

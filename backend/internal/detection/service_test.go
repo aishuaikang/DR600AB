@@ -256,9 +256,9 @@ func TestIngestLineSkipsDIDEncryptedFallbackAfterCorrelationCracked(t *testing.T
 	})
 
 	svc.IngestLine("session-1", "/dev/ttyUSB0", line)
-	waitUntil(t, time.Second, func() bool {
-		return decoder.Calls() >= 2
-	})
+	if calls := decoder.Calls(); calls != 1 {
+		t.Fatalf("decoder calls after repeated cracked DID = %d, want 1", calls)
+	}
 
 	items = svc.ScreenPositions(10)
 	if len(items) != 1 {
@@ -267,6 +267,52 @@ func TestIngestLineSkipsDIDEncryptedFallbackAfterCorrelationCracked(t *testing.T
 	if items[0].Serial != "o3-sn" || items[0].Model == "DJI-Drone" || !items[0].Cracked {
 		t.Fatalf("target after repeated DID encrypted = %#v", items[0])
 	}
+}
+
+func TestIngestLineDeduplicatesDIDEncryptedDecryptInFlight(t *testing.T) {
+	tr, err := i18n.New("zh-CN")
+	if err != nil {
+		t.Fatalf("i18n.New() error = %v", err)
+	}
+	st := store.NewMemoryStore(10, 10)
+	svc := NewService(st, tr, settings.NewStore(filepath.Join(t.TempDir(), "settings.json")), Options{})
+	decoder := newBlockingO3Decoder()
+	svc.SetO3PlusO4Decoder(decoder)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	line := "#=632/3/1, device=10125, Encypted Mavic_O4_ID=875bb45f, freq=2429.5, rssi=-64, byte,15,1b,9b,58,f0,d9"
+
+	svc.ingestLine(ctx, "session-1", "/dev/ttyUSB0", line)
+	waitUntil(t, time.Second, func() bool {
+		return decoder.Calls() == 1
+	})
+	svc.ingestLine(ctx, "session-1", "/dev/ttyUSB0", line)
+
+	if calls := decoder.Calls(); calls != 1 {
+		t.Fatalf("decoder calls for duplicate in-flight DID = %d, want 1", calls)
+	}
+	cancel()
+	waitUntil(t, time.Second, decoder.Done)
+}
+
+func TestIngestLineCancelsDIDEncryptedDecryptWithContext(t *testing.T) {
+	tr, err := i18n.New("zh-CN")
+	if err != nil {
+		t.Fatalf("i18n.New() error = %v", err)
+	}
+	st := store.NewMemoryStore(10, 10)
+	svc := NewService(st, tr, settings.NewStore(filepath.Join(t.TempDir(), "settings.json")), Options{})
+	decoder := newBlockingO3Decoder()
+	svc.SetO3PlusO4Decoder(decoder)
+	ctx, cancel := context.WithCancel(context.Background())
+	line := "#=632/3/1, device=10125, Encypted Mavic_O4_ID=875bb45f, freq=2429.5, rssi=-64, byte,15,1b,9b,58,f0,d9"
+
+	svc.ingestLine(ctx, "session-1", "/dev/ttyUSB0", line)
+	waitUntil(t, time.Second, func() bool {
+		return decoder.Calls() == 1
+	})
+	cancel()
+	waitUntil(t, time.Second, decoder.Done)
 }
 
 func TestIngestLineStoresFallbackScreenPositionFromDIDEncrypted(t *testing.T) {
@@ -376,6 +422,45 @@ func (d *oneShotO3Decoder) Calls() int {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	return d.calls
+}
+
+type blockingO3Decoder struct {
+	mu       sync.Mutex
+	calls    int
+	done     chan struct{}
+	doneOnce sync.Once
+}
+
+func newBlockingO3Decoder() *blockingO3Decoder {
+	return &blockingO3Decoder{
+		done: make(chan struct{}),
+	}
+}
+
+func (d *blockingO3Decoder) ParseO3PlusO4PacketMQTT(ctx context.Context, _ parser.DIDEncrypted, _ string, _ time.Time) (model.ScreenPositionTarget, bool) {
+	d.mu.Lock()
+	d.calls++
+	d.mu.Unlock()
+	<-ctx.Done()
+	d.doneOnce.Do(func() {
+		close(d.done)
+	})
+	return model.ScreenPositionTarget{}, false
+}
+
+func (d *blockingO3Decoder) Calls() int {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.calls
+}
+
+func (d *blockingO3Decoder) Done() bool {
+	select {
+	case <-d.done:
+		return true
+	default:
+		return false
+	}
 }
 
 func fakeO3DecodedTarget(packet parser.DIDEncrypted, receivedAt time.Time) model.ScreenPositionTarget {

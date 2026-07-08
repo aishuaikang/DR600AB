@@ -3,8 +3,11 @@ package client
 import (
 	"bufio"
 	"bytes"
+	"io"
 	"reflect"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -56,6 +59,51 @@ func (p *fakeSerialPort) Close() error {
 
 func (p *fakeSerialPort) Break(duration time.Duration) error { return nil }
 
+type blockingSerialPort struct {
+	readCalls atomic.Int32
+	closeOnce sync.Once
+	done      chan struct{}
+}
+
+func newBlockingSerialPort() *blockingSerialPort {
+	return &blockingSerialPort{done: make(chan struct{})}
+}
+
+func (p *blockingSerialPort) SetMode(mode *serial.Mode) error { return nil }
+
+func (p *blockingSerialPort) Read([]byte) (int, error) {
+	p.readCalls.Add(1)
+	<-p.done
+	return 0, io.EOF
+}
+
+func (p *blockingSerialPort) Write(b []byte) (int, error) { return len(b), nil }
+
+func (p *blockingSerialPort) Drain() error { return nil }
+
+func (p *blockingSerialPort) ResetInputBuffer() error { return nil }
+
+func (p *blockingSerialPort) ResetOutputBuffer() error { return nil }
+
+func (p *blockingSerialPort) SetDTR(dtr bool) error { return nil }
+
+func (p *blockingSerialPort) SetRTS(rts bool) error { return nil }
+
+func (p *blockingSerialPort) GetModemStatusBits() (*serial.ModemStatusBits, error) {
+	return &serial.ModemStatusBits{}, nil
+}
+
+func (p *blockingSerialPort) SetReadTimeout(timeout time.Duration) error { return nil }
+
+func (p *blockingSerialPort) Close() error {
+	p.closeOnce.Do(func() {
+		close(p.done)
+	})
+	return nil
+}
+
+func (p *blockingSerialPort) Break(duration time.Duration) error { return nil }
+
 func TestDuplexSerialClientSendsViaWritePort(t *testing.T) {
 	readPort := newFakeSerialPort("")
 	writePort := newFakeSerialPort("")
@@ -97,6 +145,23 @@ func TestDuplexSerialClientReadsViaReadPort(t *testing.T) {
 	}
 	if writePort.readCalls != 0 {
 		t.Fatalf("write port should not be read, got %d reads", writePort.readCalls)
+	}
+}
+
+func TestReadLineTimeoutReusesSingleReader(t *testing.T) {
+	port := newBlockingSerialPort()
+	c := NewSerialClient(port, "/dev/tty.blocking", false)
+	c.readLineTimeout = 10 * time.Millisecond
+	defer c.Close()
+
+	for i := 0; i < 3; i++ {
+		_, err := c.ReadLine()
+		if err == nil || !strings.Contains(err.Error(), "接收超时") {
+			t.Fatalf("ReadLine() error = %v, want timeout", err)
+		}
+	}
+	if calls := port.readCalls.Load(); calls != 1 {
+		t.Fatalf("read calls = %d, want 1 reused reader", calls)
 	}
 }
 

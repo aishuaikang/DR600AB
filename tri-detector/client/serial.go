@@ -15,15 +15,24 @@ import (
 // SerialClient 串口文本行协议客户端，包装已打开的串口连接，
 // 提供基于文本行的收发能力。
 type SerialClient struct {
-	readPort      serial.Port
-	writePort     serial.Port
-	readPortName  string
-	writePortName string
-	sharedPort    bool
-	closeOnce     sync.Once
-	scanner       *bufio.Scanner
-	verbose       bool
-	output        io.Writer
+	readPort        serial.Port
+	writePort       serial.Port
+	readPortName    string
+	writePortName   string
+	sharedPort      bool
+	closeOnce       sync.Once
+	readerOnce      sync.Once
+	scanner         *bufio.Scanner
+	readCh          chan serialReadResult
+	done            chan struct{}
+	readLineTimeout time.Duration
+	verbose         bool
+	output          io.Writer
+}
+
+type serialReadResult struct {
+	line string
+	err  error
 }
 
 // NewSerialClient 创建串口客户端，包装已打开的串口连接。
@@ -44,14 +53,17 @@ func newSerialClient(readPort serial.Port, readPortName string, writePort serial
 	scanner.Buffer(make([]byte, 0, 4096), 1024*1024)
 
 	return &SerialClient{
-		readPort:      readPort,
-		writePort:     writePort,
-		readPortName:  readPortName,
-		writePortName: writePortName,
-		sharedPort:    sharedPort,
-		scanner:       scanner,
-		verbose:       verbose,
-		output:        os.Stdout,
+		readPort:        readPort,
+		writePort:       writePort,
+		readPortName:    readPortName,
+		writePortName:   writePortName,
+		sharedPort:      sharedPort,
+		scanner:         scanner,
+		readCh:          make(chan serialReadResult, 64),
+		done:            make(chan struct{}),
+		readLineTimeout: 5 * time.Second,
+		verbose:         verbose,
+		output:          os.Stdout,
 	}
 }
 
@@ -84,26 +96,18 @@ func (c *SerialClient) Send(cmd string) error {
 
 // ReadLine 读取一行文本（带超时）
 func (c *SerialClient) ReadLine() (string, error) {
-	type result struct {
-		line string
-		err  error
+	c.ensureReader()
+	timeout := c.readLineTimeout
+	if timeout <= 0 {
+		timeout = 5 * time.Second
 	}
-
-	ch := make(chan result, 1)
-	go func() {
-		if c.scanner.Scan() {
-			ch <- result{line: strings.TrimSpace(c.scanner.Text())}
-		} else {
-			err := c.scanner.Err()
-			if err == nil {
-				err = fmt.Errorf("连接已关闭")
-			}
-			ch <- result{err: err}
-		}
-	}()
-
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
 	select {
-	case r := <-ch:
+	case r, ok := <-c.readCh:
+		if !ok {
+			return "", fmt.Errorf("连接已关闭")
+		}
 		if r.err != nil {
 			return "", r.err
 		}
@@ -111,8 +115,10 @@ func (c *SerialClient) ReadLine() (string, error) {
 			fmt.Fprintf(c.output, "  <- 接收: %q\n", r.line)
 		}
 		return r.line, nil
-	case <-time.After(5 * time.Second):
-		return "", fmt.Errorf("接收超时(5秒)")
+	case <-timer.C:
+		return "", fmt.Errorf("接收超时(%s)", timeout)
+	case <-c.done:
+		return "", fmt.Errorf("连接已关闭")
 	}
 }
 
@@ -127,24 +133,62 @@ func (c *SerialClient) SendAndReceive(cmd string) (string, error) {
 // ReadLoop 持续读取行数据，通过回调处理每一行（阻塞）。
 // 适用于持续接收设备上报的侦测数据。
 func (c *SerialClient) ReadLoop(handler LineHandler) {
+	c.ensureReader()
+	for {
+		select {
+		case r, ok := <-c.readCh:
+			if !ok {
+				return
+			}
+			if r.err != nil {
+				fmt.Fprintf(c.output, "读取错误: %v\n", r.err)
+				return
+			}
+			line := strings.TrimSpace(r.line)
+			if line == "" {
+				continue
+			}
+			if c.verbose {
+				fmt.Fprintf(c.output, "  <- 接收: %q\n", line)
+			}
+			handler(line)
+		case <-c.done:
+			return
+		}
+	}
+}
+
+func (c *SerialClient) ensureReader() {
+	c.readerOnce.Do(func() {
+		go c.readLoop()
+	})
+}
+
+func (c *SerialClient) readLoop() {
+	defer close(c.readCh)
 	for c.scanner.Scan() {
 		line := strings.TrimSpace(c.scanner.Text())
 		if line == "" {
 			continue
 		}
-		if c.verbose {
-			fmt.Fprintf(c.output, "  <- 接收: %q\n", line)
+		select {
+		case c.readCh <- serialReadResult{line: line}:
+		case <-c.done:
+			return
 		}
-		handler(line)
 	}
 	if err := c.scanner.Err(); err != nil {
-		fmt.Fprintf(c.output, "读取错误: %v\n", err)
+		select {
+		case c.readCh <- serialReadResult{err: err}:
+		case <-c.done:
+		}
 	}
 }
 
 // Close 关闭串口
 func (c *SerialClient) Close() {
 	c.closeOnce.Do(func() {
+		close(c.done)
 		if c.readPort != nil {
 			c.readPort.Close()
 		}

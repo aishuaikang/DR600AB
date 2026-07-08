@@ -68,6 +68,7 @@ const (
 	defaultRxBaudRate        = 115200
 	defaultTxBaudRate        = 460800
 	defaultBaudRate          = defaultRxBaudRate
+	defaultO3DecryptWorkers  = 4
 )
 
 type commandControlMode string
@@ -109,6 +110,9 @@ type Service struct {
 	options    Options
 	openPort   SerialOpener
 	o3Decoder  O3PlusO4Decoder
+	o3Mu       sync.Mutex
+	o3Active   map[string]struct{}
+	o3Slots    chan struct{}
 	dirSwitch  DirectionSwitch
 	listPorts  func() ([]string, error)
 	current    *session
@@ -143,6 +147,8 @@ func NewService(store *store.MemoryStore, translator *i18n.Translator, settingsS
 		options:    normalizeOptions(options),
 		openPort:   serialport.Open,
 		listPorts:  serialport.ListPorts,
+		o3Active:   make(map[string]struct{}),
+		o3Slots:    make(chan struct{}, defaultO3DecryptWorkers),
 	}
 	service.o3Decoder = NewMQTTO3PlusO4Decoder(service.options.O3Decrypt)
 	return service
@@ -589,6 +595,10 @@ func (s *Service) RestoreSavedSettings(locale string) {
 
 // IngestLine 解析一行串口数据，并写入解析和侦测记录。
 func (s *Service) IngestLine(sessionID, portName, line string) {
+	s.ingestLine(context.Background(), sessionID, portName, line)
+}
+
+func (s *Service) ingestLine(ctx context.Context, sessionID, portName, line string) {
 	msg, err := parser.ParseLine(line)
 	if err != nil {
 		parsed := model.ParsedMessage{
@@ -603,7 +613,7 @@ func (s *Service) IngestLine(sessionID, portName, line string) {
 
 	parsed := toParsedMessage(msg)
 	s.store.AddParsed(parsed)
-	s.ingestScreenPosition(parsed, msg)
+	s.ingestScreenPosition(ctx, parsed, msg)
 
 	record, ok := detectionRecordFromMessage(sessionID, portName, parsed, msg)
 	if !ok {
@@ -667,7 +677,7 @@ func (s *Service) manageSession(seq uint64, sess *session, connected bool) {
 			return
 		}
 		serialClient.ReadLoop(func(line string) {
-			s.IngestLine(sess.id, sess.config.PortName, line)
+			s.ingestLine(sess.ctx, sess.id, sess.config.PortName, line)
 		})
 		s.closeSessionClient(sess, commandControlResetIfCurrent)
 
@@ -1071,7 +1081,7 @@ func detectionRecordFromMessage(sessionID, portName string, parsed model.ParsedM
 	return record, true
 }
 
-func (s *Service) ingestScreenPosition(parsed model.ParsedMessage, msg *parser.Message) {
+func (s *Service) ingestScreenPosition(ctx context.Context, parsed model.ParsedMessage, msg *parser.Message) {
 	switch data := msg.Data.(type) {
 	case *parser.RID:
 		if target, ok := screenPositionFromRID(parsed, data); ok {
@@ -1084,10 +1094,14 @@ func (s *Service) ingestScreenPosition(parsed model.ParsedMessage, msg *parser.M
 	case *parser.DIDEncrypted:
 		did := *data
 		correlationID := didEncryptedCorrelationID(&did)
+		cracked := correlationID != "" && s.store.HasCrackedScreenPositionByCorrelationID(correlationID)
 		if target, ok := screenPositionFromDIDEncryptedFallback(parsed, &did); ok &&
-			!s.store.HasCrackedScreenPositionByCorrelationID(correlationID) {
+			!cracked {
 			target.CorrelationID = correlationID
 			s.store.AddScreenPosition(target)
+		}
+		if cracked {
+			return
 		}
 		s.mu.RLock()
 		decoder := s.o3Decoder
@@ -1095,9 +1109,14 @@ func (s *Service) ingestScreenPosition(parsed model.ParsedMessage, msg *parser.M
 		if decoder == nil {
 			return
 		}
+		release, ok := s.acquireO3Decrypt(ctx, correlationID)
+		if !ok {
+			return
+		}
 		deviceSN := did.Device
 		go func() {
-			target, ok := decoder.ParseO3PlusO4PacketMQTT(context.Background(), did, deviceSN, parsed.Time)
+			defer release()
+			target, ok := decoder.ParseO3PlusO4PacketMQTT(ctx, did, deviceSN, parsed.Time)
 			if !ok || !target.Cracked {
 				return
 			}
@@ -1123,6 +1142,39 @@ func (s *Service) ingestScreenPosition(parsed model.ParsedMessage, msg *parser.M
 			s.store.AddScreenPosition(target)
 		}()
 	}
+}
+
+func (s *Service) acquireO3Decrypt(ctx context.Context, correlationID string) (func(), bool) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if correlationID == "" {
+		return nil, false
+	}
+	select {
+	case <-ctx.Done():
+		return nil, false
+	default:
+	}
+
+	s.o3Mu.Lock()
+	defer s.o3Mu.Unlock()
+	if _, ok := s.o3Active[correlationID]; ok {
+		return nil, false
+	}
+	select {
+	case s.o3Slots <- struct{}{}:
+		s.o3Active[correlationID] = struct{}{}
+	default:
+		return nil, false
+	}
+
+	return func() {
+		s.o3Mu.Lock()
+		delete(s.o3Active, correlationID)
+		s.o3Mu.Unlock()
+		<-s.o3Slots
+	}, true
 }
 
 func didEncryptedCorrelationID(data *parser.DIDEncrypted) string {
