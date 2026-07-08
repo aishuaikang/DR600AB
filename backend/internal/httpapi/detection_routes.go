@@ -1,10 +1,12 @@
 package httpapi
 
 import (
+	"errors"
 	"strings"
 
 	"github.com/gofiber/fiber/v2"
 
+	"dr600ab-api/internal/detection"
 	"dr600ab-api/internal/model"
 )
 
@@ -34,6 +36,7 @@ func (s *Server) registerDetectionRecordRoutes(api fiber.Router) {
 	api.Get("/gps/records", s.handleGPSRecords)
 	api.Get("/detection/stream", s.handleStream)
 	api.Get("/detection/records", s.handleDetectionRecords)
+	api.Post("/detection/commands", s.handleSendDetectionCommand)
 	api.Get("/parsed/records", s.handleParsedRecords)
 }
 
@@ -242,6 +245,61 @@ func (s *Server) handleDetectionRecords(c *fiber.Ctx) error {
 	return c.JSON(model.ListResponse[model.DetectionRecord]{
 		Items: items,
 		Count: len(items),
+	})
+}
+
+// handleSendDetectionCommand 向当前侦测 TX 串口发送一条调试命令。
+func (s *Server) handleSendDetectionCommand(c *fiber.Ctx) error {
+	locale := s.resolveLocale(c)
+	if !s.requireDeveloper(c, locale) {
+		return nil
+	}
+
+	var req model.DetectionCommandRequest
+	if err := c.BodyParser(&req); err != nil {
+		return s.respondError(
+			c,
+			fiber.StatusBadRequest,
+			"invalid_request",
+			s.translator.T(locale, "errors", "invalid_request"),
+			err.Error(),
+		)
+	}
+
+	command := strings.TrimSpace(req.Command)
+	if command == "" {
+		return s.respondError(
+			c,
+			fiber.StatusBadRequest,
+			"invalid_request",
+			s.translator.T(locale, "errors", "invalid_request"),
+			nil,
+		)
+	}
+	if strings.ContainsAny(command, "\r\n") {
+		return s.respondError(
+			c,
+			fiber.StatusBadRequest,
+			"invalid_request",
+			s.translator.T(locale, "errors", "invalid_request"),
+			"命令必须是单行文本",
+		)
+	}
+
+	if err := s.detection.SendCommands(command); err != nil {
+		switch {
+		case errors.Is(err, detection.ErrCommandModeConflict):
+			return s.respondError(c, fiber.StatusConflict, "command_mode_busy", "设备控制命令正在执行，请先停止当前模式", nil)
+		case errors.Is(err, detection.ErrCommandSerialOffline):
+			return s.respondError(c, fiber.StatusServiceUnavailable, "detection_serial_offline", "侦测串口未连接", nil)
+		default:
+			return s.respondError(c, fiber.StatusInternalServerError, "detection_command_failed", "侦测调试命令发送失败", err.Error())
+		}
+	}
+
+	return c.JSON(model.DetectionCommandResponse{
+		Command: command,
+		Message: s.translator.T(locale, "common", "detection.command_sent"),
 	})
 }
 

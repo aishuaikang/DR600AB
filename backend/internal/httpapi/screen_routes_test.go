@@ -416,8 +416,8 @@ func TestScreenFPVVideoRejectsActiveDirection(t *testing.T) {
 		t.Fatalf("error code = %q, want direction_active", payload.Code)
 	}
 	assertScreenFPVPortWrites(t, ports["/dev/fpv-tx"],
-		"start -freq 1, -pathb 1, -gain 60\n",
-		"start -freq 1360\n",
+		"start -freq 1, -pathb 1, -gain 60\r\n",
+		"start -freq 1360\r\n",
 	)
 }
 
@@ -457,7 +457,7 @@ func TestScreenFPVPlaybackCommandOrder(t *testing.T) {
 	}
 
 	assertScreenFPVPortWrites(t, ports["/dev/fpv-tx"],
-		"start -freq 1, -pathb 1, -gain 60\n",
+		"start -freq 1, -pathb 1, -gain 60\r\n",
 		"start -imag 192.168.8.10:49600\r\n",
 		"start -band 1310,1410\r\n",
 		"start -imag 0\r\n",
@@ -501,7 +501,7 @@ func TestScreenFPVPlaybackRollsBackImageOutputWhenBandCommandFails(t *testing.T)
 	}
 
 	assertScreenFPVPortWrites(t, txPort,
-		"start -freq 1, -pathb 1, -gain 60\n",
+		"start -freq 1, -pathb 1, -gain 60\r\n",
 		"start -imag 192.168.8.10:49600\r\n",
 		"start -imag 0\r\n",
 		"start -freq 1, -pathb 1, -gain 60\r\n",

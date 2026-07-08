@@ -5,6 +5,7 @@
   "session.stopped": "Detection session stopped",
   "session.inactive": "No active detection session",
   "session.disconnected": "Serial connection was lost",
+  "detection.command_sent": "Detection debug command sent",
   "gps.session.connecting": "GPS session is connecting automatically",
   "gps.session.started": "GPS session started",
   "gps.session.reconnecting": "GPS connection was lost, reconnecting automatically",

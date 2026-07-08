@@ -5,6 +5,7 @@
   "session.stopped": "侦测会话已停止",
   "session.inactive": "当前没有活动侦测会话",
   "session.disconnected": "串口连接已断开",
+  "detection.command_sent": "侦测调试命令已发送",
   "gps.session.connecting": "GPS 会话正在自动连接",
   "gps.session.started": "GPS 会话已启动",
   "gps.session.reconnecting": "GPS 会话已断开，正在自动重连",

@@ -538,7 +538,7 @@ func TestStartSessionSupportsSeparateReceiveAndSendPorts(t *testing.T) {
 	if got := opened["/dev/rx"].writes; len(got) != 0 {
 		t.Fatalf("rx writes = %v, want none", got)
 	}
-	assertPortWrites(t, opened["/dev/tx"], startDetectionCommand+"\n")
+	assertPortWrites(t, opened["/dev/tx"], startDetectionCommand+"\r\n")
 
 	ports, err := svc.ListPorts()
 	if err != nil {
@@ -593,7 +593,7 @@ func TestSendCommandsWritesToActiveTXPort(t *testing.T) {
 	assertPortWrites(
 		t,
 		ports["/dev/tx"],
-		startDetectionCommand+"\n",
+		startDetectionCommand+"\r\n",
 		"start -imag 192.168.8.10:49600\r\n",
 		"start -band 1310,1410\r\n",
 	)
@@ -672,16 +672,16 @@ func TestSetScreenDirectionWritesStartAndStopCommands(t *testing.T) {
 	assertPortWrites(
 		t,
 		txPort,
-		startDetectionCommand+"\n",
-		"start -freq 1360\n",
-		startDetectionCommand+"\n",
+		startDetectionCommand+"\r\n",
+		"start -freq 1360\r\n",
+		startDetectionCommand+"\r\n",
 	)
 	assertDirectionSwitchCalls(t, directionSwitch, true, false)
 	assertEvents(t, events,
 		"switch:on",
-		"serial:start -freq 1360\n",
+		"serial:start -freq 1360\r\n",
 		"switch:off",
-		"serial:"+startDetectionCommand+"\n",
+		"serial:"+startDetectionCommand+"\r\n",
 	)
 }
 
@@ -757,7 +757,7 @@ func TestSetScreenDirectionRollsBackSwitchWhenLockCommandFails(t *testing.T) {
 	if svc.mode != commandControlModeIdle {
 		t.Fatalf("command mode = %q, want idle", svc.mode)
 	}
-	assertPortWrites(t, txPort, startDetectionCommand+"\n")
+	assertPortWrites(t, txPort, startDetectionCommand+"\r\n")
 }
 
 func TestStopScreenDirectionDoesNotSendDefaultCommandWhenSwitchOffFails(t *testing.T) {
@@ -817,8 +817,8 @@ func TestStopScreenDirectionDoesNotSendDefaultCommandWhenSwitchOffFails(t *testi
 	assertPortWrites(
 		t,
 		txPort,
-		startDetectionCommand+"\n",
-		"start -freq 1360\n",
+		startDetectionCommand+"\r\n",
+		"start -freq 1360\r\n",
 	)
 }
 
@@ -865,8 +865,8 @@ func TestStopSessionTurnsOffActiveDirectionSwitch(t *testing.T) {
 	assertPortWrites(
 		t,
 		ports["/dev/tx"],
-		startDetectionCommand+"\n",
-		"start -freq 1360\n",
+		startDetectionCommand+"\r\n",
+		"start -freq 1360\r\n",
 	)
 }
 
@@ -931,9 +931,9 @@ func TestSetScreenDirectionBlocksConflictingCommandsUntilStopped(t *testing.T) {
 	assertPortWrites(
 		t,
 		ports["/dev/tx"],
-		startDetectionCommand+"\n",
-		"start -freq 1360\n",
-		startDetectionCommand+"\n",
+		startDetectionCommand+"\r\n",
+		"start -freq 1360\r\n",
+		startDetectionCommand+"\r\n",
 		"start -imag 192.168.8.10:49600\r\n",
 		"start -band 1310,1410\r\n",
 		"start -imag 0\r\n",
@@ -1005,13 +1005,13 @@ func TestScreenFPVPlaybackRequiresResetBeforeDirection(t *testing.T) {
 	assertPortWrites(
 		t,
 		txPort,
-		startDetectionCommand+"\n",
+		startDetectionCommand+"\r\n",
 		"start -imag 192.168.8.10:49600\r\n",
 		"start -band 1310,1410\r\n",
 		"start -imag 0\r\n",
 		"start -imag 0\r\n",
 		startDetectionCommand+"\r\n",
-		"start -freq 1360\n",
+		"start -freq 1360\r\n",
 	)
 }
 
@@ -1081,9 +1081,9 @@ func TestStaleSessionCloseDoesNotClearActiveCommandMode(t *testing.T) {
 	assertPortWrites(
 		t,
 		ports["/dev/tx-new"],
-		startDetectionCommand+"\n",
-		"start -freq 1360\n",
-		startDetectionCommand+"\n",
+		startDetectionCommand+"\r\n",
+		"start -freq 1360\r\n",
+		startDetectionCommand+"\r\n",
 	)
 }
 
@@ -1126,7 +1126,7 @@ func TestStartSessionSupportsSeparateReceiveAndSendBaudRates(t *testing.T) {
 	if resp.BaudRate != 460800 || resp.RxBaudRate != 460800 || resp.TxBaudRate != 115200 {
 		t.Fatalf("unexpected response baud rates: %+v", resp)
 	}
-	assertPortWrites(t, ports["/dev/tx"], startDetectionCommand+"\n")
+	assertPortWrites(t, ports["/dev/tx"], startDetectionCommand+"\r\n")
 
 	_ = svc.Stop("zh-CN")
 }
@@ -1171,7 +1171,7 @@ func TestStartSessionFallsBackToLegacyPortName(t *testing.T) {
 	if !current.Active {
 		t.Fatal("expected legacy session to be active")
 	}
-	assertPortWrites(t, opened, startDetectionCommand+"\n")
+	assertPortWrites(t, opened, startDetectionCommand+"\r\n")
 
 	_ = svc.Stop("zh-CN")
 }
@@ -1292,8 +1292,8 @@ func TestStartSessionSendsStartCommandAfterSwitchingTxPort(t *testing.T) {
 	if got := len(opened["/dev/tx2"]); got != 1 {
 		t.Fatalf("tx2 open count = %d, want 1", got)
 	}
-	assertPortWrites(t, opened["/dev/tx1"][0], startDetectionCommand+"\n")
-	assertPortWrites(t, opened["/dev/tx2"][0], startDetectionCommand+"\n")
+	assertPortWrites(t, opened["/dev/tx1"][0], startDetectionCommand+"\r\n")
+	assertPortWrites(t, opened["/dev/tx2"][0], startDetectionCommand+"\r\n")
 
 	current := svc.Current("zh-CN")
 	if current.TxPortName != "/dev/tx2" {
@@ -1429,7 +1429,7 @@ func TestReconnectsAfterPortClosesAutomatically(t *testing.T) {
 	}
 	firstPort := ports[0]
 	mu.Unlock()
-	assertPortWrites(t, firstPort, startDetectionCommand+"\n")
+	assertPortWrites(t, firstPort, startDetectionCommand+"\r\n")
 	firstPort.Close()
 
 	waitForCondition(t, 2*time.Second, func() bool {
@@ -1455,7 +1455,7 @@ func TestReconnectsAfterPortClosesAutomatically(t *testing.T) {
 	mu.Lock()
 	reconnectedPort := ports[openCount-1]
 	mu.Unlock()
-	assertPortWrites(t, reconnectedPort, startDetectionCommand+"\n")
+	assertPortWrites(t, reconnectedPort, startDetectionCommand+"\r\n")
 
 	_ = svc.Stop("zh-CN")
 }
@@ -1507,7 +1507,7 @@ func TestReconnectSendsStartCommandToSeparateTxPort(t *testing.T) {
 	firstTX := opened["/dev/tx"][0]
 	mu.Unlock()
 	assertPortWrites(t, firstRX)
-	assertPortWrites(t, firstTX, startDetectionCommand+"\n")
+	assertPortWrites(t, firstTX, startDetectionCommand+"\r\n")
 	firstRX.Close()
 
 	waitForCondition(t, 2*time.Second, func() bool {
@@ -1522,7 +1522,7 @@ func TestReconnectSendsStartCommandToSeparateTxPort(t *testing.T) {
 	reconnectedTX := opened["/dev/tx"][len(opened["/dev/tx"])-1]
 	mu.Unlock()
 	assertPortWrites(t, reconnectedRX)
-	assertPortWrites(t, reconnectedTX, startDetectionCommand+"\n")
+	assertPortWrites(t, reconnectedTX, startDetectionCommand+"\r\n")
 
 	_ = svc.Stop("zh-CN")
 }

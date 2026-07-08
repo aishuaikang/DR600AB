@@ -2,5 +2,10 @@
   "receivePort": "接收串口",
   "sendPort": "发送串口",
   "sessionTitle": "会话状态",
-  "sessionHint": "在设置页选择接收/发送串口后，系统会自动连接并在断开后重连，实时流会自动刷新列表。"
+  "sessionHint": "在设置页选择接收/发送串口后，系统会自动连接并在断开后重连，实时流会自动刷新列表。",
+  "manualCommand.title": "手动发送命令",
+  "manualCommand.placeholder": "输入串口命令，例如 start -freq 1, -pathb 1, -gain 60",
+  "manualCommand.send": "发送",
+  "manualCommand.empty": "请输入要发送的命令",
+  "manualCommand.sent": "命令已发送"
 }

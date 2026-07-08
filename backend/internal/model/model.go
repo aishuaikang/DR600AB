@@ -74,6 +74,17 @@ type DetectionSessionResponse struct {
 	Message       string    `json:"message"`
 }
 
+// DetectionCommandRequest 请求向当前侦测发送串口写入一条调试命令。
+type DetectionCommandRequest struct {
+	Command string `json:"command"`
+}
+
+// DetectionCommandResponse 返回调试命令发送结果。
+type DetectionCommandResponse struct {
+	Command string `json:"command"`
+	Message string `json:"message"`
+}
+
 // GPSSessionRequest 配置 GPS NMEA 0183 串口会话。
 type GPSSessionRequest struct {
 	PortName        string `json:"portName,omitempty"`

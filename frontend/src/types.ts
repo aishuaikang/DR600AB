@@ -66,6 +66,15 @@ export interface DetectionSessionResponse {
   message: string;
 }
 
+export interface DetectionCommandRequest {
+  command: string;
+}
+
+export interface DetectionCommandResponse {
+  command: string;
+  message: string;
+}
+
 export interface GPSSessionRequest {
   portName?: string;
   dataPortName?: string;

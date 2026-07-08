@@ -64,14 +64,12 @@ func (c *SerialClient) SetOutput(w io.Writer) {
 	c.output = w
 }
 
-// Send 发送一行文本命令（自动追加换行符）
+// Send 发送一行文本命令（自动追加 CRLF 换行符）。
 func (c *SerialClient) Send(cmd string) error {
-	if !strings.HasSuffix(cmd, "\n") {
-		cmd += "\n"
-	}
+	cmd = strings.TrimRight(cmd, "\r\n") + "\r\n"
 
 	if c.verbose {
-		fmt.Fprintf(c.output, "  -> 发送: %q\n", strings.TrimRight(cmd, "\n"))
+		fmt.Fprintf(c.output, "  -> 发送: %q\n", strings.TrimRight(cmd, "\r\n"))
 	}
 
 	n, err := c.writePort.Write([]byte(cmd))

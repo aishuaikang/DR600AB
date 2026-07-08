@@ -68,7 +68,7 @@ func TestDuplexSerialClientSendsViaWritePort(t *testing.T) {
 	if got := readPort.written.String(); got != "" {
 		t.Fatalf("read port should not receive writes, got %q", got)
 	}
-	if got := writePort.written.String(); got != "AT+PING\n" {
+	if got := writePort.written.String(); got != "AT+PING\r\n" {
 		t.Fatalf("unexpected write port payload: %q", got)
 	}
 	if got := c.ReadPortName(); got != "/dev/rx" {

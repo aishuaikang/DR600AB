@@ -8,6 +8,8 @@ import type {
   CompassSessionResponse,
   CompassSettings,
   DetectionRecord,
+  DetectionCommandRequest,
+  DetectionCommandResponse,
   DeceptionSessionRequest,
   DeceptionSessionResponse,
   DeceptionQueryResponse,
@@ -313,6 +315,18 @@ export function getDetections(
 export function getParsed(locale: string, developerToken: string, limit = 200): Promise<ListResponse<ParsedMessage>> {
   return requestJson<ListResponse<ParsedMessage>>(`/parsed/records?limit=${limit}`, {
     headers: developerHeaders(developerToken),
+  }, locale);
+}
+
+export function sendDetectionCommand(
+  payload: DetectionCommandRequest,
+  locale: string,
+  developerToken: string,
+): Promise<DetectionCommandResponse> {
+  return requestJson<DetectionCommandResponse>("/detection/commands", {
+    method: "POST",
+    headers: developerHeaders(developerToken),
+    body: JSON.stringify(payload),
   }, locale);
 }
 

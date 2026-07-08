@@ -23,6 +23,7 @@ import {
   getSession,
   getUserSettings,
   openDetectionStream,
+  sendDetectionCommand,
   setChannelState,
   setLicenseInvalidHandler,
   setUnauthorizedHandler,
@@ -1058,6 +1059,11 @@ function App() {
     return response;
   };
 
+  const handleSendDetectionCommand = useCallback(async (command: string) => {
+    const response = await sendDetectionCommand({ command }, locale, developerToken);
+    return response.message;
+  }, [developerToken, locale]);
+
   const handleDeveloperLogin = async (code: string) => {
     const response = await createDeveloperSessionRequest({ code }, locale);
     const nextSession = storeDeveloperSession({
@@ -1169,6 +1175,7 @@ function App() {
                     locale={locale}
                     query={messageSearch}
                     onQueryChange={setMessageSearch}
+                    onSendDetectionCommand={page === "detection-records" ? handleSendDetectionCommand : undefined}
                     t={t}
                   />
                 ) : null}
