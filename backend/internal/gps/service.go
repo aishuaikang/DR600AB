@@ -18,7 +18,30 @@ import (
 	"tri-detector/client"
 )
 
-const startGPSCommand = "AT+QGPS=1\r\n"
+const (
+	startGPSCommand           = "AT+QGPS=1\r\n"
+	startGPSDataCommand       = "AT+QNETDEVCTL=1,1,1\r\n"
+	startGPSPowerCommand      = "at+qgpspower=1\r\n"
+	startGPSDataCommandDelay  = 2 * time.Second
+	startGPSPowerCommandDelay = 3 * time.Second
+)
+
+type gpsStartupCommand struct {
+	command    string
+	delayAfter time.Duration
+}
+
+type gpsConnectOptions struct {
+	controlPortName     string
+	locale              string
+	sendStartupCommands bool
+}
+
+var gpsStartupCommands = [...]gpsStartupCommand{
+	{command: startGPSCommand, delayAfter: startGPSDataCommandDelay},
+	{command: startGPSDataCommand, delayAfter: startGPSPowerCommandDelay},
+	{command: startGPSPowerCommand},
+}
 
 // Options 配置 GPS 串口默认值和重连时间参数。
 type Options struct {
@@ -44,13 +67,15 @@ type SettingsStore interface {
 type Service struct {
 	mu sync.RWMutex
 
-	store      *store.MemoryStore
-	translator *i18n.Translator
-	settings   SettingsStore
-	options    Options
-	openPort   SerialOpener
-	current    *session
-	sequence   uint64
+	store                  *store.MemoryStore
+	translator             *i18n.Translator
+	settings               SettingsStore
+	options                Options
+	openPort               SerialOpener
+	waitStartupDelay       func(context.Context, time.Duration) bool
+	initializedControlPort string
+	current                *session
+	sequence               uint64
 }
 
 type session struct {
@@ -75,11 +100,12 @@ type session struct {
 // NewService 创建 GPS 服务。
 func NewService(store *store.MemoryStore, translator *i18n.Translator, settingsStore SettingsStore, options Options) *Service {
 	return &Service{
-		store:      store,
-		translator: translator,
-		settings:   settingsStore,
-		options:    normalizeOptions(options),
-		openPort:   serialport.Open,
+		store:            store,
+		translator:       translator,
+		settings:         settingsStore,
+		options:          normalizeOptions(options),
+		openPort:         serialport.Open,
+		waitStartupDelay: waitForContext,
 	}
 }
 
@@ -140,6 +166,7 @@ func (s *Service) Start(req model.GPSSessionRequest, locale string) (model.GPSSe
 	}
 
 	prev := s.current
+	sendStartupCommands := s.initializedControlPort != controlPortName
 	ctx, cancel := context.WithCancel(context.Background())
 	seq := s.sequence + 1
 	s.sequence = seq
@@ -166,7 +193,18 @@ func (s *Service) Start(req model.GPSSessionRequest, locale string) (model.GPSSe
 		}
 	}
 
-	gpsClient, err := s.connectOnce(&sess.config, sess.controlPort, locale)
+	gpsClient, startupCommandsSent, err := s.connectOnce(
+		sess.ctx,
+		&sess.config,
+		gpsConnectOptions{
+			controlPortName:     sess.controlPort,
+			locale:              locale,
+			sendStartupCommands: sendStartupCommands,
+		},
+	)
+	if startupCommandsSent {
+		s.markStartupCommandsSent(seq, sess)
+	}
 	if err == nil {
 		if !s.assignConnectedClient(seq, sess, gpsClient) {
 			gpsClient.Close()
@@ -179,7 +217,9 @@ func (s *Service) Start(req model.GPSSessionRequest, locale string) (model.GPSSe
 		return response, nil
 	}
 
-	s.setSessionFailure(seq, sess, "connecting", err.Error())
+	if !s.setSessionFailure(seq, sess, "connecting", err.Error()) {
+		return s.Current(locale), nil
+	}
 	response := s.responseForSession(sess, locale, s.translator.T(locale, "common", "gps.session.connecting"))
 	response.LastError = err.Error()
 	response.Active = false
@@ -302,14 +342,25 @@ func (s *Service) manageSession(seq uint64, sess *session, connected bool) {
 		}
 
 		if !connected {
-			gpsClient, err := s.connectOnce(&sess.config, sess.controlPort, sess.locale)
+			sendStartupCommands := s.shouldSendStartupCommands(seq, sess)
+			gpsClient, sent, err := s.connectOnce(
+				sess.ctx,
+				&sess.config,
+				gpsConnectOptions{
+					controlPortName:     sess.controlPort,
+					locale:              sess.locale,
+					sendStartupCommands: sendStartupCommands,
+				},
+			)
+			if sent {
+				s.markStartupCommandsSent(seq, sess)
+			}
 			if err != nil {
 				state := sess.state
 				if state == "" {
 					state = "connecting"
 				}
-				s.setSessionFailure(seq, sess, state, err.Error())
-				if !s.isCurrentSession(seq, sess) {
+				if !s.setSessionFailure(seq, sess, state, err.Error()) {
 					return
 				}
 				response := s.responseForSession(sess, sess.locale, s.messageForState(state, sess.locale))
@@ -353,7 +404,14 @@ func (s *Service) manageSession(seq uint64, sess *session, connected bool) {
 			return
 		}
 
-		s.setSessionFailure(seq, sess, "reconnecting", s.translator.T(sess.locale, "common", "gps.session.disconnected"))
+		if !s.setSessionFailure(
+			seq,
+			sess,
+			"reconnecting",
+			s.translator.T(sess.locale, "common", "gps.session.disconnected"),
+		) {
+			return
+		}
 		response := s.responseForSession(sess, sess.locale, s.translator.T(sess.locale, "common", "gps.session.reconnecting"))
 		response.LastError = sess.lastError
 		response.RetryCount = sess.retryCount
@@ -431,62 +489,114 @@ func (s *Service) responseForSession(sess *session, locale, message string) mode
 	}
 }
 
-func (s *Service) connectOnce(cfg *serialport.Config, controlPortName string, locale string) (*client.SerialClient, error) {
+func (s *Service) connectOnce(
+	ctx context.Context,
+	cfg *serialport.Config,
+	options gpsConnectOptions,
+) (*client.SerialClient, bool, error) {
 	s.mu.RLock()
 	openPort := s.openPort
 	s.mu.RUnlock()
 
-	if controlPortName == "" || controlPortName == cfg.PortName {
+	if options.controlPortName == "" || options.controlPortName == cfg.PortName {
 		readPort, err := openPort(cfg)
 		if err != nil {
-			return nil, err
+			return nil, false, err
 		}
 		gpsClient := client.NewSerialClient(readPort, cfg.PortName, false)
-		if err := sendGPSStartCommand(readPort); err != nil {
-			gpsClient.Close()
-			return nil, fmt.Errorf("%s: %w", s.translator.T(locale, "errors", "gps_start_command_failed"), err)
+		if options.sendStartupCommands {
+			if err := sendGPSStartCommands(ctx, readPort, s.waitStartupDelay); err != nil {
+				gpsClient.Close()
+				return nil, false, fmt.Errorf(
+					"%s: %w",
+					s.translator.T(options.locale, "errors", "gps_start_command_failed"),
+					err,
+				)
+			}
 		}
-		return gpsClient, nil
+		return gpsClient, options.sendStartupCommands, nil
 	}
 
 	controlCfg := *cfg
-	controlCfg.PortName = controlPortName
-	if err := s.sendGPSStartCommand(openPort, &controlCfg); err != nil {
-		return nil, fmt.Errorf("%s: %w", s.translator.T(locale, "errors", "gps_start_command_failed"), err)
+	controlCfg.PortName = options.controlPortName
+	startupCommandsSent := false
+	if options.sendStartupCommands {
+		if err := s.sendGPSStartCommands(ctx, openPort, &controlCfg); err != nil {
+			return nil, false, fmt.Errorf(
+				"%s: %w",
+				s.translator.T(options.locale, "errors", "gps_start_command_failed"),
+				err,
+			)
+		}
+		startupCommandsSent = true
 	}
 
 	readPort, err := openPort(cfg)
 	if err != nil {
-		return nil, err
+		return nil, startupCommandsSent, err
 	}
-	return client.NewSerialClient(readPort, cfg.PortName, false), nil
+	return client.NewSerialClient(readPort, cfg.PortName, false), startupCommandsSent, nil
 }
 
-func (s *Service) sendGPSStartCommand(openPort SerialOpener, cfg *serialport.Config) error {
+func (s *Service) sendGPSStartCommands(
+	ctx context.Context,
+	openPort SerialOpener,
+	cfg *serialport.Config,
+) error {
 	port, err := openPort(cfg)
 	if err != nil {
 		return err
 	}
 	defer port.Close()
-	return sendGPSStartCommand(port)
+	return sendGPSStartCommands(ctx, port, s.waitStartupDelay)
 }
 
-func sendGPSStartCommand(port serial.Port) error {
+func sendGPSStartCommands(
+	ctx context.Context,
+	port serial.Port,
+	wait func(context.Context, time.Duration) bool,
+) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("GPS 启动已取消: %w", err)
+	}
 	if err := port.ResetInputBuffer(); err != nil {
 		return fmt.Errorf("清空输入缓冲失败: %w", err)
 	}
 	if err := port.ResetOutputBuffer(); err != nil {
 		return fmt.Errorf("清空输出缓冲失败: %w", err)
 	}
-	n, err := port.Write([]byte(startGPSCommand))
-	if err != nil {
-		return fmt.Errorf("发送失败: %w", err)
+	if wait == nil {
+		wait = waitForContext
 	}
-	if n != len(startGPSCommand) {
-		return fmt.Errorf("发送不完整: 期望%d字节, 实际%d字节", len(startGPSCommand), n)
-	}
-	if err := port.Drain(); err != nil {
-		return fmt.Errorf("等待发送完成失败: %w", err)
+	for _, step := range gpsStartupCommands {
+		if err := ctx.Err(); err != nil {
+			return fmt.Errorf("GPS 启动已取消: %w", err)
+		}
+		n, err := port.Write([]byte(step.command))
+		if err != nil {
+			return fmt.Errorf("发送 GPS 指令 %q 失败: %w", strings.TrimSpace(step.command), err)
+		}
+		if n != len(step.command) {
+			return fmt.Errorf(
+				"GPS 指令 %q 发送不完整: 期望%d字节, 实际%d字节",
+				strings.TrimSpace(step.command),
+				len(step.command),
+				n,
+			)
+		}
+		if err := port.Drain(); err != nil {
+			return fmt.Errorf("等待 GPS 指令 %q 发送完成失败: %w", strings.TrimSpace(step.command), err)
+		}
+		if step.delayAfter > 0 && !wait(ctx, step.delayAfter) {
+			err := ctx.Err()
+			if err == nil {
+				err = context.Canceled
+			}
+			return fmt.Errorf("GPS 启动已取消: %w", err)
+		}
 	}
 	return nil
 }
@@ -504,15 +614,16 @@ func (s *Service) assignConnectedClient(seq uint64, sess *session, c *client.Ser
 	return true
 }
 
-func (s *Service) setSessionFailure(seq uint64, sess *session, state, lastErr string) {
+func (s *Service) setSessionFailure(seq uint64, sess *session, state, lastErr string) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.sequence != seq || s.current != sess {
-		return
+		return false
 	}
 	sess.state = state
 	sess.lastError = lastErr
 	sess.retryCount++
+	return true
 }
 
 func (s *Service) updateLastRecord(sessionID string, record model.GPSRecord) {
@@ -533,6 +644,23 @@ func (s *Service) isCurrentSession(seq uint64, sess *session) bool {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.sequence == seq && s.current == sess
+}
+
+func (s *Service) shouldSendStartupCommands(seq uint64, sess *session) bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.sequence == seq &&
+		s.current == sess &&
+		s.initializedControlPort != sess.controlPort
+}
+
+func (s *Service) markStartupCommandsSent(seq uint64, sess *session) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.sequence != seq || s.current != sess {
+		return
+	}
+	s.initializedControlPort = sess.controlPort
 }
 
 func (s *Service) saveSettings(req model.GPSSessionRequest) error {
@@ -612,6 +740,16 @@ func (s *Service) nextBackoff(current time.Duration) time.Duration {
 func (s *Service) sleepOrDone(ctx context.Context, delay time.Duration) bool {
 	if delay <= 0 {
 		delay = time.Second
+	}
+	return waitForContext(ctx, delay)
+}
+
+func waitForContext(ctx context.Context, delay time.Duration) bool {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if delay <= 0 {
+		return true
 	}
 	timer := time.NewTimer(delay)
 	defer timer.Stop()

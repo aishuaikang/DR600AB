@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"math"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -237,35 +238,72 @@ func TestIngestLineStoresScreenPositionFromDIDEncryptedDecoder(t *testing.T) {
 	})
 }
 
-func TestIngestLineSkipsDIDEncryptedFallbackAfterCorrelationCracked(t *testing.T) {
+func TestIngestLineRefreshesDIDEncryptedAfterCorrelationCracked(t *testing.T) {
 	tr, err := i18n.New("zh-CN")
 	if err != nil {
 		t.Fatalf("i18n.New() error = %v", err)
 	}
 	st := store.NewMemoryStore(10, 10)
 	svc := NewService(st, tr, settings.NewStore(filepath.Join(t.TempDir(), "settings.json")), Options{})
-	decoder := &oneShotO3Decoder{}
+	decoder := &refreshingO3Decoder{}
 	svc.SetO3PlusO4Decoder(decoder)
-	line := "#=632/3/1, device=10125, Encypted Mavic_O4_ID=875bb45f, freq=2429.5, rssi=-64, byte,15,1b,9b,58,f0,d9"
+	firstLine := "#=632/3/1, device=10125, Encypted Mavic_O4_ID=875bb45f, freq=2429.5, rssi=-64, byte,15,1b,9b,58,f0,d9"
+	secondLine := "#=632/3/1, device=10125, Encypted Mavic_O4_ID=875bb45f, freq=2429.5, rssi=-62, byte,15,1b,9b,58,f0,d9"
 
-	svc.IngestLine("session-1", "/dev/ttyUSB0", line)
+	svc.IngestLine("session-1", "/dev/ttyUSB0", firstLine)
 	var items []model.ScreenPositionTarget
 	waitUntil(t, time.Second, func() bool {
 		items = svc.ScreenPositions(10)
-		return len(items) == 1 && items[0].Serial == "o3-sn"
+		return len(items) == 1 &&
+			items[0].Serial == "o3-sn" &&
+			items[0].Drone != nil &&
+			items[0].Drone.Latitude == 31.2
+	})
+	firstReceivedAt := items[0].LastRecord.ReceivedAt
+	waitUntil(t, time.Second, func() bool {
+		svc.o3Mu.Lock()
+		defer svc.o3Mu.Unlock()
+		return len(svc.o3Active) == 0
 	})
 
-	svc.IngestLine("session-1", "/dev/ttyUSB0", line)
-	if calls := decoder.Calls(); calls != 1 {
-		t.Fatalf("decoder calls after repeated cracked DID = %d, want 1", calls)
-	}
+	svc.IngestLine("session-1", "/dev/ttyUSB0", secondLine)
+	waitUntil(t, time.Second, func() bool {
+		items = svc.ScreenPositions(10)
+		return len(items) == 1 &&
+			decoder.Calls() == 2 &&
+			items[0].LastRecord.ReceivedAt.After(firstReceivedAt)
+	})
 
-	items = svc.ScreenPositions(10)
-	if len(items) != 1 {
-		t.Fatalf("screen positions count = %d, want only cracked target after repeated DID encrypted", len(items))
+	item := items[0]
+	if item.Drone == nil || math.Abs(item.Drone.Latitude-31.20005) > 1e-9 {
+		t.Fatalf("drone = %#v, want refreshed latitude 31.20005", item.Drone)
 	}
-	if items[0].Serial != "o3-sn" || items[0].Model == "DJI-Drone" || !items[0].Cracked {
-		t.Fatalf("target after repeated DID encrypted = %#v", items[0])
+	if item.Pilot == nil || math.Abs(item.Pilot.Latitude-31.10005) > 1e-9 {
+		t.Fatalf("pilot = %#v, want refreshed latitude 31.10005", item.Pilot)
+	}
+	if item.Home == nil || math.Abs(item.Home.Latitude-31.15005) > 1e-9 {
+		t.Fatalf("home = %#v, want refreshed latitude 31.15005", item.Home)
+	}
+	if item.Height == nil || *item.Height != 36 {
+		t.Fatalf("height = %#v, want 36", item.Height)
+	}
+	if item.Altitude == nil || *item.Altitude != 121 {
+		t.Fatalf("altitude = %#v, want 121", item.Altitude)
+	}
+	if item.Speed == nil || *item.Speed != 6 {
+		t.Fatalf("speed = %#v, want 6", item.Speed)
+	}
+	if item.RSSI != -62 {
+		t.Fatalf("RSSI = %v, want -62", item.RSSI)
+	}
+	if len(item.DroneTrajectory) != 2 {
+		t.Fatalf("drone trajectory count = %d, want 2", len(item.DroneTrajectory))
+	}
+	if len(item.PilotTrajectory) != 2 {
+		t.Fatalf("pilot trajectory count = %d, want 2", len(item.PilotTrajectory))
+	}
+	if item.Serial != "o3-sn" || item.Model == "DJI-Drone" || !item.Cracked {
+		t.Fatalf("target after repeated DID encrypted = %#v", item)
 	}
 }
 
@@ -293,6 +331,92 @@ func TestIngestLineDeduplicatesDIDEncryptedDecryptInFlight(t *testing.T) {
 	}
 	cancel()
 	waitUntil(t, time.Second, decoder.Done)
+}
+
+func TestIngestLineLimitsConcurrentDIDEncryptedDecrypts(t *testing.T) {
+	tr, err := i18n.New("zh-CN")
+	if err != nil {
+		t.Fatalf("i18n.New() error = %v", err)
+	}
+	st := store.NewMemoryStore(10, 10)
+	svc := NewService(st, tr, settings.NewStore(filepath.Join(t.TempDir(), "settings.json")), Options{})
+	decoder := newBlockingO3Decoder()
+	svc.SetO3PlusO4Decoder(decoder)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	baseLine := "#=632/3/1, device=10125, Encypted Mavic_O4_ID=875bb45f, freq=2429.5, rssi=-64, byte,15,1b,9b,58,f0,d9"
+
+	for _, correlationID := range []string{"875bb451", "875bb452", "875bb453", "875bb454", "875bb455"} {
+		line := strings.Replace(baseLine, "875bb45f", correlationID, 1)
+		svc.ingestLine(ctx, "session-1", "/dev/ttyUSB0", line)
+	}
+	waitUntil(t, time.Second, func() bool {
+		return decoder.Calls() == defaultO3DecryptWorkers
+	})
+	if calls := decoder.Calls(); calls != defaultO3DecryptWorkers {
+		t.Fatalf("concurrent decoder calls = %d, want %d", calls, defaultO3DecryptWorkers)
+	}
+
+	cancel()
+	waitUntil(t, time.Second, func() bool {
+		svc.o3Mu.Lock()
+		defer svc.o3Mu.Unlock()
+		return len(svc.o3Active) == 0 && len(svc.o3Slots) == 0
+	})
+}
+
+func TestIngestLineReservesDIDEncryptedDecryptSlotForNewTarget(t *testing.T) {
+	tr, err := i18n.New("zh-CN")
+	if err != nil {
+		t.Fatalf("i18n.New() error = %v", err)
+	}
+	st := store.NewMemoryStore(10, 10)
+	svc := NewService(st, tr, settings.NewStore(filepath.Join(t.TempDir(), "settings.json")), Options{})
+	decoder := newBlockingO3Decoder()
+	svc.SetO3PlusO4Decoder(decoder)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	baseLine := "#=632/3/1, device=10125, Encypted Mavic_O4_ID=875bb45f, freq=2429.5, rssi=-64, byte,15,1b,9b,58,f0,d9"
+	now := time.Now()
+
+	for _, encryptedID := range []string{"875bb451", "875bb452", "875bb453", "875bb454"} {
+		st.AddScreenPosition(model.ScreenPositionTarget{
+			Serial:        "decoded-" + encryptedID,
+			Model:         "DJI O4",
+			Source:        string(parser.TypeDIDEncrypted),
+			CorrelationID: "did_encrypted:" + encryptedID,
+			Cracked:       true,
+			FirstSeen:     now,
+			LastSeen:      now,
+		})
+		line := strings.Replace(baseLine, "875bb45f", encryptedID, 1)
+		svc.ingestLine(ctx, "session-1", "/dev/ttyUSB0", line)
+	}
+
+	newEncryptedID := "875bb455"
+	line := strings.Replace(baseLine, "875bb45f", newEncryptedID, 1)
+	svc.ingestLine(ctx, "session-1", "/dev/ttyUSB0", line)
+	waitUntil(t, time.Second, func() bool {
+		return decoder.Calls() == defaultO3DecryptWorkers
+	})
+
+	svc.o3Mu.Lock()
+	_, newTargetActive := svc.o3Active["did_encrypted:"+newEncryptedID]
+	activeCount := len(svc.o3Active)
+	svc.o3Mu.Unlock()
+	if !newTargetActive {
+		t.Fatal("new DID encrypted target did not receive the reserved initial decrypt slot")
+	}
+	if activeCount != defaultO3DecryptWorkers {
+		t.Fatalf("active decrypt count = %d, want %d", activeCount, defaultO3DecryptWorkers)
+	}
+
+	cancel()
+	waitUntil(t, time.Second, func() bool {
+		svc.o3Mu.Lock()
+		defer svc.o3Mu.Unlock()
+		return len(svc.o3Active) == 0 && len(svc.o3Slots) == 0
+	})
 }
 
 func TestIngestLineCancelsDIDEncryptedDecryptWithContext(t *testing.T) {
@@ -403,22 +527,39 @@ func (fakeO3Decoder) ParseO3PlusO4PacketMQTT(_ context.Context, packet parser.DI
 	return fakeO3DecodedTarget(packet, receivedAt), true
 }
 
-type oneShotO3Decoder struct {
+type refreshingO3Decoder struct {
 	mu    sync.Mutex
 	calls int
 }
 
-func (d *oneShotO3Decoder) ParseO3PlusO4PacketMQTT(_ context.Context, packet parser.DIDEncrypted, deviceSN string, receivedAt time.Time) (model.ScreenPositionTarget, bool) {
+func (d *refreshingO3Decoder) ParseO3PlusO4PacketMQTT(_ context.Context, packet parser.DIDEncrypted, deviceSN string, receivedAt time.Time) (model.ScreenPositionTarget, bool) {
 	d.mu.Lock()
-	defer d.mu.Unlock()
 	d.calls++
-	if d.calls > 1 || deviceSN != "10125" {
+	call := d.calls
+	d.mu.Unlock()
+	if deviceSN != "10125" {
 		return model.ScreenPositionTarget{}, false
 	}
-	return fakeO3DecodedTarget(packet, receivedAt), true
+	target := fakeO3DecodedTarget(packet, receivedAt)
+	offset := float64(call - 1)
+	target.Drone.Latitude += offset * 0.00005
+	target.Pilot = &model.ScreenPositionPoint{
+		Latitude:  31.1 + offset*0.00005,
+		Longitude: 121.3,
+	}
+	target.Home = &model.ScreenPositionPoint{
+		Latitude:  31.15 + offset*0.00005,
+		Longitude: 121.35,
+	}
+	target.Height = float64Ptr(35 + offset)
+	target.Altitude = float64Ptr(120 + offset)
+	target.Speed = float64Ptr(5 + offset)
+	target.TrajectoryHeight = float64Ptr(35 + offset)
+	target.TrajectorySpeed = float64Ptr(5 + offset)
+	return target, true
 }
 
-func (d *oneShotO3Decoder) Calls() int {
+func (d *refreshingO3Decoder) Calls() int {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	return d.calls

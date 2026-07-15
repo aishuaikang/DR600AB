@@ -1,9 +1,12 @@
 package gps
 
 import (
+	"context"
+	"errors"
 	"io"
 	"path/filepath"
 	"slices"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -22,6 +25,10 @@ type fakeSerialPort struct {
 	closeCount int
 	closeCh    chan struct{}
 	writes     []string
+	writeCount int
+	writeErrAt int
+	writeErr   error
+	onWrite    func(string)
 }
 
 func newFakeSerialPort() *fakeSerialPort {
@@ -37,8 +44,18 @@ func (p *fakeSerialPort) Read(b []byte) (int, error) {
 
 func (p *fakeSerialPort) Write(b []byte) (int, error) {
 	p.mu.Lock()
-	defer p.mu.Unlock()
-	p.writes = append(p.writes, string(b))
+	p.writeCount++
+	if p.writeCount == p.writeErrAt && p.writeErr != nil {
+		p.mu.Unlock()
+		return 0, p.writeErr
+	}
+	command := string(b)
+	p.writes = append(p.writes, command)
+	onWrite := p.onWrite
+	p.mu.Unlock()
+	if onWrite != nil {
+		onWrite(command)
+	}
 	return len(b), nil
 }
 
@@ -72,13 +89,18 @@ func (p *fakeSerialPort) Close() error {
 
 func (p *fakeSerialPort) Break(duration time.Duration) error { return nil }
 
-func TestStartSendsQGPSCommandToControlPort(t *testing.T) {
+func TestStartSendsGPSStartupCommandsToControlPort(t *testing.T) {
 	tr, err := i18n.New("zh-CN")
 	if err != nil {
 		t.Fatalf("i18n.New() error = %v", err)
 	}
 	st := store.NewMemoryStore(10, 10)
 	svc := NewService(st, tr, settings.NewStore(filepath.Join(t.TempDir(), "settings.json")), Options{})
+	var delays []time.Duration
+	svc.waitStartupDelay = func(_ context.Context, delay time.Duration) bool {
+		delays = append(delays, delay)
+		return true
+	}
 
 	opened := map[string]*fakeSerialPort{}
 	var openOrder []string
@@ -111,7 +133,16 @@ func TestStartSendsQGPSCommandToControlPort(t *testing.T) {
 		t.Fatalf("open order = %v, want %v", openOrder, want)
 	}
 	assertPortWrites(t, opened["/dev/ttyUSB1"])
-	assertPortWrites(t, opened["/dev/ttyUSB2"], startGPSCommand)
+	assertPortWrites(
+		t,
+		opened["/dev/ttyUSB2"],
+		startGPSCommand,
+		startGPSDataCommand,
+		startGPSPowerCommand,
+	)
+	if want := []time.Duration{startGPSDataCommandDelay, startGPSPowerCommandDelay}; !slices.Equal(delays, want) {
+		t.Fatalf("command delays = %v, want %v", delays, want)
+	}
 	assertCloseCount(t, opened["/dev/ttyUSB2"], 1)
 	assertCloseCount(t, opened["/dev/ttyUSB1"], 0)
 
@@ -119,13 +150,18 @@ func TestStartSendsQGPSCommandToControlPort(t *testing.T) {
 	assertCloseCount(t, opened["/dev/ttyUSB1"], 1)
 }
 
-func TestStartSendsQGPSCommandOnSharedGPSPort(t *testing.T) {
+func TestStartSendsGPSStartupCommandsOnSharedGPSPort(t *testing.T) {
 	tr, err := i18n.New("zh-CN")
 	if err != nil {
 		t.Fatalf("i18n.New() error = %v", err)
 	}
 	st := store.NewMemoryStore(10, 10)
 	svc := NewService(st, tr, settings.NewStore(filepath.Join(t.TempDir(), "settings.json")), Options{})
+	var delays []time.Duration
+	svc.waitStartupDelay = func(_ context.Context, delay time.Duration) bool {
+		delays = append(delays, delay)
+		return true
+	}
 
 	opened := map[string]*fakeSerialPort{}
 	var openOrder []string
@@ -154,11 +190,297 @@ func TestStartSendsQGPSCommandOnSharedGPSPort(t *testing.T) {
 	if want := []string{"/dev/ttyUSB0"}; !slices.Equal(openOrder, want) {
 		t.Fatalf("open order = %v, want %v", openOrder, want)
 	}
-	assertPortWrites(t, opened["/dev/ttyUSB0"], startGPSCommand)
+	assertPortWrites(
+		t,
+		opened["/dev/ttyUSB0"],
+		startGPSCommand,
+		startGPSDataCommand,
+		startGPSPowerCommand,
+	)
+	if want := []time.Duration{startGPSDataCommandDelay, startGPSPowerCommandDelay}; !slices.Equal(delays, want) {
+		t.Fatalf("command delays = %v, want %v", delays, want)
+	}
 	assertCloseCount(t, opened["/dev/ttyUSB0"], 0)
 
 	_ = svc.Stop("zh-CN")
 	assertCloseCount(t, opened["/dev/ttyUSB0"], 1)
+}
+
+func TestStopCancelsGPSStartupCommandSequence(t *testing.T) {
+	tr, err := i18n.New("zh-CN")
+	if err != nil {
+		t.Fatalf("i18n.New() error = %v", err)
+	}
+	svc := NewService(
+		store.NewMemoryStore(10, 10),
+		tr,
+		settings.NewStore(filepath.Join(t.TempDir(), "settings.json")),
+		Options{},
+	)
+	waitStarted := make(chan struct{})
+	var waitStartedOnce sync.Once
+	svc.waitStartupDelay = func(ctx context.Context, _ time.Duration) bool {
+		waitStartedOnce.Do(func() {
+			close(waitStarted)
+		})
+		<-ctx.Done()
+		return false
+	}
+	port := newFakeSerialPort()
+	svc.SetSerialOpener(func(_ *serialport.Config) (serial.Port, error) {
+		return port, nil
+	})
+
+	type startResult struct {
+		response model.GPSSessionResponse
+		err      error
+	}
+	startDone := make(chan startResult, 1)
+	go func() {
+		response, startErr := svc.Start(model.GPSSessionRequest{
+			DataPortName:    "/dev/ttyUSB0",
+			ControlPortName: "/dev/ttyUSB0",
+			BaudRate:        115200,
+			DataBits:        8,
+			StopBits:        1,
+			Parity:          "none",
+		}, "zh-CN")
+		startDone <- startResult{response: response, err: startErr}
+	}()
+
+	select {
+	case <-waitStarted:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for GPS startup delay")
+	}
+	_ = svc.Stop("zh-CN")
+	select {
+	case result := <-startDone:
+		if result.err != nil {
+			t.Fatalf("Start() error = %v", result.err)
+		}
+		if result.response.State != "inactive" || result.response.Active {
+			t.Fatalf("Start() response after cancellation = %+v, want inactive", result.response)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("Start() did not return after GPS session cancellation")
+	}
+
+	assertPortWrites(t, port, startGPSCommand)
+	assertCloseCount(t, port, 1)
+}
+
+func TestStartSendsGPSStartupCommandsOnlyWhenControlPortChanges(t *testing.T) {
+	tr, err := i18n.New("zh-CN")
+	if err != nil {
+		t.Fatalf("i18n.New() error = %v", err)
+	}
+	svc := NewService(
+		store.NewMemoryStore(10, 10),
+		tr,
+		settings.NewStore(filepath.Join(t.TempDir(), "settings.json")),
+		Options{},
+	)
+	svc.waitStartupDelay = func(_ context.Context, _ time.Duration) bool {
+		return true
+	}
+
+	var openedMu sync.Mutex
+	opened := map[string][]*fakeSerialPort{}
+	svc.SetSerialOpener(func(cfg *serialport.Config) (serial.Port, error) {
+		port := newFakeSerialPort()
+		openedMu.Lock()
+		opened[cfg.PortName] = append(opened[cfg.PortName], port)
+		openedMu.Unlock()
+		return port, nil
+	})
+
+	first := model.GPSSessionRequest{
+		DataPortName:    "/dev/ttyUSB1",
+		ControlPortName: "/dev/ttyUSB2",
+		BaudRate:        115200,
+		DataBits:        8,
+		StopBits:        1,
+		Parity:          "none",
+	}
+	if _, err := svc.Start(first, "zh-CN"); err != nil {
+		t.Fatalf("first Start() error = %v", err)
+	}
+
+	sameControlPort := first
+	sameControlPort.DataPortName = "/dev/ttyUSB3"
+	if _, err := svc.Start(sameControlPort, "zh-CN"); err != nil {
+		t.Fatalf("same-control Start() error = %v", err)
+	}
+
+	newControlPort := sameControlPort
+	newControlPort.ControlPortName = "/dev/ttyUSB4"
+	if _, err := svc.Start(newControlPort, "zh-CN"); err != nil {
+		t.Fatalf("new-control Start() error = %v", err)
+	}
+
+	openedMu.Lock()
+	controlPorts := append([]*fakeSerialPort(nil), opened["/dev/ttyUSB2"]...)
+	newControlPorts := append([]*fakeSerialPort(nil), opened["/dev/ttyUSB4"]...)
+	dataPorts := append([]*fakeSerialPort(nil), opened["/dev/ttyUSB3"]...)
+	openedMu.Unlock()
+	if len(controlPorts) != 1 {
+		t.Fatalf("original control port open count = %d, want 1", len(controlPorts))
+	}
+	if len(newControlPorts) != 1 {
+		t.Fatalf("new control port open count = %d, want 1", len(newControlPorts))
+	}
+	assertPortWrites(t, controlPorts[0], startGPSCommand, startGPSDataCommand, startGPSPowerCommand)
+	assertPortWrites(t, newControlPorts[0], startGPSCommand, startGPSDataCommand, startGPSPowerCommand)
+	for _, port := range dataPorts {
+		assertPortWrites(t, port)
+	}
+
+	_ = svc.Stop("zh-CN")
+}
+
+func TestReconnectDoesNotResendGPSStartupCommandsAfterSuccessfulInitialization(t *testing.T) {
+	tr, err := i18n.New("zh-CN")
+	if err != nil {
+		t.Fatalf("i18n.New() error = %v", err)
+	}
+	svc := NewService(
+		store.NewMemoryStore(10, 10),
+		tr,
+		settings.NewStore(filepath.Join(t.TempDir(), "settings.json")),
+		Options{ReconnectInitialDelay: time.Millisecond, ReconnectMaxDelay: time.Millisecond},
+	)
+	svc.waitStartupDelay = func(_ context.Context, _ time.Duration) bool {
+		return true
+	}
+
+	var openerMu sync.Mutex
+	var controlPorts []*fakeSerialPort
+	dataOpenCount := 0
+	reconnected := make(chan *fakeSerialPort, 1)
+	svc.SetSerialOpener(func(cfg *serialport.Config) (serial.Port, error) {
+		switch cfg.PortName {
+		case "/dev/ttyUSB2":
+			port := newFakeSerialPort()
+			openerMu.Lock()
+			controlPorts = append(controlPorts, port)
+			openerMu.Unlock()
+			return port, nil
+		case "/dev/ttyUSB1":
+			openerMu.Lock()
+			dataOpenCount++
+			attempt := dataOpenCount
+			openerMu.Unlock()
+			if attempt == 1 {
+				return nil, errors.New("data port unavailable")
+			}
+			port := newFakeSerialPort()
+			reconnected <- port
+			return port, nil
+		default:
+			return nil, errors.New("unexpected port")
+		}
+	})
+
+	resp, err := svc.Start(model.GPSSessionRequest{
+		DataPortName:    "/dev/ttyUSB1",
+		ControlPortName: "/dev/ttyUSB2",
+		BaudRate:        115200,
+		DataBits:        8,
+		StopBits:        1,
+		Parity:          "none",
+	}, "zh-CN")
+	if err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+	if resp.Active {
+		t.Fatal("expected initial data-port connection to fail")
+	}
+
+	select {
+	case <-reconnected:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for data-port reconnect")
+	}
+	openerMu.Lock()
+	gotControlPorts := append([]*fakeSerialPort(nil), controlPorts...)
+	gotDataOpenCount := dataOpenCount
+	openerMu.Unlock()
+	if len(gotControlPorts) != 1 {
+		t.Fatalf("control port open count = %d, want 1", len(gotControlPorts))
+	}
+	if gotDataOpenCount != 2 {
+		t.Fatalf("data port open count = %d, want 2", gotDataOpenCount)
+	}
+	assertPortWrites(t, gotControlPorts[0], startGPSCommand, startGPSDataCommand, startGPSPowerCommand)
+
+	_ = svc.Stop("zh-CN")
+}
+
+func TestSendGPSStartCommandsFollowsConfiguredSequence(t *testing.T) {
+	port := newFakeSerialPort()
+	events := []string{}
+	port.onWrite = func(command string) {
+		events = append(events, "write:"+command)
+	}
+
+	err := sendGPSStartCommands(context.Background(), port, func(_ context.Context, delay time.Duration) bool {
+		events = append(events, "sleep:"+delay.String())
+		return true
+	})
+	if err != nil {
+		t.Fatalf("sendGPSStartCommands() error = %v", err)
+	}
+
+	want := []string{
+		"write:AT+QGPS=1\r\n",
+		"sleep:2s",
+		"write:AT+QNETDEVCTL=1,1,1\r\n",
+		"sleep:3s",
+		"write:at+qgpspower=1\r\n",
+	}
+	if !slices.Equal(events, want) {
+		t.Fatalf("startup sequence = %q, want %q", events, want)
+	}
+}
+
+func TestSendGPSStartCommandsStopsAfterWriteFailure(t *testing.T) {
+	port := newFakeSerialPort()
+	writeErr := errors.New("write failed")
+	port.writeErrAt = 2
+	port.writeErr = writeErr
+	delays := []time.Duration{}
+
+	err := sendGPSStartCommands(context.Background(), port, func(_ context.Context, delay time.Duration) bool {
+		delays = append(delays, delay)
+		return true
+	})
+	if !errors.Is(err, writeErr) {
+		t.Fatalf("sendGPSStartCommands() error = %v, want %v", err, writeErr)
+	}
+	if !strings.Contains(err.Error(), strings.TrimSpace(startGPSDataCommand)) {
+		t.Fatalf("sendGPSStartCommands() error = %q, want failed command", err)
+	}
+	assertPortWrites(t, port, startGPSCommand)
+	if want := []time.Duration{startGPSDataCommandDelay}; !slices.Equal(delays, want) {
+		t.Fatalf("command delays = %v, want %v", delays, want)
+	}
+}
+
+func TestSendGPSStartCommandsStopsWhenContextCanceled(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	port := newFakeSerialPort()
+	port.onWrite = func(command string) {
+		if command == startGPSCommand {
+			cancel()
+		}
+	}
+
+	err := sendGPSStartCommands(ctx, port, nil)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("sendGPSStartCommands() error = %v, want context cancellation", err)
+	}
+	assertPortWrites(t, port, startGPSCommand)
 }
 
 func TestIngestLineParsesGGAAndRMC(t *testing.T) {

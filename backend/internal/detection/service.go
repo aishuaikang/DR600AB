@@ -62,13 +62,14 @@ type DirectionSwitch interface {
 }
 
 const (
-	startDetectionCommand    = "start -freq 1, -pathb 1, -gain 60"
-	screenDirectionEventType = "screen.direction.updated"
-	maxDirectionFrequencyMHz = 10000
-	defaultRxBaudRate        = 115200
-	defaultTxBaudRate        = 460800
-	defaultBaudRate          = defaultRxBaudRate
-	defaultO3DecryptWorkers  = 4
+	startDetectionCommand         = "start -freq 1, -pathb 1, -gain 60"
+	screenDirectionEventType      = "screen.direction.updated"
+	maxDirectionFrequencyMHz      = 10000
+	defaultRxBaudRate             = 115200
+	defaultTxBaudRate             = 460800
+	defaultBaudRate               = defaultRxBaudRate
+	defaultO3DecryptWorkers       = 4
+	reservedO3InitialDecryptSlots = 1
 )
 
 type commandControlMode string
@@ -1100,16 +1101,13 @@ func (s *Service) ingestScreenPosition(ctx context.Context, parsed model.ParsedM
 			target.CorrelationID = correlationID
 			s.store.AddScreenPosition(target)
 		}
-		if cracked {
-			return
-		}
 		s.mu.RLock()
 		decoder := s.o3Decoder
 		s.mu.RUnlock()
 		if decoder == nil {
 			return
 		}
-		release, ok := s.acquireO3Decrypt(ctx, correlationID)
+		release, ok := s.acquireO3Decrypt(ctx, correlationID, cracked)
 		if !ok {
 			return
 		}
@@ -1144,7 +1142,7 @@ func (s *Service) ingestScreenPosition(ctx context.Context, parsed model.ParsedM
 	}
 }
 
-func (s *Service) acquireO3Decrypt(ctx context.Context, correlationID string) (func(), bool) {
+func (s *Service) acquireO3Decrypt(ctx context.Context, correlationID string, refresh bool) (func(), bool) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -1160,6 +1158,10 @@ func (s *Service) acquireO3Decrypt(ctx context.Context, correlationID string) (f
 	s.o3Mu.Lock()
 	defer s.o3Mu.Unlock()
 	if _, ok := s.o3Active[correlationID]; ok {
+		return nil, false
+	}
+	refreshLimit := cap(s.o3Slots) - reservedO3InitialDecryptSlots
+	if refresh && len(s.o3Slots) >= refreshLimit {
 		return nil, false
 	}
 	select {
