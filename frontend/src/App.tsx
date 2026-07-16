@@ -23,6 +23,7 @@ import {
   getSession,
   getUserSettings,
   openDetectionStream,
+  openGPSStream,
   sendDetectionCommand,
   setChannelState,
   setLicenseInvalidHandler,
@@ -171,7 +172,7 @@ function App() {
   const licenseInvalid = license !== null && !licenseValid;
   const licenseRecoveryMode = licenseInvalid && !license.deviceSn;
   const debugAccessBlocked = licenseValid && !developerActive && isDebugPage(page);
-  const needsRuntimeData = licenseValid && page !== "screen" && page !== "settings" && page !== "network-settings" && page !== "whitelist" && page !== "intrusions" && page !== "fpv-records" && page !== "deception-reports" && !debugAccessBlocked;
+  const needsRuntimeData = licenseValid && page !== "screen" && page !== "settings" && page !== "network-settings" && page !== "whitelist" && page !== "intrusions" && page !== "fpv-records" && page !== "deception-reports" && page !== "gps-records" && !debugAccessBlocked;
   const needsSerialRecoveryData = licenseRecoveryMode;
   const serialSettingsEnabled = needsRuntimeData || needsSerialRecoveryData;
   const deceptionReportsVisible = licenseValid ? adminScreenStatus?.deception.configured !== false : false;
@@ -336,7 +337,7 @@ function App() {
         getLocales(),
         getPorts(locale, developerToken),
         getSession(locale, developerToken),
-        getGPSSession(locale, developerToken),
+        getGPSSession(locale),
         getDeceptionSession(locale, developerToken),
         getCompassSession(locale, developerToken),
         getDetectionSettings(locale, developerToken),
@@ -385,22 +386,22 @@ function App() {
   }, [developerActive, developerToken, locale, syncCompassSelection, syncDeceptionSelection, syncGPSSelection, syncSerialSelection, t]);
 
   const loadGPSRecords = useCallback(async () => {
-    if (!developerActive) {
-      setGPSRecords([]);
-      return;
-    }
     setGPSRecordsLoading(true);
     setGPSRecordsBanner({ kind: "loading", message: t("loading", { ns: "common" }) });
     try {
-      const response = await getGPSRecords(locale, developerToken, 200);
-      setGPSRecords(response.items);
+      const [sessionResponse, recordsResponse] = await Promise.all([
+        getGPSSession(locale),
+        getGPSRecords(locale, 200),
+      ]);
+      setGPSSession(sessionResponse);
+      setGPSRecords(recordsResponse.items);
       setGPSRecordsBanner({ kind: "idle", message: "" });
     } catch (error) {
       setGPSRecordsBanner({ kind: "error", message: extractErrorMessage(error, t("unexpectedError", { ns: "common" })) });
     } finally {
       setGPSRecordsLoading(false);
     }
-  }, [developerActive, developerToken, locale, t]);
+  }, [locale, t]);
 
   const loadUserSettings = useCallback(async () => {
     try {
@@ -518,11 +519,41 @@ function App() {
   }, [bootstrap, needsRuntimeData]);
 
   useEffect(() => {
-    if (!licenseValid || page !== "gps-records" || !developerActive) {
+    if (!licenseValid || page !== "gps-records") {
       return;
     }
     void loadGPSRecords();
-  }, [developerActive, licenseValid, loadGPSRecords, page]);
+  }, [licenseValid, loadGPSRecords, page]);
+
+  useEffect(() => {
+    if (!licenseValid || page !== "gps-records") {
+      return;
+    }
+    return openGPSStream(locale, {
+      onSessionStarted: (event) => {
+        if (event.payload) setGPSSession(event.payload);
+      },
+      onSessionStopped: (event) => {
+        if (event.payload) setGPSSession(event.payload);
+      },
+      onSessionState: (event) => {
+        if (event.payload) setGPSSession(event.payload);
+      },
+      onRecord: (event) => {
+        if (!event.payload) return;
+        setGPSSession((current) => current ? {
+          ...current,
+          lastNmea: event.payload!.raw,
+          lastFix: event.payload!.fix ?? current.lastFix,
+          lastRecord: event.payload!,
+        } : current);
+        setGPSRecords((items) => dedupeGPSRecords(items, event.payload!, 200));
+      },
+      onError: (error) => {
+        setGPSRecordsBanner({ kind: "error", message: error.message });
+      },
+    });
+  }, [licenseValid, locale, page]);
 
   useEffect(() => {
     if (!licenseValid || page !== "interference" || !developerActive) {
@@ -1191,7 +1222,7 @@ function App() {
                   ) : null
                 ) : null}
 
-                {page === "gps-records" && developerActive ? (
+                {page === "gps-records" ? (
                   <GPSRecordsPage
                     records={gpsRecords}
                     banner={gpsRecordsBanner}

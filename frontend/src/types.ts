@@ -146,6 +146,49 @@ export interface GPSRecord {
   type: string;
   raw: string;
   fix?: GPSFix;
+  details?: NMEADetails;
+}
+
+export interface NMEASatellite {
+  id: string;
+  elevation?: number;
+  azimuth?: number;
+  signalDbHz?: number;
+}
+
+export interface NMEADetails {
+  talker?: string;
+  sentence: string;
+  utcTime?: string;
+  utcDate?: string;
+  status?: string;
+  mode?: string;
+  navigationStatus?: string;
+  fixType?: number;
+  fixQuality?: number;
+  satellitesUsed?: number;
+  satelliteIds?: string[];
+  totalSatellites?: number;
+  totalMessages?: number;
+  messageNumber?: number;
+  signalId?: string;
+  satellites?: NMEASatellite[];
+  latitude?: number;
+  longitude?: number;
+  altitudeM?: number;
+  geoidSeparationM?: number;
+  speedKnots?: number;
+  speedKph?: number;
+  courseTrue?: number;
+  courseMagnetic?: number;
+  pdop?: number;
+  hdop?: number;
+  vdop?: number;
+  differentialAgeSec?: number;
+  differentialStation?: string;
+  checksum?: string;
+  calculatedChecksum?: string;
+  checksumValid?: boolean;
 }
 
 export interface CompassSessionRequest {
@@ -1048,6 +1091,14 @@ export interface StreamHandlers {
   onParsed?: (event: EventMessage<ParsedMessage>) => void;
   onDetection?: (event: EventMessage<DetectionRecord>) => void;
   onChannelUpdated?: (event: EventMessage<GpioChannel>) => void;
+  onError?: (error: Error) => void;
+}
+
+export interface GPSStreamHandlers {
+  onSessionStarted?: (event: EventMessage<GPSSessionResponse>) => void;
+  onSessionStopped?: (event: EventMessage<GPSSessionResponse>) => void;
+  onSessionState?: (event: EventMessage<GPSSessionResponse>) => void;
+  onRecord?: (event: EventMessage<GPSRecord>) => void;
   onError?: (error: Error) => void;
 }
 

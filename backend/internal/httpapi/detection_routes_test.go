@@ -10,10 +10,53 @@ import (
 	"go.bug.st/serial"
 
 	"dr600ab-api/internal/detection"
+	"dr600ab-api/internal/gps"
 	"dr600ab-api/internal/model"
 	"dr600ab-api/internal/store"
 	"serialport"
 )
+
+func TestGPSReadRoutesAllowLicensedUserWithoutDeveloperSession(t *testing.T) {
+	translator := mustTranslator(t)
+	memoryStore := store.NewMemoryStore(10, 10)
+	gpsSvc := gps.NewService(memoryStore, translator, nil, gps.Options{})
+	gpsSvc.IngestLine(
+		"gps-user",
+		"/dev/ttyGPS0",
+		"$GNGGA,013909.00,,,,,0,00,99.99,,,,,,*7A",
+	)
+	server := &Server{
+		app:        fiber.New(),
+		translator: translator,
+		gps:        gpsSvc,
+		detection:  detection.NewService(memoryStore, translator, nil, detection.Options{}),
+	}
+	server.registerGPSReadRoutes(server.app.Group("/api/v1"))
+
+	tests := []struct {
+		name string
+		path string
+	}{
+		{name: "session", path: "/api/v1/gps/session"},
+		{name: "records", path: "/api/v1/gps/records"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req, err := http.NewRequest(http.MethodGet, tt.path, nil)
+			if err != nil {
+				t.Fatalf("NewRequest(%q) error = %v", tt.path, err)
+			}
+			resp, err := server.app.Test(req)
+			if err != nil {
+				t.Fatalf("app.Test(%q) error = %v", tt.path, err)
+			}
+			defer resp.Body.Close()
+			if resp.StatusCode != http.StatusOK {
+				t.Fatalf("GET %s status = %d, want %d", tt.path, resp.StatusCode, http.StatusOK)
+			}
+		})
+	}
+}
 
 func TestHandleSendDetectionCommandWritesToTXPort(t *testing.T) {
 	translator := mustTranslator(t)

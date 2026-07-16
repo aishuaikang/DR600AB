@@ -30,6 +30,7 @@ func (s *Server) routes() {
 	s.registerDetectionRecoveryRoutes(api)
 
 	protected := api.Group("", s.requireLicense)
+	s.registerGPSReadRoutes(protected)
 	s.registerDetectionSessionRoutes(protected)
 	s.registerDetectionRecordRoutes(protected)
 	s.registerIntrusionRoutes(protected)

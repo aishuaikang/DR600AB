@@ -28,24 +28,26 @@ func (s *Server) registerDetectionRecoveryRoutes(api fiber.Router) {
 // registerDetectionSessionRoutes 挂载授权后可用的设备会话配置接口。
 func (s *Server) registerDetectionSessionRoutes(api fiber.Router) {
 	api.Get("/gps/settings", s.handleGPSSettings)
-	api.Get("/gps/session", s.handleCurrentGPSSession)
 	api.Put("/gps/settings", s.handleUpdateGPSSettings)
 }
 
 func (s *Server) registerDetectionRecordRoutes(api fiber.Router) {
-	api.Get("/gps/records", s.handleGPSRecords)
 	api.Get("/detection/stream", s.handleStream)
 	api.Get("/detection/records", s.handleDetectionRecords)
 	api.Post("/detection/commands", s.handleSendDetectionCommand)
 	api.Get("/parsed/records", s.handleParsedRecords)
 }
 
+// registerGPSReadRoutes 挂载普通授权用户可访问的 GPS 只读接口。
+func (s *Server) registerGPSReadRoutes(api fiber.Router) {
+	api.Get("/gps/session", s.handleCurrentGPSSession)
+	api.Get("/gps/records", s.handleGPSRecords)
+	api.Get("/gps/stream", s.handleGPSStream)
+}
+
 // handleCurrentGPSSession 返回当前 GPS 会话响应。
 func (s *Server) handleCurrentGPSSession(c *fiber.Ctx) error {
 	locale := s.resolveLocale(c)
-	if !s.requireDeveloper(c, locale) {
-		return nil
-	}
 	return c.JSON(s.gps.Current(locale))
 }
 
@@ -110,10 +112,6 @@ func (s *Server) handleUpdateGPSSettings(c *fiber.Ctx) error {
 
 // handleGPSRecords 返回最新 GPS NMEA 记录。
 func (s *Server) handleGPSRecords(c *fiber.Ctx) error {
-	locale := s.resolveLocale(c)
-	if !s.requireDeveloper(c, locale) {
-		return nil
-	}
 	items := s.gps.Records(parseLimit(c, 100))
 	return c.JSON(model.ListResponse[model.GPSRecord]{
 		Items: items,

@@ -112,12 +112,57 @@ type GPSFix struct {
 
 // GPSRecord 保存一条 GPS NMEA 0183 原始数据及其解析结果。
 type GPSRecord struct {
-	SessionID  string    `json:"sessionId"`
-	PortName   string    `json:"portName"`
-	ReceivedAt time.Time `json:"receivedAt"`
-	Type       string    `json:"type"`
-	Raw        string    `json:"raw"`
-	Fix        *GPSFix   `json:"fix,omitempty"`
+	SessionID  string       `json:"sessionId"`
+	PortName   string       `json:"portName"`
+	ReceivedAt time.Time    `json:"receivedAt"`
+	Type       string       `json:"type"`
+	Raw        string       `json:"raw"`
+	Fix        *GPSFix      `json:"fix,omitempty"`
+	Details    *NMEADetails `json:"details,omitempty"`
+}
+
+// NMEASatellite 描述 GSV 报文中的单颗卫星状态。
+type NMEASatellite struct {
+	ID         string `json:"id"`
+	Elevation  *int   `json:"elevation,omitempty"`
+	Azimuth    *int   `json:"azimuth,omitempty"`
+	SignalDBHz *int   `json:"signalDbHz,omitempty"`
+}
+
+// NMEADetails 保存常用 NMEA 0183 语句的结构化状态。
+type NMEADetails struct {
+	Talker              string          `json:"talker,omitempty"`
+	Sentence            string          `json:"sentence"`
+	UTCTime             string          `json:"utcTime,omitempty"`
+	UTCDate             string          `json:"utcDate,omitempty"`
+	Status              string          `json:"status,omitempty"`
+	Mode                string          `json:"mode,omitempty"`
+	NavigationStatus    string          `json:"navigationStatus,omitempty"`
+	FixType             *int            `json:"fixType,omitempty"`
+	FixQuality          *int            `json:"fixQuality,omitempty"`
+	SatellitesUsed      *int            `json:"satellitesUsed,omitempty"`
+	SatelliteIDs        []string        `json:"satelliteIds,omitempty"`
+	TotalSatellites     *int            `json:"totalSatellites,omitempty"`
+	TotalMessages       *int            `json:"totalMessages,omitempty"`
+	MessageNumber       *int            `json:"messageNumber,omitempty"`
+	SignalID            string          `json:"signalId,omitempty"`
+	Satellites          []NMEASatellite `json:"satellites,omitempty"`
+	Latitude            *float64        `json:"latitude,omitempty"`
+	Longitude           *float64        `json:"longitude,omitempty"`
+	AltitudeM           *float64        `json:"altitudeM,omitempty"`
+	GeoidSeparationM    *float64        `json:"geoidSeparationM,omitempty"`
+	SpeedKnots          *float64        `json:"speedKnots,omitempty"`
+	SpeedKPH            *float64        `json:"speedKph,omitempty"`
+	CourseTrue          *float64        `json:"courseTrue,omitempty"`
+	CourseMagnetic      *float64        `json:"courseMagnetic,omitempty"`
+	PDOP                *float64        `json:"pdop,omitempty"`
+	HDOP                *float64        `json:"hdop,omitempty"`
+	VDOP                *float64        `json:"vdop,omitempty"`
+	DifferentialAgeSec  *float64        `json:"differentialAgeSec,omitempty"`
+	DifferentialStation string          `json:"differentialStation,omitempty"`
+	Checksum            string          `json:"checksum,omitempty"`
+	CalculatedChecksum  string          `json:"calculatedChecksum,omitempty"`
+	ChecksumValid       *bool           `json:"checksumValid,omitempty"`
 }
 
 // GeoPoint 描述 WGS84 经纬度坐标。

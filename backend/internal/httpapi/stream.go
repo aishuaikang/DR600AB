@@ -52,6 +52,49 @@ func (s *Server) handleStream(c *fiber.Ctx) error {
 	return nil
 }
 
+// handleGPSStream 保持 GPS 只读事件流开启，只推送 GPS 会话和数据事件。
+func (s *Server) handleGPSStream(c *fiber.Ctx) error {
+	ctx := c.Context()
+
+	c.Set(fiber.HeaderContentType, "text/event-stream")
+	c.Set(fiber.HeaderCacheControl, "no-cache")
+	c.Set(fiber.HeaderConnection, "keep-alive")
+	c.Context().SetBodyStreamWriter(func(w *bufio.Writer) {
+		events, unsubscribe := s.detection.Subscribe(s.cfg.EventBufferSize)
+		defer unsubscribe()
+
+		_ = writeComment(w, "connected")
+		ticker := time.NewTicker(15 * time.Second)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case evt, ok := <-events:
+				if !ok {
+					return
+				}
+				if evt.Type != "gps.session.started" &&
+					evt.Type != "gps.session.stopped" &&
+					evt.Type != "gps.session.connecting" &&
+					evt.Type != "gps.session.reconnecting" &&
+					evt.Type != "gps.record" {
+					continue
+				}
+				if err := writeEvent(w, evt); err != nil {
+					return
+				}
+			case <-ticker.C:
+				if err := writeComment(w, "ping"); err != nil {
+					return
+				}
+			case <-ctx.Done():
+				return
+			}
+		}
+	})
+	return nil
+}
+
 // handleScreenStream 保持大屏公开只读事件流开启，只推送大屏相关事件。
 func (s *Server) handleScreenStream(c *fiber.Ctx) error {
 	ctx := c.Context()

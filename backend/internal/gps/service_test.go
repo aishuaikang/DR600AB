@@ -492,7 +492,7 @@ func TestIngestLineParsesGGAAndRMC(t *testing.T) {
 	svc := NewService(st, tr, settings.NewStore(filepath.Join(t.TempDir(), "settings.json")), Options{})
 
 	svc.IngestLine("gps-1", "/dev/ttyUSB1", "$GPGGA,092750.000,5321.6802,N,00630.3372,W,1,8,1.03,61.7,M,55.2,M,,*76")
-	svc.IngestLine("gps-1", "/dev/ttyUSB1", "$GPRMC,092751.000,A,5321.6803,N,00630.3373,W,0.13,309.62,120598,,,A*10")
+	svc.IngestLine("gps-1", "/dev/ttyUSB1", "$GPRMC,092751.000,A,5321.6803,N,00630.3373,W,0.13,309.62,120598,,,A*76")
 
 	records := svc.Records(10)
 	if len(records) != 2 {
@@ -506,6 +506,121 @@ func TestIngestLineParsesGGAAndRMC(t *testing.T) {
 	}
 	assertClose(t, records[0].Fix.Latitude, 53.3613383333)
 	assertClose(t, records[0].Fix.Longitude, -6.5056216667)
+}
+
+func TestParseNMEADetails(t *testing.T) {
+	tests := []struct {
+		name   string
+		raw    string
+		assert func(*testing.T, *model.NMEADetails)
+	}{
+		{
+			name: "RMC reports invalid positioning state",
+			raw:  "$GNRMC,013909.00,V,,,,,,,160726,,,N,V*1F",
+			assert: func(t *testing.T, details *model.NMEADetails) {
+				t.Helper()
+				if details.Talker != "GN" || details.Status != "V" || details.UTCDate != "160726" {
+					t.Fatalf("RMC details = %+v", details)
+				}
+				if details.Latitude != nil || details.Longitude != nil {
+					t.Fatalf("RMC coordinates = %v, %v, want nil", details.Latitude, details.Longitude)
+				}
+			},
+		},
+		{
+			name: "GGA reports fix quality and dilution",
+			raw:  "$GNGGA,013909.00,,,,,0,00,99.99,,,,,,*7A",
+			assert: func(t *testing.T, details *model.NMEADetails) {
+				t.Helper()
+				if details.FixQuality == nil || *details.FixQuality != 0 {
+					t.Fatalf("GGA fix quality = %v, want 0", details.FixQuality)
+				}
+				if details.SatellitesUsed == nil || *details.SatellitesUsed != 0 {
+					t.Fatalf("GGA satellites used = %v, want 0", details.SatellitesUsed)
+				}
+				if details.HDOP == nil || *details.HDOP != 99.99 {
+					t.Fatalf("GGA HDOP = %v, want 99.99", details.HDOP)
+				}
+			},
+		},
+		{
+			name: "GSA reports fix mode and system",
+			raw:  "$GNGSA,A,1,,,,,,,,,,,,,99.99,99.99,99.99,4*36",
+			assert: func(t *testing.T, details *model.NMEADetails) {
+				t.Helper()
+				if details.Mode != "A" || details.FixType == nil || *details.FixType != 1 || details.SignalID != "4" {
+					t.Fatalf("GSA details = %+v", details)
+				}
+			},
+		},
+		{
+			name: "GSV reports visible satellites and signal strength",
+			raw:  "$GPGSV,4,1,14,05,42,259,31,06,39,067,,11,56,009,23,12,27,257,20,0*68",
+			assert: func(t *testing.T, details *model.NMEADetails) {
+				t.Helper()
+				if details.TotalMessages == nil || *details.TotalMessages != 4 || details.TotalSatellites == nil || *details.TotalSatellites != 14 {
+					t.Fatalf("GSV totals = %+v", details)
+				}
+				if len(details.Satellites) != 4 || details.Satellites[0].ID != "05" {
+					t.Fatalf("GSV satellites = %+v", details.Satellites)
+				}
+				if details.Satellites[0].SignalDBHz == nil || *details.Satellites[0].SignalDBHz != 31 {
+					t.Fatalf("GSV first signal = %+v", details.Satellites[0])
+				}
+			},
+		},
+		{
+			name: "VTG reports unavailable motion mode",
+			raw:  "$GNVTG,,,,,,,,,N*2E",
+			assert: func(t *testing.T, details *model.NMEADetails) {
+				t.Helper()
+				if details.Mode != "N" || details.SpeedKnots != nil || details.CourseTrue != nil {
+					t.Fatalf("VTG details = %+v", details)
+				}
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			details := parseNMEADetails(tt.raw)
+			if details == nil {
+				t.Fatal("parseNMEADetails() = nil")
+			}
+			if details.ChecksumValid == nil || !*details.ChecksumValid {
+				t.Fatalf("checksum = %q, calculated = %q, valid = %v", details.Checksum, details.CalculatedChecksum, details.ChecksumValid)
+			}
+			tt.assert(t, details)
+		})
+	}
+}
+
+func TestParseNMEARejectsInvalidChecksum(t *testing.T) {
+	tests := []struct {
+		name string
+		raw  string
+	}{
+		{
+			name: "GGA",
+			raw:  "$GNGGA,020103.00,2811.59746,N,11700.50221,E,1,04,15.52,19.3,M,,M,,*00",
+		},
+		{
+			name: "RMC",
+			raw:  "$GNRMC,020105.00,A,2811.60221,N,11700.50056,E,0.000,,160726,,,A,V*00",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			details := parseNMEADetails(tt.raw)
+			if details == nil || details.ChecksumValid == nil || *details.ChecksumValid {
+				t.Fatalf("checksum details = %+v, want invalid checksum", details)
+			}
+			if fix := parseNMEA(tt.raw); fix != nil {
+				t.Fatalf("parseNMEA() = %+v, want nil", fix)
+			}
+		})
+	}
 }
 
 func TestSettingsStoreKeepsDetectionAndGPS(t *testing.T) {

@@ -32,6 +32,7 @@ import type {
   GpioChannelStateRequest,
   GpioChannelStateResponse,
   GPSRecord,
+  GPSStreamHandlers,
   GPSSessionRequest,
   GPSSessionResponse,
   GPSSettings,
@@ -220,10 +221,8 @@ export function updateDetectionSettings(
   }, locale);
 }
 
-export function getGPSSession(locale: string, developerToken: string): Promise<GPSSessionResponse> {
-  return requestJson<GPSSessionResponse>("/gps/session", {
-    headers: developerHeaders(developerToken),
-  }, locale);
+export function getGPSSession(locale: string): Promise<GPSSessionResponse> {
+  return requestJson<GPSSessionResponse>("/gps/session", {}, locale);
 }
 
 export function getGPSSettings(locale: string, developerToken: string): Promise<GPSSettings> {
@@ -330,10 +329,8 @@ export function sendDetectionCommand(
   }, locale);
 }
 
-export function getGPSRecords(locale: string, developerToken: string, limit = 200): Promise<ListResponse<GPSRecord>> {
-  return requestJson<ListResponse<GPSRecord>>(`/gps/records?limit=${limit}`, {
-    headers: developerHeaders(developerToken),
-  }, locale);
+export function getGPSRecords(locale: string, limit = 200): Promise<ListResponse<GPSRecord>> {
+  return requestJson<ListResponse<GPSRecord>>(`/gps/records?limit=${limit}`, {}, locale);
 }
 
 export function getCompassRecords(
@@ -757,6 +754,38 @@ export function openDetectionStream(locale: string, developerToken: string, hand
     if (source.readyState === EventSource.CLOSED) {
       const t = i18n.getFixedT(locale, "common");
       handlers.onError?.(new Error(t("stream.detectionDisconnected")));
+    }
+  };
+
+  return () => source.close();
+}
+
+export function openGPSStream(locale: string, handlers: GPSStreamHandlers): () => void {
+  const params = new URLSearchParams({ locale });
+  const source = new EventSource(`${API_PREFIX}/gps/stream?${params.toString()}`);
+
+  const bind = <T,>(type: string, handler?: (event: EventMessage<T>) => void) => {
+    if (!handler) {
+      return;
+    }
+    source.addEventListener(type, (message) => {
+      const event = parseStreamEvent<T>((message as MessageEvent<string>).data);
+      if (event) {
+        handler(event);
+      }
+    });
+  };
+
+  bind("gps.session.started", handlers.onSessionStarted);
+  bind("gps.session.stopped", handlers.onSessionStopped);
+  bind("gps.session.connecting", handlers.onSessionState);
+  bind("gps.session.reconnecting", handlers.onSessionState);
+  bind("gps.record", handlers.onRecord);
+
+  source.onerror = () => {
+    if (source.readyState === EventSource.CLOSED) {
+      const translate = i18n.getFixedT(locale, "common");
+      handlers.onError?.(new Error(translate("stream.detectionDisconnected")));
     }
   };
 

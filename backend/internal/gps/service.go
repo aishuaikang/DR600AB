@@ -325,6 +325,7 @@ func (s *Service) IngestLine(sessionID, portName, line string) {
 		Type:       nmeaSentenceType(raw),
 		Raw:        raw,
 		Fix:        parseNMEA(raw),
+		Details:    parseNMEADetails(raw),
 	}
 	s.store.AddGPS(record)
 	s.updateLastRecord(sessionID, record)
@@ -806,6 +807,9 @@ func nmeaSentenceType(raw string) string {
 }
 
 func parseNMEA(raw string) *model.GPSFix {
+	if !hasValidNMEAChecksum(raw) {
+		return nil
+	}
 	fields := splitNMEAFields(raw)
 	if len(fields) == 0 {
 		return nil
@@ -819,6 +823,181 @@ func parseNMEA(raw string) *model.GPSFix {
 	default:
 		return nil
 	}
+}
+
+func hasValidNMEAChecksum(raw string) bool {
+	details := &model.NMEADetails{}
+	parseNMEAChecksum(raw, details)
+	return details.ChecksumValid == nil || *details.ChecksumValid
+}
+
+func parseNMEADetails(raw string) *model.NMEADetails {
+	fields := splitNMEAFields(raw)
+	if len(fields) == 0 {
+		return nil
+	}
+
+	header := strings.TrimSpace(fields[0])
+	sentence := nmeaSentenceType(raw)
+	talker := ""
+	if len(header) > len(sentence) {
+		talker = header[:len(header)-len(sentence)]
+	}
+	details := &model.NMEADetails{
+		Talker:       talker,
+		Sentence:     sentence,
+		SatelliteIDs: []string{},
+		Satellites:   []model.NMEASatellite{},
+	}
+	parseNMEAChecksum(raw, details)
+
+	switch sentence {
+	case "RMC":
+		parseRMCDetails(fields, details)
+	case "GGA":
+		parseGGADetails(fields, details)
+	case "GSA":
+		parseGSADetails(fields, details)
+	case "GSV":
+		parseGSVDetails(fields, details)
+	case "VTG":
+		parseVTGDetails(fields, details)
+	}
+	return details
+}
+
+func parseRMCDetails(fields []string, details *model.NMEADetails) {
+	details.UTCTime = fieldAt(fields, 1)
+	details.Status = fieldAt(fields, 2)
+	details.Latitude, details.Longitude = parseCoordinatePointers(
+		fieldAt(fields, 3),
+		fieldAt(fields, 4),
+		fieldAt(fields, 5),
+		fieldAt(fields, 6),
+	)
+	details.SpeedKnots = parseOptionalFloat(fieldAt(fields, 7))
+	details.CourseTrue = parseOptionalFloat(fieldAt(fields, 8))
+	details.UTCDate = fieldAt(fields, 9)
+	details.Mode = fieldAt(fields, 12)
+	details.NavigationStatus = fieldAt(fields, 13)
+}
+
+func parseGGADetails(fields []string, details *model.NMEADetails) {
+	details.UTCTime = fieldAt(fields, 1)
+	details.Latitude, details.Longitude = parseCoordinatePointers(
+		fieldAt(fields, 2),
+		fieldAt(fields, 3),
+		fieldAt(fields, 4),
+		fieldAt(fields, 5),
+	)
+	details.FixQuality = parseOptionalInt(fieldAt(fields, 6))
+	details.SatellitesUsed = parseOptionalInt(fieldAt(fields, 7))
+	details.HDOP = parseOptionalFloat(fieldAt(fields, 8))
+	details.AltitudeM = parseOptionalFloat(fieldAt(fields, 9))
+	details.GeoidSeparationM = parseOptionalFloat(fieldAt(fields, 11))
+	details.DifferentialAgeSec = parseOptionalFloat(fieldAt(fields, 13))
+	details.DifferentialStation = fieldAt(fields, 14)
+}
+
+func parseGSADetails(fields []string, details *model.NMEADetails) {
+	details.Mode = fieldAt(fields, 1)
+	details.FixType = parseOptionalInt(fieldAt(fields, 2))
+	for index := 3; index <= 14; index++ {
+		if id := fieldAt(fields, index); id != "" {
+			details.SatelliteIDs = append(details.SatelliteIDs, id)
+		}
+	}
+	details.PDOP = parseOptionalFloat(fieldAt(fields, 15))
+	details.HDOP = parseOptionalFloat(fieldAt(fields, 16))
+	details.VDOP = parseOptionalFloat(fieldAt(fields, 17))
+	details.SignalID = fieldAt(fields, 18)
+}
+
+func parseGSVDetails(fields []string, details *model.NMEADetails) {
+	details.TotalMessages = parseOptionalInt(fieldAt(fields, 1))
+	details.MessageNumber = parseOptionalInt(fieldAt(fields, 2))
+	details.TotalSatellites = parseOptionalInt(fieldAt(fields, 3))
+	lastSatelliteField := len(fields)
+	if remainder := (len(fields) - 4) % 4; remainder == 1 {
+		lastSatelliteField--
+		details.SignalID = fieldAt(fields, len(fields)-1)
+	}
+	for index := 4; index+3 < lastSatelliteField; index += 4 {
+		id := fieldAt(fields, index)
+		if id == "" {
+			continue
+		}
+		details.Satellites = append(details.Satellites, model.NMEASatellite{
+			ID:         id,
+			Elevation:  parseOptionalInt(fieldAt(fields, index+1)),
+			Azimuth:    parseOptionalInt(fieldAt(fields, index+2)),
+			SignalDBHz: parseOptionalInt(fieldAt(fields, index+3)),
+		})
+	}
+}
+
+func parseVTGDetails(fields []string, details *model.NMEADetails) {
+	details.CourseTrue = parseOptionalFloat(fieldAt(fields, 1))
+	details.CourseMagnetic = parseOptionalFloat(fieldAt(fields, 3))
+	details.SpeedKnots = parseOptionalFloat(fieldAt(fields, 5))
+	details.SpeedKPH = parseOptionalFloat(fieldAt(fields, 7))
+	details.Mode = fieldAt(fields, 9)
+}
+
+func parseNMEAChecksum(raw string, details *model.NMEADetails) {
+	line := strings.TrimSpace(strings.TrimPrefix(raw, "$"))
+	star := strings.LastIndex(line, "*")
+	if star < 0 || star+1 >= len(line) {
+		return
+	}
+	details.Checksum = strings.ToUpper(strings.TrimSpace(line[star+1:]))
+	var checksum byte
+	for index := range star {
+		checksum ^= line[index]
+	}
+	details.CalculatedChecksum = fmt.Sprintf("%02X", checksum)
+	valid := details.Checksum == details.CalculatedChecksum
+	details.ChecksumValid = &valid
+}
+
+func parseCoordinatePointers(latValue, latDirection, lngValue, lngDirection string) (*float64, *float64) {
+	lat, okLat := parseNMEACoordinate(latValue, latDirection)
+	lng, okLng := parseNMEACoordinate(lngValue, lngDirection)
+	if !okLat || !okLng {
+		return nil, nil
+	}
+	return &lat, &lng
+}
+
+func fieldAt(fields []string, index int) string {
+	if index < 0 || index >= len(fields) {
+		return ""
+	}
+	return strings.TrimSpace(fields[index])
+}
+
+func parseOptionalInt(value string) *int {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return nil
+	}
+	parsed, err := strconv.Atoi(value)
+	if err != nil {
+		return nil
+	}
+	return &parsed
+}
+
+func parseOptionalFloat(value string) *float64 {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return nil
+	}
+	parsed, err := strconv.ParseFloat(value, 64)
+	if err != nil {
+		return nil
+	}
+	return &parsed
 }
 
 func parseGGA(fields []string) *model.GPSFix {
