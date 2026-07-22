@@ -6,6 +6,7 @@ import { Activity, BellRing, Check, ChevronDown, ChevronLeft, ChevronRight, Cpu,
 import * as QRCode from "qrcode";
 
 import {
+  getSystemTime,
   getScreenDetections,
   getScreenDeception,
   getScreenDeceptionStatus,
@@ -796,17 +797,46 @@ function getScreenLocale() {
   return i18n.language.startsWith("zh") ? "zh-CN" : "en-US";
 }
 
-function formatScreenDate(value: Date) {
-  const year = value.getFullYear();
-  const month = String(value.getMonth() + 1).padStart(2, "0");
-  const day = String(value.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
+function getScreenDateTimeFormatter(
+  locale: string,
+  options: Intl.DateTimeFormatOptions,
+  timeZone?: string,
+) {
+  try {
+    return new Intl.DateTimeFormat(locale, {
+      ...options,
+      ...(timeZone ? { timeZone } : {}),
+    });
+  } catch {
+    return new Intl.DateTimeFormat(locale, options);
+  }
+}
+
+function formatScreenDate(value: Date, timeZone?: string) {
+  const parts = Object.fromEntries(
+    getScreenDateTimeFormatter("en-US", {
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }, timeZone).formatToParts(value).map((part) => [part.type, part.value]),
+  );
+  return `${parts.year}-${parts.month}-${parts.day}`;
+}
+
+function formatScreenClock(value: Date, timeZone?: string) {
+  return getScreenDateTimeFormatter(getScreenLocale(), {
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  }, timeZone).format(value);
 }
 
 function ScreenHeader({
   appTitle,
   t,
   now,
+  timeZone,
   locale,
   localeOptions,
   soundActive,
@@ -820,6 +850,7 @@ function ScreenHeader({
   appTitle: string;
   t: TFunction;
   now: Date;
+  timeZone?: string;
   locale: string;
   localeOptions: string[];
   soundActive: boolean;
@@ -837,8 +868,8 @@ function ScreenHeader({
     <header className="screen-header">
       <span className="screen-header-bg" dangerouslySetInnerHTML={{ __html: headerBg }} />
       <div className="screen-header__left">
-        <span className="screen-header__date">{formatScreenDate(now)}</span>
-        <strong className="screen-header__time">{now.toLocaleTimeString(getScreenLocale(), { hour12: false })}</strong>
+        <span className="screen-header__date">{formatScreenDate(now, timeZone)}</span>
+        <strong className="screen-header__time">{formatScreenClock(now, timeZone)}</strong>
       </div>
 
       <div className="screen-header__title">
@@ -3146,6 +3177,7 @@ export function ScreenPage({
   const [fpvVideoStatus, setFpvVideoStatus] = useState<ScreenFpvStatus | null>(null);
   const [fpvVideoFrame, setFpvVideoFrame] = useState<ScreenFpvFrame | null>(null);
   const [fpvVideoError, setFpvVideoError] = useState("");
+  const [deviceTimezone, setDeviceTimezone] = useState<string | undefined>();
   const [deceptionDeviceStatus, setDeceptionDeviceStatus] = useState<ScreenDeceptionDeviceStatus | null>(null);
   const [deceptionPanelActive, setDeceptionPanelActive] = useState(false);
   const [deceptionStatusOpen, setDeceptionStatusOpen] = useState(false);
@@ -3159,6 +3191,31 @@ export function ScreenPage({
   });
   const deceptionStatusSyncingRef = useRef(false);
   const now = useNow();
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const syncDeviceTimezone = async () => {
+      try {
+        const response = await getSystemTime(locale);
+        if (!cancelled) {
+          setDeviceTimezone(response.time_management_supported ? response.timezone : undefined);
+        }
+      } catch {
+        // Fall back to the browser timezone while the device time endpoint is unavailable.
+      }
+    };
+
+    void syncDeviceTimezone();
+    const timer = window.setInterval(() => {
+      void syncDeviceTimezone();
+    }, 30_000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [locale]);
+
   const fpvTargets = useMemo(() => targets.filter(isFpvTarget), [targets]);
   const alarmSettings = useMemo(
     () => resolveScreenAlarmSettings(userSettings.screenAlarmSettings),
@@ -3798,6 +3855,7 @@ export function ScreenPage({
         appTitle={appTitle}
         t={t}
         now={now}
+        timeZone={deviceTimezone}
         locale={locale}
         localeOptions={localeOptions}
         soundActive={alarmSettings.sound}

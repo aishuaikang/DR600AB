@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 import {
   Cable,
   CheckCircle2,
+  Clock3,
   Download,
   FileArchive,
   FolderOpen,
@@ -31,9 +32,11 @@ import type {
   SSHStatus,
 } from "./types";
 import { api, onProgress } from "./wails";
+import { TimeConfigPage } from "./TimeConfigPage";
 
 const pageItems: Array<{ id: Page; label: string; icon: typeof Server }> = [
   { id: "deploy", label: "部署更新", icon: HardDriveUpload },
+  { id: "time", label: "时间设置", icon: Clock3 },
   { id: "license", label: "授权管理", icon: ShieldCheck },
   { id: "intrusions", label: "目标入侵", icon: ShieldAlert },
   { id: "interference-reports", label: "干扰报告", icon: ShieldOff },
@@ -819,6 +822,13 @@ export function App() {
                 onOpenDirPicker={openRemoteDirPicker}
                 onProbe={runProbe}
                 onStopAllServices={stopAllServices}
+              />
+            ) : null}
+            {page === "time" ? (
+              <TimeConfigPage
+                connected={connected}
+                connectionKey={connected ? `${sshStatus.host}:${sshStatus.port}:${sshStatus.user}` : ""}
+                onNotice={setNotice}
               />
             ) : null}
             {page === "intrusions" ? (

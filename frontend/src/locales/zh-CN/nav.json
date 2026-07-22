@@ -7,6 +7,7 @@
   "detectionRecords": "侦测数据",
   "parsedRecords": "解析数据",
   "gpsRecords": "GPS 数据",
+  "cellularStatus": "4G 数据",
   "interference": "GPIO 控制",
   "networkSettings": "网络设置",
   "debugGroup": "调试",

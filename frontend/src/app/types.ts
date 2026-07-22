@@ -9,6 +9,7 @@ export type Page =
   | "developer-settings"
   | "fpv-records"
   | "gps-records"
+  | "cellular-status"
   | "intrusions"
   | "interference-reports"
   | "interference"

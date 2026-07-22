@@ -1,4 +1,4 @@
-import { FileText, FileVideo, ListTree, Monitor, Network, Satellite, Settings2, ShieldCheck, Zap } from "lucide-react";
+import { FileText, FileVideo, ListTree, Monitor, Network, RadioTower, Satellite, Settings2, ShieldCheck, Zap } from "lucide-react";
 
 import { MESSAGE_PAGE_CONFIG } from "./message-pages";
 import type { NavItem, Page } from "./types";
@@ -12,6 +12,7 @@ export const debugPageItems: NavItem[] = [
 
 export const userPageItems: NavItem[] = [
   { id: "gps-records", icon: Satellite, labelKey: "gpsRecords" },
+  { id: "cellular-status", icon: RadioTower, labelKey: "cellularStatus" },
   { id: "settings", icon: Settings2, labelKey: "settings" },
   { id: "network-settings", icon: Network, labelKey: "networkSettings" },
   { id: "whitelist", icon: ShieldCheck, labelKey: "whitelist" },

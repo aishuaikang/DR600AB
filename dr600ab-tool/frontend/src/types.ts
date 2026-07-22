@@ -1,4 +1,4 @@
-export type Page = "deploy" | "intrusions" | "interference-reports" | "deception-reports" | "offline-map" | "license";
+export type Page = "deploy" | "time" | "intrusions" | "interference-reports" | "deception-reports" | "offline-map" | "license";
 
 export interface SavedConfig {
   ssh?: {
@@ -28,6 +28,13 @@ export interface SSHStatus {
   port?: number;
   user?: string;
   message: string;
+}
+
+export interface TimeInfo {
+  currentTime: string;
+  timezone: string;
+  ntpEnabled: boolean;
+  timezones: string[];
 }
 
 export interface RemoteProbe {

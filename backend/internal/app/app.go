@@ -23,6 +23,7 @@ import (
 	"dr600ab-api/internal/network"
 	"dr600ab-api/internal/settings"
 	"dr600ab-api/internal/store"
+	"dr600ab-api/internal/systemtime"
 )
 
 // App 聚合后端 HTTP 服务及其运行依赖。
@@ -134,6 +135,7 @@ func New(cfg config.Config) (*App, error) {
 		ReconnectMaxDelay:     cfg.ReconnectMaxDelay,
 	})
 	networkSvc := network.NewService(nil, settingsStore)
+	systemTimeSvc := systemtime.New()
 	deceptionSvc := deception.NewService(state, translator, settingsStore, deception.Options{
 		DefaultBaudRate:       cfg.DefaultBaudRate,
 		DefaultDataBits:       cfg.DefaultDataBits,
@@ -185,6 +187,7 @@ func New(cfg config.Config) (*App, error) {
 			developerSvc,
 			gpsSvc,
 			networkSvc,
+			systemTimeSvc,
 			deceptionSvc,
 			compassSvc,
 			settingsStore,

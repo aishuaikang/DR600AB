@@ -5,6 +5,7 @@ import * as QRCode from "qrcode";
 
 import { Panel, PanelBody } from "../components/Panel";
 import { SectionHeader } from "../components/SectionHeader";
+import { SystemTimeSettings } from "../components/SystemTimeSettings";
 import type { UserSettings } from "../types";
 import { extractErrorMessage } from "../utils/session";
 import {
@@ -46,6 +47,7 @@ function validLongitude(value: number) {
 export function UserSettingsPage({
   appTitle,
   defaultAppTitle,
+  locale,
   userSettings,
   t,
   onAppTitleChange,
@@ -53,6 +55,7 @@ export function UserSettingsPage({
 }: {
   appTitle: string;
   defaultAppTitle: string;
+  locale: string;
   userSettings: UserSettings;
   t: TFunction;
   onAppTitleChange: (value: string) => void;
@@ -272,6 +275,8 @@ export function UserSettingsPage({
 
   return (
     <section className="grid gap-3">
+      <SystemTimeSettings locale={locale} t={t} />
+
       <Panel>
         <PanelBody>
           <SectionHeader

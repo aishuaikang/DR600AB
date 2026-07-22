@@ -15,6 +15,7 @@ import type {
   SavedConfig,
   SSHConnectRequest,
   SSHStatus,
+  TimeInfo,
 } from "./types";
 
 type AppBridge = {
@@ -24,6 +25,10 @@ type AppBridge = {
   ReconnectSSH(): Promise<SSHStatus>;
   DisconnectSSH(): Promise<void>;
   GetSSHStatus(): Promise<SSHStatus>;
+  GetTimeInfo(): Promise<TimeInfo>;
+  SetTimezone(timezone: string): Promise<void>;
+  SetNTPEnabled(enabled: boolean): Promise<void>;
+  SetManualTime(datetime: string): Promise<void>;
   ProbeRemote(installDir: string): Promise<RemoteProbe>;
   BrowseRemoteDir(path: string): Promise<RemoteEntry[]>;
   StopAllServices(installDir: string): Promise<string>;
@@ -72,6 +77,10 @@ export const api = {
   reconnectSSH: () => bridge().ReconnectSSH(),
   disconnectSSH: () => bridge().DisconnectSSH(),
   getSSHStatus: () => bridge().GetSSHStatus(),
+  getTimeInfo: () => bridge().GetTimeInfo(),
+  setTimezone: (timezone: string) => bridge().SetTimezone(timezone),
+  setNTPEnabled: (enabled: boolean) => bridge().SetNTPEnabled(enabled),
+  setManualTime: (datetime: string) => bridge().SetManualTime(datetime),
   probeRemote: (installDir: string) => bridge().ProbeRemote(installDir),
   browseRemoteDir: (path: string) => bridge().BrowseRemoteDir(path),
   stopAllServices: (installDir: string) => bridge().StopAllServices(installDir),

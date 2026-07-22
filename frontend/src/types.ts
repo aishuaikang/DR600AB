@@ -4,6 +4,16 @@ export interface LocaleMeta {
   namespaces: string[];
 }
 
+export interface SystemTimeInfo {
+  platform: string;
+  time_management_supported: boolean;
+  current_time?: string;
+  timezone?: string;
+  utc_offset?: string;
+  ntp_enabled: boolean;
+  ntp_synced: boolean;
+}
+
 export interface LicenseInfo {
   deviceSn?: string;
   customer?: string;

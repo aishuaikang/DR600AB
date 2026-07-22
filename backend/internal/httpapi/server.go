@@ -2,6 +2,7 @@
 package httpapi
 
 import (
+	"context"
 	"sync"
 	"time"
 
@@ -23,6 +24,7 @@ import (
 	"dr600ab-api/internal/license"
 	"dr600ab-api/internal/model"
 	"dr600ab-api/internal/network"
+	"dr600ab-api/internal/systemtime"
 )
 
 // UserSettingsStore 持久化公开用户设置。
@@ -30,6 +32,15 @@ type UserSettingsStore interface {
 	LoadUser() (model.UserSettings, bool, error)
 	SaveUser(model.UserSettings) error
 	SaveEditableUser(model.UserSettings) (model.UserSettings, error)
+}
+
+// SystemTimeService 提供本机系统时间管理能力。
+type SystemTimeService interface {
+	GetInfo(context.Context) (systemtime.Info, error)
+	ListTimezones(context.Context) ([]string, error)
+	SetTimezone(context.Context, string) error
+	SetNTPEnabled(context.Context, bool) error
+	SetManualTime(context.Context, string) error
 }
 
 // IntrusionStore 查询已归档的目标入侵记录。
@@ -86,6 +97,7 @@ type Server struct {
 	developer           *developer.Service
 	gps                 *gps.Service
 	network             *network.Service
+	systemTime          SystemTimeService
 	deception           *deception.Service
 	compass             *compass.Service
 	fpv                 *fpv.Service
@@ -109,6 +121,7 @@ func New(
 	developerSvc *developer.Service,
 	gpsSvc *gps.Service,
 	networkSvc *network.Service,
+	systemTimeSvc SystemTimeService,
 	deceptionSvc *deception.Service,
 	compassSvc *compass.Service,
 	userSettingsStore UserSettingsStore,
@@ -127,6 +140,7 @@ func New(
 		developer:           developerSvc,
 		gps:                 gpsSvc,
 		network:             networkSvc,
+		systemTime:          systemTimeSvc,
 		deception:           deceptionSvc,
 		compass:             compassSvc,
 		fpv:                 fpvSvc,

@@ -42,6 +42,7 @@ func (s *Server) routes() {
 	s.registerDeceptionRoutes(protected)
 	s.registerCompassRoutes(protected)
 	s.registerNetworkRoutes(protected)
+	s.registerSystemTimeRoutes(protected)
 
 	s.registerOfflineMapRoutes()
 	s.registerFrontendRoutes()

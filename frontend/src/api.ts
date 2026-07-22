@@ -73,6 +73,7 @@ import type {
   ScreenStrikeState,
   ScreenStreamHandlers,
   StreamHandlers,
+  SystemTimeInfo,
   UserSettings,
   WiFiConnectRequest,
   WiFiConnectResponse,
@@ -185,6 +186,35 @@ async function requestJson<T>(path: string, init: RequestInit = {}, locale?: str
 
 export function getLocales(): Promise<LocaleMeta> {
   return requestJson<LocaleMeta>("/meta/locales");
+}
+
+export function getSystemTime(locale?: string): Promise<SystemTimeInfo> {
+  return requestJson<SystemTimeInfo>("/system/time", {}, locale);
+}
+
+export function getSystemTimezones(locale?: string): Promise<string[]> {
+  return requestJson<string[]>("/system/timezones", {}, locale);
+}
+
+export function updateSystemTimezone(timezone: string, locale?: string): Promise<{ message: string }> {
+  return requestJson<{ message: string }>("/system/timezone", {
+    method: "PUT",
+    body: JSON.stringify({ timezone }),
+  }, locale);
+}
+
+export function updateSystemNTP(enabled: boolean, locale?: string): Promise<{ message: string }> {
+  return requestJson<{ message: string }>("/system/time/ntp", {
+    method: "PUT",
+    body: JSON.stringify({ enabled }),
+  }, locale);
+}
+
+export function updateSystemManualTime(datetime: string, locale?: string): Promise<{ message: string }> {
+  return requestJson<{ message: string }>("/system/time/manual", {
+    method: "PUT",
+    body: JSON.stringify({ datetime }),
+  }, locale);
 }
 
 export function getLicenseStatus(locale?: string): Promise<LicenseInfo> {

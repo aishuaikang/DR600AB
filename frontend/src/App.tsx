@@ -47,6 +47,7 @@ import { FPVVideoRecordsPage } from "./pages/FPVVideoRecordsPage";
 import { InterferencePage } from "./pages/InterferencePage";
 import { InterferenceReportsPage } from "./pages/InterferenceReportsPage";
 import { GPSRecordsPage } from "./pages/GPSRecordsPage";
+import { CellularStatusPage } from "./pages/CellularStatusPage";
 import { IntrusionsPage } from "./pages/IntrusionsPage";
 import { LicensePage } from "./pages/LicensePage";
 import { MessagePage } from "./pages/MessagePage";
@@ -172,7 +173,7 @@ function App() {
   const licenseInvalid = license !== null && !licenseValid;
   const licenseRecoveryMode = licenseInvalid && !license.deviceSn;
   const debugAccessBlocked = licenseValid && !developerActive && isDebugPage(page);
-  const needsRuntimeData = licenseValid && page !== "screen" && page !== "settings" && page !== "network-settings" && page !== "whitelist" && page !== "intrusions" && page !== "fpv-records" && page !== "deception-reports" && page !== "gps-records" && !debugAccessBlocked;
+  const needsRuntimeData = licenseValid && page !== "screen" && page !== "settings" && page !== "network-settings" && page !== "whitelist" && page !== "intrusions" && page !== "fpv-records" && page !== "deception-reports" && page !== "gps-records" && page !== "cellular-status" && !debugAccessBlocked;
   const needsSerialRecoveryData = licenseRecoveryMode;
   const serialSettingsEnabled = needsRuntimeData || needsSerialRecoveryData;
   const deceptionReportsVisible = licenseValid ? adminScreenStatus?.deception.configured !== false : false;
@@ -468,10 +469,6 @@ function App() {
       return;
     }
     void loadUserSettings();
-    const timer = window.setInterval(() => {
-      void loadUserSettings();
-    }, 3000);
-    return () => window.clearInterval(timer);
   }, [loadUserSettings, page]);
 
   useEffect(() => {
@@ -984,7 +981,10 @@ function App() {
   const defaultAppTitle = t("app.title", { ns: "common" });
   const appTitle = storedSettings.appTitle.trim() || defaultAppTitle;
   const allLocaleOptions = meta?.supportedLocales.length ? meta.supportedLocales : supportedLocales;
-  const localeOptions = normalizeVisibleLocales(allLocaleOptions, visibleLocales, locale);
+  const localeOptions = useMemo(
+    () => normalizeVisibleLocales(allLocaleOptions, visibleLocales, locale),
+    [allLocaleOptions, locale, visibleLocales],
+  );
   const allMapLayerOptions = referenceMapLayers;
   const mapLayerOptions = useMemo(
     () => normalizeVisibleMapLayers(allMapLayerOptions, visibleMapLayers),
@@ -1233,6 +1233,14 @@ function App() {
                   />
                 ) : null}
 
+                {page === "cellular-status" ? (
+                  <CellularStatusPage
+                    locale={locale}
+                    developerToken={developerToken}
+                    t={t}
+                  />
+                ) : null}
+
                 {page === "intrusions" ? (
                   <IntrusionsPage
                     locale={locale}
@@ -1268,6 +1276,7 @@ function App() {
                   <UserSettingsPage
                     appTitle={appTitle}
                     defaultAppTitle={defaultAppTitle}
+                    locale={locale}
                     userSettings={userSettings}
                     t={t}
                     onAppTitleChange={handleAppTitleChange}
